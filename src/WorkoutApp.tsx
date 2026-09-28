@@ -113,6 +113,11 @@ function RealApp() {
   const [email, setEmail] = useState('');
   const [sentTo, setSentTo] = useState('');
   const [name, setName] = useState('');
+  const [googleOn, setGoogleOn] = useState(false);
+
+  useEffect(() => {
+    void auth.googleEnabled().then(setGoogleOn);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -185,10 +190,14 @@ function RealApp() {
         <h1>Журнал тренера и клиента</h1>
         <p className="muted">Вкладки клиентов в зале, запись подходов в одно касание, подсказки прогрессии и сводка по всем клиентам.</p>
         {err && <div className="alert">{err}</div>}
-        <button className="btn btn-primary btn-lg btn-block" disabled={busy} onClick={google}>
-          <GoogleMark /> Войти через Google
-        </button>
-        <p className="muted small center-text">или по ссылке на почту</p>
+        {googleOn && (
+          <>
+            <button className="btn btn-primary btn-lg btn-block" disabled={busy} onClick={google}>
+              <GoogleMark /> Войти через Google
+            </button>
+            <p className="muted small center-text">или по ссылке на почту</p>
+          </>
+        )}
         {sentTo ? (
           <div className="notice">
             <Mail size={18} />
@@ -211,7 +220,7 @@ function RealApp() {
                 required
               />
             </label>
-            <button className="btn btn-lg btn-block" disabled={busy || !email.trim()} type="submit">
+            <button className={'btn btn-lg btn-block' + (googleOn ? '' : ' btn-primary')} disabled={busy || !email.trim()} type="submit">
               {busy ? 'Отправляем…' : 'Получить ссылку для входа'} <ChevronRight size={18} />
             </button>
           </form>

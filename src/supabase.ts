@@ -26,6 +26,16 @@ export const auth = {
     if (error) throw error;
     return data.session ? toUser(data.session.user) : null;
   },
+  /** Whether Google sign-in is switched on in the Supabase project. */
+  async googleEnabled() {
+    if (!url || !key) return false;
+    try {
+      const res = await fetch(`${url}/auth/v1/settings`, { headers: { apikey: key } });
+      return !!(await res.json())?.external?.google;
+    } catch {
+      return false;
+    }
+  },
   async signInWithGoogle() {
     const { error } = await sb().auth.signInWithOAuth({
       provider: 'google',
