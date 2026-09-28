@@ -2308,3 +2308,27 @@ h2 {
   color: var(--bg);
   background: color-mix(in srgb, var(--bg) 16%, transparent);
 }
+
+/* One-off exercise swap in the journal. */
+.swap-btn {
+  position: relative;
+  flex: none;
+  color: var(--ink-2);
+}
+.swap-btn::after {
+  content: '';
+  position: absolute;
+  inset: -6px -4px;
+}
+.ex-swapped {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  font-size: 12px;
+  color: var(--accent);
+}
+.ex-swapped .link-btn {
+  font-size: 12px;
+  padding-block: 4px;
+}

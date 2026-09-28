@@ -73,6 +73,8 @@ export interface SetEntry {
 export interface SessionExercise {
   exerciseId: string;
   exerciseName: string;
+  /** Planned exercise this one replaces for a single workout. */
+  replaces?: string;
   sets: SetEntry[];
 }
 export interface Session {

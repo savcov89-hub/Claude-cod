@@ -123,6 +123,8 @@ interface SetEntry {
 interface SessionExercise {
   exerciseId: string;
   exerciseName: string;
+  /** Planned exercise this one stands in for during a single workout (the program is unchanged). */
+  replaces?: string;
   sets: SetEntry[];
 }
 interface SessionRecord {
@@ -263,6 +265,37 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
       muscles: item.muscles,
       custom: true,
     }));
+  }
+
+  /**
+   * Matches submitted workout exercises to the day's plan, one per planned exercise.
+   * An entry may swap in another known exercise via `replaces`; names always come from the server.
+   * Returns null when the list does not fit the plan.
+   */
+  async function matchPlan(trainerId: string, day: ProgramDay, submitted: SessionExercise[]) {
+    if (submitted.length !== day.exercises.length) return null;
+    const slots = submitted.map((e) => String(e.replaces || e.exerciseId));
+    if (new Set(slots).size !== slots.length || slots.some((id) => !day.exercises.some((p) => p.exerciseId === id))) return null;
+    let custom: Exercise[] | null = null;
+    const out: SessionExercise[] = [];
+    for (const e of submitted) {
+      const planned = day.exercises.find((p) => p.exerciseId === String(e.replaces || e.exerciseId))!;
+      const id = String(e.exerciseId);
+      if (id === planned.exerciseId) {
+        out.push({ exerciseId: planned.exerciseId, exerciseName: planned.exerciseName, sets: e.sets });
+        continue;
+      }
+      if (day.exercises.some((p) => p.exerciseId === id)) return null;
+      let known: { id: string; name: string } | undefined = catalog.find((c) => c.id === id);
+      if (!known && id.startsWith('custom:')) {
+        custom ||= await customExercises(trainerId);
+        known = custom.find((c) => c.id === id);
+      }
+      if (!known) return null;
+      out.push({ exerciseId: id, exerciseName: known.name, replaces: planned.exerciseId, sets: e.sets });
+    }
+    if (new Set(out.map((e) => e.exerciseId)).size !== out.length) return null;
+    return out;
   }
 
   /** Validates and normalises submitted program days. Returns an error string or clean days. */
@@ -753,6 +786,17 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
       },
     ],
 
+    'GET /api/previous/:trainerId/:programId/:exerciseId': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const { trainerId, programId, exerciseId } = ctx.params;
+        const access = await workoutOwner(ctx.user!.userId, trainerId, programId);
+        if (!access) return error('Нет доступа к тренировке.', 403);
+        const last = await first<{ sets: SetEntry[]; completedAt?: string }>(lastResultTable(access.ownerId, exerciseId));
+        return json({ previousSets: last?.sets || [], previousAt: last?.completedAt || null });
+      },
+    ],
+
     'POST /api/draft': [
       requireAuth(),
       async (ctx: Ctx) => {
@@ -763,20 +807,14 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         if (!access) return error('Нет доступа', 403);
         const day = access.program.days.find((d) => d.id === b.dayId);
         if (!day) return error('Тренировка не найдена', 404);
-        const exercises = b.exercises as SessionExercise[];
+        const submitted = b.exercises as SessionExercise[];
         if (
           JSON.stringify(b).length > 100000 ||
-          exercises.length !== day.exercises.length ||
-          new Set(exercises.map((e) => e.exerciseId)).size !== day.exercises.length ||
-          exercises.some(
-            (e) =>
-              !day.exercises.some((p) => p.exerciseId === e.exerciseId) ||
-              !Array.isArray(e.sets) ||
-              e.sets.length > 10 ||
-              !e.sets.every(validSet),
-          )
+          submitted.some((e) => !Array.isArray(e?.sets) || e.sets.length > 10 || !e.sets.every(validSet))
         )
           return error('Проверьте вес, повторы и RIR', 400);
+        const exercises = await matchPlan(b.trainerId, day, submitted);
+        if (!exercises) return error('Состав тренировки не совпадает с программой.', 400);
         const table = draftTable(access.ownerId, b.programId, b.dayId);
         const current = await first<DraftRecord>(table);
         if ((current?.revision || null) !== (b.baseRevision || null))
@@ -784,11 +822,7 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         const updatedAt = nowIso();
         const revision = randomId();
         await upsertSingle<DraftRecord>(table, {
-          exercises: exercises.map((e) => ({
-            exerciseId: e.exerciseId,
-            exerciseName: day.exercises.find((p) => p.exerciseId === e.exerciseId)!.exerciseName,
-            sets: e.sets.map(cleanSet),
-          })),
+          exercises: exercises.map((e) => ({ ...e, sets: e.sets.map(cleanSet) })),
           updatedAt,
           revision,
           closed: false,
@@ -818,21 +852,12 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         const day = program.days.find((d) => d.id === dayId);
         if (!day) return error('Тренировка не найдена.', 404);
         const submitted = b.exercises as SessionExercise[];
-        const planned = new Set(day.exercises.map((e) => e.exerciseId));
-        if (
-          submitted.length !== day.exercises.length ||
-          new Set(submitted.map((e) => e.exerciseId)).size !== day.exercises.length ||
-          submitted.some((e) => !planned.has(e.exerciseId))
-        )
-          return error('Состав тренировки не совпадает с программой.', 400);
-        if (submitted.some((e) => !Array.isArray(e.sets) || e.sets.length > 10 || !e.sets.every(validSet)))
+        if (submitted.some((e) => !Array.isArray(e?.sets) || e.sets.length > 10 || !e.sets.every(validSet)))
           return error('Заполните корректно вес, повторы и RIR.', 400);
-        const performed = submitted
-          .map((e) => ({
-            exerciseId: String(e.exerciseId),
-            exerciseName: day.exercises.find((p) => p.exerciseId === e.exerciseId)!.exerciseName,
-            sets: e.sets.filter((s) => s.reps > 0).map(cleanSet),
-          }))
+        const matched = await matchPlan(trainerId, day, submitted);
+        if (!matched) return error('Состав тренировки не совпадает с программой.', 400);
+        const performed = matched
+          .map((e) => ({ ...e, sets: e.sets.filter((s) => s.reps > 0).map(cleanSet) }))
           .filter((e) => e.sets.length > 0);
         if (!performed.length) return error('Нет выполненных подходов. Черновик сохранён — продолжите позже.', 400);
         // A workout left unfinished on an earlier day can be recorded with its own date (up to 14 days back).

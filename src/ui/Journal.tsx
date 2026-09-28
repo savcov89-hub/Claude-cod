@@ -1,11 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Check, ChevronDown, Minus, Plus } from 'lucide-react';
+import { ArrowLeft, ArrowLeftRight, Check, ChevronDown, Minus, Plus, Undo2 } from 'lucide-react';
 import { api, isLocal, readError, safeStorage } from '../transport';
 import { fmtKg, suggestNext, type Suggestion } from '../analytics';
 import { localDate } from '../clock';
-import type { SessionExercise, SetEntry, WorkoutPayload } from '../types';
+import type { Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
 import { Confirm, clock, fmtDate, fmtSets, useNow } from './common';
 import { catalog } from '../catalog';
+import { ExercisePicker } from './ProgramBuilder';
+
+let exerciseList: Promise<Exercise[]> | null = null;
+const loadExercises = () =>
+  (exerciseList ||= api.get('/api/exercises').then(
+    (r) => r.data.exercises as Exercise[],
+    (err) => {
+      exerciseList = null;
+      throw err;
+    },
+  ));
+interface Previous {
+  previousSets: SetEntry[];
+  previousAt: string | null;
+}
 
 export interface JournalSource {
   trainerId: string;
@@ -129,7 +144,7 @@ function JournalBody({
   const matchesPlan = (list?: SessionExercise[]) =>
     !!list &&
     list.length === workout.day.exercises.length &&
-    list.every((e, i) => e.exerciseId === workout.day.exercises[i].exerciseId);
+    list.every((e, i) => (e.replaces || e.exerciseId) === workout.day.exercises[i].exerciseId);
   const cacheUsable =
     !!initialCache?.pending &&
     (initialCache.baseRevision || null) === (workout.revision || null) &&
@@ -188,6 +203,40 @@ function JournalBody({
       else next.add(i);
       return next;
     });
+
+  // Previous results of exercises swapped in for this workout, keyed by exercise id.
+  const [swapInfo, setSwapInfo] = useState<Record<string, Previous>>({});
+  const [swapping, setSwapping] = useState<{ ei: number; list: Exercise[] } | null>(null);
+  const plan = useMemo<WorkoutExercise[]>(
+    () =>
+      workout.day.exercises.map((p, i) => {
+        const r = results[i];
+        if (!r?.replaces || r.exerciseId === p.exerciseId) return p;
+        const info = swapInfo[r.exerciseId];
+        return {
+          ...p,
+          exerciseId: r.exerciseId,
+          exerciseName: r.exerciseName,
+          previousSets: info?.previousSets || [],
+          previousAt: info?.previousAt || null,
+        };
+      }),
+    [workout, results, swapInfo],
+  );
+  const planSuggestions = useMemo(() => plan.map((e) => suggestNext(e, e.previousSets)), [plan]);
+  const fetchPrevious = (exerciseId: string) =>
+    api
+      .get('/api/previous/' + workout.trainerId + '/' + workout.programId + '/' + encodeURIComponent(exerciseId))
+      .then((r) => r.data as Previous);
+  // A restored draft may contain swaps whose previous results are not loaded yet.
+  useEffect(() => {
+    for (const r of results)
+      if (r.replaces && !swapInfo[r.exerciseId])
+        fetchPrevious(r.exerciseId)
+          .then((info) => setSwapInfo((cur) => ({ ...cur, [r.exerciseId]: info })))
+          .catch(() => setSwapInfo((cur) => ({ ...cur, [r.exerciseId]: { previousSets: [], previousAt: null } })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results.map((r) => r.exerciseId).join(',')]);
 
   const latest = useRef(results);
   const feedbackRef = useRef(feedback);
@@ -277,15 +326,15 @@ function JournalBody({
         '/' +
         results[currentIdx].sets.length +
         ' ' +
-        workout.day.exercises[currentIdx].exerciseName;
+        plan[currentIdx].exerciseName;
   useEffect(() => {
     onActivity?.({ done, total, lastSetAt, current });
   }, [done, total, lastSetAt, current, onActivity]);
 
   const isBodyweight = (ei: number) => {
-    const id = workout.day.exercises[ei].exerciseId;
+    const id = plan[ei].exerciseId;
     const known = catalog.find((c) => c.id === id);
-    return known ? known.equipment === 'Собственный вес' : !workout.day.exercises[ei].previousSets.some((x) => x.weight > 0);
+    return known ? known.equipment === 'Собственный вес' : !plan[ei].previousSets.some((x) => x.weight > 0);
   };
 
   const update = (next: SessionExercise[]) => {
@@ -323,9 +372,8 @@ function JournalBody({
       }
       return patchSet(ei, si, { reps: 0 });
     }
-    const sug = suggestions[ei];
-    const plan = workout.day.exercises[ei];
-    const reps = sug.reps[si] ?? sug.reps.at(-1) ?? plan.repMin;
+    const sug = planSuggestions[ei];
+    const reps = sug.reps[si] ?? sug.reps.at(-1) ?? plan[ei].repMin;
     const weight = set.weight || sug.weight || 0;
     if (!weight && !isBodyweight(ei)) {
       // No weight yet (first workout): ask for it instead of saving 0 kg.
@@ -347,6 +395,41 @@ function JournalBody({
     const e = latest.current[ei];
     if (e.sets.length <= 1) return;
     update(latest.current.map((x, i) => (i === ei ? { ...x, sets: x.sets.slice(0, -1) } : x)));
+  };
+
+  /** Puts `next` in place of the planned exercise at `ei` for this workout only; `null` restores the plan. */
+  const swapExercise = async (ei: number, next: Exercise | null) => {
+    setSwapping(null);
+    const planned = workout.day.exercises[ei];
+    const id = next ? next.id : planned.exerciseId;
+    let info: Previous = { previousSets: planned.previousSets, previousAt: planned.previousAt || null };
+    if (next) {
+      try {
+        info = swapInfo[id] || (await fetchPrevious(id));
+      } catch {
+        info = { previousSets: [], previousAt: null };
+      }
+      setSwapInfo((cur) => ({ ...cur, [id]: info }));
+    }
+    const sug = suggestNext({ ...planned, exerciseId: id }, info.previousSets);
+    const entry: SessionExercise = {
+      exerciseId: id,
+      exerciseName: next ? next.name : planned.exerciseName,
+      ...(next ? { replaces: planned.exerciseId } : {}),
+      sets: Array.from({ length: latest.current[ei].sets.length }, (_, si) => ({
+        weight: sug.weight || info.previousSets[si]?.weight || info.previousSets.at(-1)?.weight || 0,
+        reps: 0,
+        rir: null,
+      })),
+    };
+    update(latest.current.map((x, i) => (i === ei ? entry : x)));
+  };
+  const openSwap = async (ei: number) => {
+    try {
+      setSwapping({ ei, list: await loadExercises() });
+    } catch (err) {
+      setErrorText(readError(err));
+    }
   };
 
   const finish = async (at?: string): Promise<boolean> => {
@@ -383,11 +466,12 @@ function JournalBody({
 
   const startOver = () => {
     setStale(false);
-    const fresh = workout.day.exercises.map((e, i) => ({
+    const fresh = plan.map((e, i) => ({
       exerciseId: e.exerciseId,
       exerciseName: e.exerciseName,
+      ...(latest.current[i]?.replaces ? { replaces: latest.current[i].replaces } : {}),
       sets: Array.from({ length: e.sets }, (_, si) => ({
-        weight: suggestions[i].weight || e.previousSets[si]?.weight || 0,
+        weight: planSuggestions[i].weight || e.previousSets[si]?.weight || 0,
         reps: 0,
         rir: null,
       })),
@@ -517,8 +601,9 @@ function JournalBody({
       )}
 
       <fieldset className={'exercise-list' + (showRir ? ' with-rir' : '')} disabled={finishing || conflict}>
-        {workout.day.exercises.map((e, ei) => {
-          const sug = suggestions[ei];
+        {plan.map((e, ei) => {
+          const sug = planSuggestions[ei];
+          const original = results[ei]?.replaces ? workout.day.exercises[ei] : null;
           const r = results[ei];
           const exDone = r.sets.filter((s) => s.reps > 0).length;
           const complete = exDone === r.sets.length;
@@ -547,10 +632,30 @@ function JournalBody({
                     {e.sets}×{e.repMin}–{e.repMax} · RIR {e.targetRir}
                     {e.previousAt ? ' · прошл. ' + fmtDate(e.previousAt) : ''}
                   </span>
+                  {original && (
+                    <span className="ex-swapped">
+                      вместо «{original.exerciseName}»
+                      {exDone === 0 && (
+                        <button className="link-btn" onClick={() => void swapExercise(ei, null)}>
+                          <Undo2 size={13} /> вернуть
+                        </button>
+                      )}
+                    </span>
+                  )}
                 </div>
                 <span className={'hint hint-' + sug.kind} title={sug.text}>
                   {shortHint(sug)}
                 </span>
+                {exDone === 0 && (
+                  <button
+                    className="icon-btn sm swap-btn"
+                    aria-label={'Заменить упражнение: ' + e.exerciseName}
+                    title="Заменить только в этой тренировке"
+                    onClick={() => void openSwap(ei)}
+                  >
+                    <ArrowLeftRight size={16} />
+                  </button>
+                )}
               </header>
               <div className="sets" role="table" aria-label={'Подходы: ' + e.exerciseName}>
                 <div className="set-row set-labels" role="row">
@@ -647,6 +752,20 @@ function JournalBody({
           </button>
         )}
       </fieldset>
+
+      {swapping && (
+        <ExercisePicker
+          title={'Замена: ' + plan[swapping.ei].exerciseName}
+          exercises={swapping.list}
+          exclude={[...workout.day.exercises.map((x) => x.exerciseId), ...plan.map((x) => x.exerciseId)]}
+          initialGroup={
+            (swapping.list.find((x) => x.id === workout.day.exercises[swapping.ei].exerciseId)?.muscleGroup || '').split(' / ')[0]
+          }
+          autoFocusSearch={false}
+          onPick={(x) => void swapExercise(swapping.ei, x)}
+          onClose={() => setSwapping(null)}
+        />
+      )}
 
       <div className="j-foot">
         {confirmFinish ? (

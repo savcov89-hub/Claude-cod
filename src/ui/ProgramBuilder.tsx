@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowLeft, ArrowUp, Plus, RefreshCw, Search, Trash2, Undo2 } from 'lucide-react';
 import { api, readError } from '../transport';
 import { templateDays, templates } from '../templates';
@@ -405,21 +405,31 @@ export function ProgramBuilder({
   );
 }
 
-function ExercisePicker({
+export function ExercisePicker({
   exercises,
   exclude,
   title,
+  initialGroup = '',
+  autoFocusSearch = true,
   onPick,
   onClose,
 }: {
   exercises: Exercise[];
   exclude: string[];
   title: string;
+  /** Muscle group to show first, e.g. the group of the exercise being replaced. */
+  initialGroup?: string;
+  autoFocusSearch?: boolean;
   onPick: (e: Exercise) => void;
   onClose: () => void;
 }) {
   const [q, setQ] = useState('');
-  const [group, setGroup] = useState('');
+  const [group, setGroup] = useState(initialGroup);
+  const filtersRef = useRef<HTMLDivElement>(null);
+  // Show the preselected muscle group chip, which may sit far right in the row.
+  useEffect(() => {
+    filtersRef.current?.querySelector('.filter.on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }, []);
   const groups = Array.from(new Set(exercises.map((e) => e.muscleGroup.split(' / ')[0])));
   const list = exercises.filter(
     (e) =>
@@ -431,9 +441,9 @@ function ExercisePicker({
     <Sheet title={title} onClose={onClose}>
       <label className="search">
         <Search size={16} />
-        <input id="picker-search" autoFocus placeholder="Поиск" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input id="picker-search" autoFocus={autoFocusSearch} placeholder="Поиск" value={q} onChange={(e) => setQ(e.target.value)} />
       </label>
-      <div className="filters">
+      <div className="filters" ref={filtersRef}>
         <button className={'filter' + (!group ? ' on' : '')} onClick={() => setGroup('')}>
           Все
         </button>
