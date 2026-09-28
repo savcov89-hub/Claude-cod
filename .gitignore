@@ -1,0 +1,6 @@
+node_modules
+dist
+dist-artifact
+stub
+vite.local.config.ts
+dist-artifact

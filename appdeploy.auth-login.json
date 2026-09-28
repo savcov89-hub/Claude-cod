@@ -1,0 +1,15 @@
+{
+  "methods": ["google", "apple", "x"],
+  "headline": "Вход в Training Log",
+  "subtitle": "Ваши программы и история тренировок",
+  "style": {
+    "mode": "dark",
+    "accentColor": "#ff3b30",
+    "backgroundColor": "#0b0b0d",
+    "panelColor": "#171719",
+    "textColor": "#f7f7f7",
+    "fontFamily": "Inter, system-ui, sans-serif",
+    "borderRadius": 16
+  }
+}
+
