@@ -31,6 +31,8 @@ export function Gym({
   const [picker, setPicker] = useState(false);
   const [leaving, setLeaving] = useState<string | null>(null);
   const finishers = useRef<Record<string, Finisher | null>>({});
+  const swipe = useRef<{ x: number; y: number; t: number; lx: number; ly: number } | null>(null);
+  const [slide, setSlide] = useState<{ id: string; from: 'left' | 'right' } | null>(null);
   const activeId = present.some((c) => c.clientId === active) ? active : present[0]?.clientId || null;
   const presentKey = present.map((c) => c.clientId).join(',');
 
@@ -113,6 +115,42 @@ export function Gym({
     [data.reload],
   );
 
+  const switchBy = (step: 1 | -1) => {
+    const i = present.findIndex((c) => c.clientId === activeId);
+    const next = present[i + step];
+    if (!next) return;
+    setActive(next.clientId);
+    setSlide({ id: next.clientId, from: step > 0 ? 'right' : 'left' });
+    document.querySelectorAll('.gym-tabs .gym-tab')[i + step]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  };
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    const target = e.target as HTMLElement;
+    swipe.current =
+      e.touches.length === 1 &&
+      // Screen edges belong to the browser's back/forward gesture.
+      t.clientX > 24 &&
+      t.clientX < window.innerWidth - 24 &&
+      target !== document.activeElement &&
+      !scrollsSideways(target, e.currentTarget as HTMLElement)
+        ? { x: t.clientX, y: t.clientY, t: Date.now(), lx: t.clientX, ly: t.clientY }
+        : null;
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (!swipe.current) return;
+    swipe.current.lx = e.touches[0].clientX;
+    swipe.current.ly = e.touches[0].clientY;
+  };
+  // A drag over an input can end in touchcancel, so the last known position decides.
+  const onTouchEnd = () => {
+    const start = swipe.current;
+    swipe.current = null;
+    if (!start) return;
+    const dx = start.lx - start.x;
+    const dy = start.ly - start.y;
+    if (Math.abs(dx) >= 60 && Math.abs(dx) > 2 * Math.abs(dy) && Date.now() - start.t < 700) switchBy(dx < 0 ? 1 : -1);
+  };
+
   if (!present.length)
     return (
       <div className="gym">
@@ -150,7 +188,18 @@ export function Gym({
         const isActive = c.clientId === activeId;
         const program = src ? list.find((p) => p.id === src.programId) : undefined;
         return (
-          <div key={c.clientId} className="gym-pane" hidden={!isActive} role="tabpanel" data-pane={c.clientId}>
+          <div
+            key={c.clientId}
+            className={'gym-pane' + (slide?.id === c.clientId ? ' slide-from-' + slide.from : '')}
+            hidden={!isActive}
+            role="tabpanel"
+            data-pane={c.clientId}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            onTouchCancel={onTouchEnd}
+            onAnimationEnd={() => setSlide(null)}
+          >
             <div className="gym-toolbar">
               <div className="grow">
                 <strong>{c.clientName}</strong>
@@ -240,6 +289,15 @@ export function Gym({
       )}
     </div>
   );
+}
+
+/** True when the touch starts inside something that scrolls sideways itself (e.g. the day picker). */
+function scrollsSideways(el: HTMLElement | null, stop: HTMLElement) {
+  for (; el && el !== stop; el = el.parentElement) {
+    const ox = getComputedStyle(el).overflowX;
+    if ((ox === 'auto' || ox === 'scroll') && el.scrollWidth > el.clientWidth) return true;
+  }
+  return false;
 }
 
 /** Journal wrapper that re-renders only when its workout changes. */

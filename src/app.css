@@ -82,6 +82,8 @@ body {
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  /* Sideways swipes switch clients in the gym instead of navigating back. */
+  overscroll-behavior-x: none;
 }
 button,
 input,
@@ -728,6 +730,30 @@ table {
 .gym {
   display: grid;
   gap: 12px;
+}
+@keyframes pane-from-right {
+  from {
+    opacity: 0.4;
+    transform: translateX(32px);
+  }
+}
+@keyframes pane-from-left {
+  from {
+    opacity: 0.4;
+    transform: translateX(-32px);
+  }
+}
+.gym-pane.slide-from-right {
+  animation: pane-from-right 0.18s ease-out;
+}
+.gym-pane.slide-from-left {
+  animation: pane-from-left 0.18s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gym-pane.slide-from-right,
+  .gym-pane.slide-from-left {
+    animation: none;
+  }
 }
 .gym-tabs {
   position: sticky;
