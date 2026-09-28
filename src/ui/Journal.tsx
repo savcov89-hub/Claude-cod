@@ -168,6 +168,19 @@ function JournalBody({
   const rootRef = useRef<HTMLDivElement>(null);
   const [showRir, setShowRir] = useState(() => safeStorage.get('tl-show-rir') === '1');
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // A finished exercise stays open while its numbers are being typed, so the field is not unmounted mid-entry.
+  const [editing, setEditing] = useState<number | null>(null);
+  const editTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startEditing = (ei: number) => {
+    if (editTimer.current) clearTimeout(editTimer.current);
+    setEditing(ei);
+  };
+  const stopEditing = () => {
+    if (editTimer.current) clearTimeout(editTimer.current);
+    editTimer.current = setTimeout(() => setEditing(null), 400);
+  };
+  // True when ✓ is pressed while a number in the same row is being typed.
+  const confirmTap = useRef(false);
   const toggleExpanded = (i: number) =>
     setExpanded((cur) => {
       const next = new Set(cur);
@@ -300,9 +313,16 @@ function JournalBody({
     if (!wasDone && next[ei].sets[si].reps > 0) setLastSetAt(Date.now());
     update(next);
   };
-  const toggleDone = (ei: number, si: number) => {
+  const toggleDone = (ei: number, si: number, confirm = false) => {
     const set = latest.current[ei].sets[si];
-    if (set.reps > 0) return patchSet(ei, si, { reps: 0 });
+    if (set.reps > 0) {
+      // ✓ right after typing the reps confirms them instead of clearing the set.
+      if (confirm) {
+        (document.activeElement as HTMLElement | null)?.blur();
+        return;
+      }
+      return patchSet(ei, si, { reps: 0 });
+    }
     const sug = suggestions[ei];
     const plan = workout.day.exercises[ei];
     const reps = sug.reps[si] ?? sug.reps.at(-1) ?? plan.repMin;
@@ -502,7 +522,7 @@ function JournalBody({
           const r = results[ei];
           const exDone = r.sets.filter((s) => s.reps > 0).length;
           const complete = exDone === r.sets.length;
-          if (complete && !expanded.has(ei))
+          if (complete && !expanded.has(ei) && editing !== ei)
             return (
               <button key={e.exerciseId} className="ex ex-collapsed" onClick={() => toggleExpanded(ei)}>
                 <span className="ex-num num">
@@ -513,7 +533,12 @@ function JournalBody({
               </button>
             );
           return (
-            <section className={'ex' + (complete ? ' ex-done' : '')} key={e.exerciseId}>
+            <section
+              className={'ex' + (complete ? ' ex-done' : '')}
+              key={e.exerciseId}
+              onFocus={(ev) => ev.target instanceof HTMLInputElement && startEditing(ei)}
+              onBlur={(ev) => ev.target instanceof HTMLInputElement && stopEditing()}
+            >
               <header className="ex-head" onClick={complete ? () => toggleExpanded(ei) : undefined}>
                 <span className="ex-num num">{ei + 1}</span>
                 <div className="ex-name">
@@ -581,7 +606,14 @@ function JournalBody({
                       <button
                         className={'tick' + (s.reps > 0 ? ' on' : '')}
                         aria-label={s.reps > 0 ? 'Снять отметку подхода' : 'Подход выполнен: ' + fmtKg(s.weight || sug.weight) + ' × ' + target}
-                        onClick={() => toggleDone(ei, si)}
+                        onPointerDown={(ev) => {
+                          const row = ev.currentTarget.closest('.set-row');
+                          confirmTap.current = !!row && row.contains(document.activeElement) && document.activeElement !== ev.currentTarget;
+                        }}
+                        onClick={() => {
+                          toggleDone(ei, si, confirmTap.current);
+                          confirmTap.current = false;
+                        }}
                       >
                         <Check size={18} strokeWidth={3} />
                       </button>

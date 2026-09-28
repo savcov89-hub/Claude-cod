@@ -10,6 +10,7 @@ interface Source {
   dayId: string;
 }
 type Finisher = () => Promise<boolean>;
+const UNDO_MS = 5000;
 
 const defaultProgram = (list: Program[]) =>
   [...list].sort((a, b) => (b.lastCompletedAt || b.createdAt).localeCompare(a.lastCompletedAt || a.createdAt))[0];
@@ -33,7 +34,11 @@ export function Gym({
   const finishers = useRef<Record<string, Finisher | null>>({});
   const swipe = useRef<{ x: number; y: number; t: number; lx: number; ly: number } | null>(null);
   const [slide, setSlide] = useState<{ id: string; from: 'left' | 'right' } | null>(null);
-  const activeId = present.some((c) => c.clientId === active) ? active : present[0]?.clientId || null;
+  // Clients who just pressed «Ушёл»: hidden at once, saved after UNDO_MS unless undone.
+  const [going, setGoing] = useState<string[]>([]);
+  const goingClients = useRef<Record<string, { client: ClientItem; timer: ReturnType<typeof setTimeout> }>>({});
+  const shown = present.filter((c) => !going.includes(c.clientId));
+  const activeId = shown.some((c) => c.clientId === active) ? active : shown[0]?.clientId || null;
   const presentKey = present.map((c) => c.clientId).join(',');
 
   const sourceOf = (clientId: string): Source | null => {
@@ -100,6 +105,40 @@ export function Gym({
       setLeaving(null);
     }
   };
+  const checkOutRef = useRef(checkOut);
+  checkOutRef.current = checkOut;
+  const commitLeave = async (id: string) => {
+    const entry = goingClients.current[id];
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    delete goingClients.current[id];
+    try {
+      await checkOutRef.current(entry.client);
+    } finally {
+      setGoing((ids) => ids.filter((x) => x !== id));
+    }
+  };
+  const leave = (c: ClientItem) => {
+    if (goingClients.current[c.clientId]) return;
+    goingClients.current[c.clientId] = { client: c, timer: setTimeout(() => void commitLeave(c.clientId), UNDO_MS) };
+    setGoing((ids) => [...ids, c.clientId]);
+  };
+  const undoLeave = (id: string) => {
+    const entry = goingClients.current[id];
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    delete goingClients.current[id];
+    setGoing((ids) => ids.filter((x) => x !== id));
+    setActive(id);
+  };
+  // If the app is put away during the undo window, save right away so nothing is lost.
+  const commitAllRef = useRef(() => Object.keys(goingClients.current).forEach((id) => void commitLeave(id)));
+  useEffect(() => {
+    const onHide = () => document.visibilityState === 'hidden' && commitAllRef.current();
+    document.addEventListener('visibilitychange', onHide);
+    return () => document.removeEventListener('visibilitychange', onHide);
+  }, []);
+
   const nextWorkout = (clientId: string) => {
     setFinished((f) => {
       const { [clientId]: _drop, ...rest } = f;
@@ -119,8 +158,8 @@ export function Gym({
   );
 
   const switchBy = (step: 1 | -1) => {
-    const i = present.findIndex((c) => c.clientId === activeId);
-    const next = present[i + step];
+    const i = shown.findIndex((c) => c.clientId === activeId);
+    const next = shown[i + step];
     if (!next) return;
     setActive(next.clientId);
     setSlide({ id: next.clientId, from: step > 0 ? 'right' : 'left' });
@@ -174,7 +213,7 @@ export function Gym({
   return (
     <div className="gym">
       <div className="gym-tabs" role="tablist" aria-label="Клиенты в зале">
-        {present.map((c) => (
+        {shown.map((c) => (
           <GymTab
             key={c.clientId}
             name={c.clientName}
@@ -242,7 +281,7 @@ export function Gym({
                 className="btn btn-sm"
                 disabled={leaving === c.clientId}
                 title="Отметить уход. Выполненные подходы сохранятся в историю."
-                onClick={() => void checkOut(c)}
+                onClick={() => leave(c)}
               >
                 <LogOut size={15} /> {leaving === c.clientId ? 'Сохраняем…' : 'Ушёл'}
               </button>
@@ -268,7 +307,7 @@ export function Gym({
                   <button className="btn" onClick={() => nextWorkout(c.clientId)}>
                     Открыть следующую
                   </button>
-                  <button className="btn btn-primary" onClick={() => void checkOut(c)}>
+                  <button className="btn btn-primary" onClick={() => leave(c)}>
                     <LogOut size={16} /> Ушёл
                   </button>
                 </div>
@@ -288,6 +327,23 @@ export function Gym({
           </div>
         );
       })}
+
+      {!shown.length && <Empty title="В зале никого" text="Отметьте пришедших кнопкой «+»." />}
+
+      {going.length > 0 && (
+        <div className="undo-stack" role="status">
+          {going.map((id) => (
+            <div className="undo-toast" key={id}>
+              <span>
+                <strong>{present.find((c) => c.clientId === id)?.clientName || 'Клиент'}</strong> · уход из зала
+              </span>
+              <button className="undo-btn" onClick={() => undoLeave(id)}>
+                Отменить
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {picker && (
         <Sheet title="Кто пришёл?" onClose={() => setPicker(false)}>
