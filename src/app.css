@@ -2198,3 +2198,14 @@ h2 {
 .arrivals {
   grid-template-columns: minmax(0, 1fr);
 }
+
+/* iOS zooms the page into any field whose text is under 16px; keep touch fields at 16px or more. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea,
+  .select-sm,
+  .num-input.small {
+    font-size: 16px;
+  }
+}
