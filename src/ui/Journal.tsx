@@ -35,6 +35,7 @@ export interface JournalActivity {
   current: string | null;
 }
 export type JournalFinisher = () => Promise<boolean>;
+const WEIGHT_STEP = 2.5;
 
 /** Loads a workout and renders the set log. */
 export function Journal({
@@ -385,6 +386,11 @@ function JournalBody({
     setNudge(null);
     patchSet(ei, si, { reps, weight });
   };
+  const stepWeight = (ei: number, si: number, delta: number) => {
+    const current = latest.current[ei].sets[si].weight || 0;
+    if (nudge) setNudge(null);
+    patchSet(ei, si, { weight: Math.max(0, Math.round((current + delta) * 100) / 100) });
+  };
   const addSet = (ei: number) => {
     const e = latest.current[ei];
     if (e.sets.length >= 10) return;
@@ -680,19 +686,38 @@ function JournalBody({
                     <div className={'set-row' + (s.reps > 0 ? ' is-done' : '')} role="row" key={si}>
                       <span className="set-n num">{si + 1}</span>
                       <span className="set-prev num">{prev ? fmtKg(prev.weight) + '×' + prev.reps : '—'}</span>
-                      <NumberInput
-                        decimal
-                        dataW={ei + '-' + si}
-                        nudge={nudge === ei + '-' + si}
-                        label={e.exerciseName + ', подход ' + (si + 1) + ', вес'}
-                        value={s.weight}
-                        showZero={isBodyweight(ei)}
-                        placeholder="кг"
-                        onChange={(v) => {
-                          if (nudge) setNudge(null);
-                          patchSet(ei, si, { weight: v ?? 0 });
-                        }}
-                      />
+                      <div className="wfield">
+                        <button
+                          type="button"
+                          className="wstep"
+                          aria-label={e.exerciseName + ', подход ' + (si + 1) + ': минус ' + fmtKg(WEIGHT_STEP) + ' кг'}
+                          disabled={!s.weight}
+                          onClick={() => stepWeight(ei, si, -WEIGHT_STEP)}
+                        >
+                          −{fmtKg(WEIGHT_STEP)}
+                        </button>
+                        <NumberInput
+                          decimal
+                          dataW={ei + '-' + si}
+                          nudge={nudge === ei + '-' + si}
+                          label={e.exerciseName + ', подход ' + (si + 1) + ', вес'}
+                          value={s.weight}
+                          showZero={isBodyweight(ei)}
+                          placeholder="кг"
+                          onChange={(v) => {
+                            if (nudge) setNudge(null);
+                            patchSet(ei, si, { weight: v ?? 0 });
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="wstep"
+                          aria-label={e.exerciseName + ', подход ' + (si + 1) + ': плюс ' + fmtKg(WEIGHT_STEP) + ' кг'}
+                          onClick={() => stepWeight(ei, si, WEIGHT_STEP)}
+                        >
+                          +{fmtKg(WEIGHT_STEP)}
+                        </button>
+                      </div>
                       <NumberInput
                         label={e.exerciseName + ', подход ' + (si + 1) + ', повторы'}
                         value={s.reps || null}

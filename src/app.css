@@ -1997,11 +1997,11 @@ h2 {
   gap: 4px;
 }
 .set-row {
-  grid-template-columns: 16px 54px minmax(0, 1fr) minmax(0, 1fr) 44px;
+  grid-template-columns: 16px 50px minmax(0, 1.6fr) minmax(0, 0.85fr) 44px;
   gap: 5px;
 }
 .with-rir .set-row {
-  grid-template-columns: 16px 50px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.7fr) 44px;
+  grid-template-columns: 16px 48px minmax(0, 1.6fr) minmax(0, 0.7fr) minmax(0, 0.55fr) 44px;
 }
 .set-labels {
   font-size: 10px;
@@ -2331,4 +2331,71 @@ h2 {
 .ex-swapped .link-btn {
   font-size: 12px;
   padding-block: 4px;
+}
+
+/* Weight field with −2,5 / +2,5 on its edges. */
+.wfield {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  height: 38px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.is-done .wfield {
+  background: var(--good-soft);
+  border-color: transparent;
+}
+.wfield .num-input {
+  height: 100%;
+  padding-inline: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.wstep {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  border-radius: 7px;
+}
+.wstep::after {
+  content: '';
+  position: absolute;
+  inset: -2px 0;
+}
+.wstep:active:not(:disabled) {
+  background: var(--surface);
+  color: var(--ink);
+}
+.wstep:disabled {
+  opacity: 0.35;
+}
+/* With the RIR column the row is tighter. */
+.with-rir .wfield {
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+}
+.with-rir .wfield .num-input {
+  font-size: 15px;
+}
+.with-rir .wstep {
+  font-size: 10px;
+}
+.with-rir .set-prev {
+  font-size: 11px;
+}
+.with-rir .set-tools {
+  margin-left: -16px;
+  gap: 4px;
+}
+.with-rir .set-tools button {
+  width: 28px;
+}
+.with-rir .set-labels > span:nth-last-child(2) {
+  text-align: left;
 }
