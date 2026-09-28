@@ -360,13 +360,13 @@ function GymTab({
       className={'gym-tab' + (active ? ' active' : '') + (rest && rest > 180000 ? ' waiting' : '') + (done ? ' finished' : '')}
       onClick={onClick}
     >
-      <span className="gt-top">
-        <strong>{name}</strong>
+      <strong className="gt-name">{name}</strong>
+      <span className="gt-sub">
         <span className="num" title={rest !== null ? 'С последнего подхода' : 'Подходов сделано'}>
           {done ? <Check size={12} /> : rest !== null ? clock(rest) : a ? a.done + '/' + a.total : ''}
         </span>
+        <span className="gt-cur">{done ? 'записано' : a?.current || (a ? 'всё отмечено' : '…')}</span>
       </span>
-      <span className="gt-sub">{done ? 'записано' : a?.current || (a ? 'всё отмечено' : '…')}</span>
     </button>
   );
 }

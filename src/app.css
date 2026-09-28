@@ -2099,43 +2099,54 @@ h2 {
 
 /* ---- gym floor pass ---- */
 .gym-tabs {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  flex-wrap: wrap;
   overflow: visible;
 }
 .gym-tab {
+  flex: 1 1 110px;
+  max-width: calc(50% - 4px);
   min-width: 0;
   gap: 0;
   padding: 5px 8px;
   text-align: left;
 }
-.gym-tab .gt-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
-  align-items: baseline;
-  color: inherit;
+.gym-tab .gt-name {
+  display: block;
+  min-width: 0;
   font-size: 13px;
-}
-.gym-tab .gt-top strong {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.gym-tab .gt-top .num {
-  font-size: 12px;
-  color: inherit;
-  opacity: 0.75;
 }
 .gym-tab .gt-sub {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
   font-size: 11px;
+}
+.gym-tab .gt-sub .num {
+  flex: none;
+  font-weight: 600;
+}
+.gym-tab .gt-cur {
+  display: block;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.gym-tab .gt-sub b {
-  font-weight: 600;
+/* The open tab keeps light text on its dark fill; a ring outside it signals a long rest. */
+.gym-tab.active.waiting {
+  outline: 2px solid var(--warn);
+  outline-offset: 1px;
+}
+.gym-tab.active.waiting span {
+  color: var(--bg);
+}
+.gym-tab.active.waiting .num {
+  opacity: 1;
+  font-weight: 700;
 }
 .gym-tab.finished:not(.active) {
   border-color: color-mix(in srgb, var(--good) 50%, var(--line));
@@ -2144,6 +2155,7 @@ h2 {
   color: var(--good);
 }
 .gym-tab.add {
+  flex: 0 0 44px;
   min-height: 40px;
 }
 .arrival.on {
