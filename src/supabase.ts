@@ -26,6 +26,13 @@ export const auth = {
     if (error) throw error;
     return data.session ? toUser(data.session.user) : null;
   },
+  async signInWithGoogle() {
+    const { error } = await sb().auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: location.origin + location.pathname },
+    });
+    if (error) throw error;
+  },
   async sendLink(email: string) {
     const { error } = await sb().auth.signInWithOtp({
       email,

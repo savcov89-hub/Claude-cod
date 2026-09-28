@@ -1,6 +1,7 @@
 # Training Log — журнал тренера и клиента
 
-Работает на Supabase: база Postgres, вход по ссылке из письма, сервер — Edge Function `api`.
+Сайт: https://savcov89-hub.github.io/Claude-cod/ (GitHub Pages).
+Работает на Supabase: база Postgres, вход через Google или по ссылке из письма, сервер — Edge Function `api`.
 Тест без входа: `?demo=1` (та же логика в браузере, пример данных).
 
 ## Что нового в v3
@@ -42,6 +43,7 @@
 - `npm run build:api` — собрать серверную функцию.
 - `npm run build:demo` — тестовая версия одним файлом (`artifact/training-log.html`).
 - `npm run dev` — интерфейс локально; адрес и ключ Supabase берутся из `.env.local` (образец — `.env.example`).
+- `npm run build` — сайт в `dist/` (на GitHub Pages собирается автоматически).
 
 ## Настройка Supabase (один раз)
 1. На supabase.com создайте проект (бесплатный план подходит). Сохраните пароль базы данных.
@@ -52,12 +54,27 @@
 5. GitHub → Actions → **Deploy Supabase** → Run workflow. Скрипт создаст таблицу и выложит сервер.
    Дальше он запускается сам при каждом изменении серверной части в ветке `main`.
 
-## Когда появится адрес сайта
-- Сборка сайта: `npm run build` с переменными `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY`
-  (Project Settings → API: адрес проекта и publishable/anon ключ — он публичный).
-- Supabase → Authentication → URL Configuration: **Site URL** = адрес сайта, иначе ссылки из писем поведут не туда.
-- Письма: встроенная почта Supabase доставляет только участникам проекта и с жёстким лимитом.
-  Чтобы клиенты получали ссылки, подключите свой SMTP (Authentication → SMTP Settings), например Resend.
+## Сайт на GitHub Pages (один раз)
+1. GitHub → Settings → Pages → Build and deployment → Source: **GitHub Actions**.
+2. Supabase → Project Settings → API Keys: скопируйте **publishable** ключ (он публичный, это не секрет).
+   GitHub → Settings → Secrets and variables → Actions → вкладка **Variables** → New repository variable:
+   `SUPABASE_ANON_KEY` = этот ключ.
+3. GitHub → Actions → **Deploy site** → Run workflow. Дальше сайт обновляется сам при изменениях в `main`.
+4. Supabase → Authentication → URL Configuration: **Site URL** = `https://savcov89-hub.github.io/Claude-cod/`,
+   и тот же адрес добавьте в **Redirect URLs**. Иначе после входа вернёт не на сайт.
+
+## Вход через Google (один раз)
+1. console.cloud.google.com → создайте проект → APIs & Services → **OAuth consent screen**:
+   тип External, название приложения, ваша почта. Затем опубликуйте приложение (Publish app).
+2. APIs & Services → Credentials → Create credentials → **OAuth client ID** → Web application:
+   - Authorized JavaScript origins: `https://savcov89-hub.github.io`
+   - Authorized redirect URIs: `https://<Project ID>.supabase.co/auth/v1/callback`
+3. Скопируйте Client ID и Client secret → Supabase → Authentication → Sign In / Providers → **Google** →
+   включите, вставьте оба значения, Save.
+
+## Письма со ссылкой для входа
+Встроенная почта Supabase доставляет только участникам проекта и с жёстким лимитом. Клиентам проще входить
+через Google. Если нужен вход по почте для всех — подключите свой SMTP (Authentication → SMTP Settings), например Resend.
 
 ## Локальная проверка сервера
 `npx supabase start` (нужен Docker) поднимает базу, вход, почту (http://127.0.0.1:54324) и функцию.

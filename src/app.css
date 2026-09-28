@@ -1719,6 +1719,11 @@ table {
   display: grid;
   gap: 10px;
 }
+.gmark {
+  padding: 3px;
+  background: #fff;
+  border-radius: 50%;
+}
 .notice {
   display: grid;
   gap: 10px;
