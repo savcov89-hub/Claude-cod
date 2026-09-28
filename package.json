@@ -1,14 +1,18 @@
 {
-  "name": "vite-react-app",
+  "name": "training-log",
   "private": true,
   "version": "0.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:api": "esbuild backend/server.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=supabase/functions/api/server.js",
+    "build:demo": "vite build --config vite.artifact.config.ts && node scripts/to-artifact.mjs",
+    "check": "tsc --noEmit -p tsconfig.check.json"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.117.2",
     "lucide-react": "^0.469.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -21,8 +25,10 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.0",
+    "esbuild": "^0.25.12",
     "playwright": "^1.63.0",
     "postcss": "^8.4.0",
+    "supabase": "^2.118.0",
     "tailwindcss": "^3.4.0",
     "tsx": "^4.23.15",
     "typescript": "^5.7.0",

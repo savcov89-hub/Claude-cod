@@ -1,7 +1,7 @@
-# Training Log v3 — журнал тренера и клиента
+# Training Log — журнал тренера и клиента
 
-Приложение: https://training-log-mdq8xu.v2.appdeploy.ai/ (боевая версия, вход AppDeploy)
-Тест без входа: `?demo=1` или артефакт в Claude (та же логика, пример данных).
+Работает на Supabase: база Postgres, вход по ссылке из письма, сервер — Edge Function `api`.
+Тест без входа: `?demo=1` (та же логика в браузере, пример данных).
 
 ## Что нового в v3
 - **Зал.** Вкладки клиентов, отмеченных «Пришёл». Переключение в одно касание, журнал не закрывается.
@@ -29,14 +29,38 @@
   кроссовер-махи, байесовские сгибания, face pull, икры сидя и др.). Для своих упражнений — выбор мышц.
 
 ## Структура
-- `backend/app.ts` — вся серверная логика (`createHandler(sdk)`), `backend/index.ts` подключает SDK AppDeploy.
-- `src/local/*` — та же логика в браузере для теста: SDK-заглушка, хранилище, пример данных.
+- `backend/app.ts` — вся серверная логика (`createHandler(sdk)`): маршруты, права доступа, расчёты.
+- `backend/server.ts` — запуск этой логики на Supabase: HTTP-обработчик, проверка токена, хранение строк в Postgres.
+- `backend/router.ts` — маршрутизатор, общий для сервера и тестового режима.
+- `supabase/functions/api/` — Edge Function; `server.js` собирается из `backend/` командой `npm run build:api`.
+- `supabase/migrations/` — схема базы: одна таблица `kv_rows`, прямой доступ из браузера закрыт.
+- `src/supabase.ts` — вход и запросы к серверу; `src/local/*` — тестовый режим в браузере.
 - `src/ui/*` — интерфейс; `src/analytics.ts` — прогресс, застой, подсказки; `src/templates.ts` — шаблоны.
-- Сборка теста одним файлом: `npx vite build --config vite.artifact.config.ts && node scripts/to-artifact.mjs`.
-- Проверка типов вне AppDeploy: `npx tsc --noEmit -p tsconfig.check.json`.
 
-## Совместимость данных
-Старые записи читаются: клиенты, подключённые до v3, остаются под своим аккаунтом (ключ клиента = id аккаунта),
-старые коды подключения работают. Новые таблицы не нужны; добавлены поля клиента
-`userId, visits, notes, insights, archived` и программы `archived, updatedAt`.
-Сводка клиента (`insights`) пересчитывается при каждой завершённой тренировке.
+## Команды
+- `npm run check` — проверка типов.
+- `npm run build:api` — собрать серверную функцию.
+- `npm run build:demo` — тестовая версия одним файлом (`artifact/training-log.html`).
+- `npm run dev` — интерфейс локально; адрес и ключ Supabase берутся из `.env.local` (образец — `.env.example`).
+
+## Настройка Supabase (один раз)
+1. На supabase.com создайте проект (бесплатный план подходит). Сохраните пароль базы данных.
+2. Скопируйте **Project ID** (Project Settings → General).
+3. Создайте токен доступа: аватар → Account → Access Tokens → Generate new token.
+4. В GitHub: репозиторий → Settings → Secrets and variables → Actions → New repository secret. Добавьте три секрета:
+   `SUPABASE_PROJECT_ID`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`.
+5. GitHub → Actions → **Deploy Supabase** → Run workflow. Скрипт создаст таблицу и выложит сервер.
+   Дальше он запускается сам при каждом изменении серверной части в ветке `main`.
+
+## Когда появится адрес сайта
+- Сборка сайта: `npm run build` с переменными `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY`
+  (Project Settings → API: адрес проекта и publishable/anon ключ — он публичный).
+- Supabase → Authentication → URL Configuration: **Site URL** = адрес сайта, иначе ссылки из писем поведут не туда.
+- Письма: встроенная почта Supabase доставляет только участникам проекта и с жёстким лимитом.
+  Чтобы клиенты получали ссылки, подключите свой SMTP (Authentication → SMTP Settings), например Resend.
+
+## Локальная проверка сервера
+`npx supabase start` (нужен Docker) поднимает базу, вход, почту (http://127.0.0.1:54324) и функцию.
+`SRK=<service_role key из npx supabase status> npx tsx scripts/supabase-parity.ts` прогоняет пример данных
+через Postgres и сверяет ответы API с тестовым режимом. После `npm run build:api` перезапустите контейнер
+`supabase_edge_runtime_training-log`, чтобы функция подхватила новую сборку.

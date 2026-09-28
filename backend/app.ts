@@ -4,7 +4,7 @@ import { clientInsights, type ClientInsights } from '../src/analytics';
 import { nowIso } from '../src/clock';
 
 // The request logic is written against this small surface so the same code runs
-// on AppDeploy (real SDK) and in the test build (in-browser SDK shim).
+// on Supabase (backend/server.ts) and in the demo build (in-browser database).
 export interface Db {
   list<T>(
     table: string,
@@ -361,7 +361,11 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         if (existing) return json({ profile: existing });
         const profile: Profile = {
           role: ctx.body.role,
-          name: ctx.user!.name || ctx.user!.email || (ctx.body.role === 'trainer' ? 'Тренер' : 'Клиент'),
+          name:
+            text(ctx.body.name, 60) ||
+            ctx.user!.name ||
+            (ctx.user!.email || '').split('@')[0] ||
+            (ctx.body.role === 'trainer' ? 'Тренер' : 'Клиент'),
           email: ctx.user!.email || '',
         };
         const [id] = await db.add(profileTable(ctx.user!.userId), [profile]);

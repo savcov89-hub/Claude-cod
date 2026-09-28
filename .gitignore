@@ -4,3 +4,6 @@ dist-artifact
 stub
 vite.local.config.ts
 dist-artifact
+supabase/functions/api/server.js
+.env
+.env.local

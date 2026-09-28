@@ -1,4 +1,4 @@
-import { api as remote } from '@appdeploy/client';
+import { remoteApi as remote } from './supabase';
 import { localApi } from './local/runtime';
 
 /** Test build (artifact) or ?demo=1: requests run in the browser against sample data. */

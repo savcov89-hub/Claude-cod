@@ -1714,9 +1714,19 @@ table {
   background: var(--accent);
   color: var(--accent-ink);
 }
-.role-grid {
+.role-grid,
+.auth-form {
   display: grid;
   gap: 10px;
+}
+.notice {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  line-height: 1.45;
 }
 .role {
   display: grid;

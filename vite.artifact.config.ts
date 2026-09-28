@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [react(), viteSingleFile()],
   define: { 'import.meta.env.VITE_LOCAL_ONLY': JSON.stringify('1') },
   resolve: {
-    alias: { '@appdeploy/client': path.resolve(__dirname, 'src/local/client-stub.ts') },
+    alias: { '@supabase/supabase-js': path.resolve(__dirname, 'src/local/supabase-stub.ts') },
   },
   build: { outDir: 'dist-artifact', emptyOutDir: true },
 });

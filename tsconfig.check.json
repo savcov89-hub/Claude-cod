@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "noUnusedLocals": false },
-  "include": ["src", "backend", "typings-local"]
+  "include": ["src", "backend"]
 }
