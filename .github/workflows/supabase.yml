@@ -10,7 +10,7 @@ on:
       - src/trainingRules.ts
       - src/analytics.ts
       - src/clock.ts
-      - supabase/**
+      - supabase/functions/**
       - package-lock.json
       - .github/workflows/supabase.yml
 
@@ -21,17 +21,19 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-      PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      PROJECT_ID: mtheahciwliosrzadhbd
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run check
       - run: npm run build:api
-      - run: npx supabase link --project-ref "$PROJECT_ID"
-      - run: npx supabase db push
-      - run: npx supabase functions deploy api --project-ref "$PROJECT_ID" --no-verify-jwt
+      - name: Deploy function
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+        run: npx supabase functions deploy api --project-ref "$PROJECT_ID" --no-verify-jwt --use-api
+      - name: No token
+        if: env.SUPABASE_ACCESS_TOKEN == ''
+        run: echo "::warning::SUPABASE_ACCESS_TOKEN secret is not set, so the function was built but not deployed."

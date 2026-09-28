@@ -45,30 +45,23 @@
 - `npm run dev` — интерфейс локально; адрес и ключ Supabase берутся из `.env.local` (образец — `.env.example`).
 - `npm run build` — сайт в `dist/` (на GitHub Pages собирается автоматически).
 
-## Настройка Supabase (один раз)
-1. На supabase.com создайте проект (бесплатный план подходит). Сохраните пароль базы данных.
-2. Скопируйте **Project ID** (Project Settings → General).
-3. Создайте токен доступа: аватар → Account → Access Tokens → Generate new token.
-4. В GitHub: репозиторий → Settings → Secrets and variables → Actions → New repository secret. Добавьте три секрета:
-   `SUPABASE_PROJECT_ID`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`.
-5. GitHub → Actions → **Deploy Supabase** → Run workflow. Скрипт создаст таблицу и выложит сервер.
-   Дальше он запускается сам при каждом изменении серверной части в ветке `main`.
-
-## Сайт на GitHub Pages (один раз)
-1. GitHub → Settings → Pages → Build and deployment → Source: **GitHub Actions**.
-2. Supabase → Project Settings → API Keys: скопируйте **publishable** ключ (он публичный, это не секрет).
-   GitHub → Settings → Secrets and variables → Actions → вкладка **Variables** → New repository variable:
-   `SUPABASE_ANON_KEY` = этот ключ.
-3. GitHub → Actions → **Deploy site** → Run workflow. Дальше сайт обновляется сам при изменениях в `main`.
-4. Supabase → Authentication → URL Configuration: **Site URL** = `https://savcov89-hub.github.io/Claude-cod/`,
-   и тот же адрес добавьте в **Redirect URLs**. Иначе после входа вернёт не на сайт.
+## Публикация
+- **Сайт.** Каждый пуш в `main` собирает сайт (Actions → Deploy site) и кладёт сборку в ветку `gh-pages`,
+  которую показывает GitHub Pages. Адрес Supabase и публичный ключ — в `.env.production`.
+- **Сервер.** Проект Supabase `mtheahciwliosrzadhbd` («Training Log»). Функцию `api` выкладывает Actions → Deploy Supabase,
+  если в GitHub добавлен секрет `SUPABASE_ACCESS_TOKEN` (Settings → Secrets and variables → Actions → Secrets).
+  Без секрета функцию можно выложить вручную: `SUPABASE_ACCESS_TOKEN=... npx supabase functions deploy api
+  --project-ref mtheahciwliosrzadhbd --no-verify-jwt --use-api` (после `npm run build:api`).
+- **Схема базы.** Миграции из `supabase/migrations/` применяются вручную (SQL Editor в Supabase или через API).
+  В проекте остались таблицы и функция `training-api` от ранней версии — приложение их не использует.
+- **Вход.** Site URL и Redirect URLs в Supabase уже указывают на адрес сайта.
 
 ## Вход через Google (один раз)
 1. console.cloud.google.com → создайте проект → APIs & Services → **OAuth consent screen**:
    тип External, название приложения, ваша почта. Затем опубликуйте приложение (Publish app).
 2. APIs & Services → Credentials → Create credentials → **OAuth client ID** → Web application:
    - Authorized JavaScript origins: `https://savcov89-hub.github.io`
-   - Authorized redirect URIs: `https://<Project ID>.supabase.co/auth/v1/callback`
+   - Authorized redirect URIs: `https://mtheahciwliosrzadhbd.supabase.co/auth/v1/callback`
 3. Скопируйте Client ID и Client secret → Supabase → Authentication → Sign In / Providers → **Google** →
    включите, вставьте оба значения, Save.
 
