@@ -163,7 +163,11 @@ export function Gym({
             <p className="muted">Отметьте всех, кто пришёл, — у каждого откроется вкладка с тренировкой.</p>
           </div>
         </div>
-        <ArrivalPicker clients={activeClients(data.clients)} onDone={checkIn} />
+        {activeClients(data.clients).length ? (
+          <ArrivalPicker clients={activeClients(data.clients)} onDone={checkIn} />
+        ) : (
+          <Empty title="Клиентов пока нет" text="Добавьте их в разделе «Клиенты» — они появятся здесь." />
+        )}
       </div>
     );
 

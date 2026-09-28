@@ -292,11 +292,13 @@ table {
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior-y: contain;
-    /* Sticky bars stop short of a scroller's padding, so the top gap lives on the first child. */
+    /* Sticky bars stop short of a scroller's padding, so the top gap comes from an empty first row. */
     padding-top: 0;
+    /* Short pages must not stretch their rows to the full height. */
+    align-content: start;
   }
-  .app.has-nav > .main > :first-child {
-    margin-top: 8px;
+  .app.has-nav > .main::before {
+    content: '';
   }
   .app.has-nav > .nav {
     position: relative;
