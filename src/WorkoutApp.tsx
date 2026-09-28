@@ -187,7 +187,7 @@ function RealApp() {
       <div className="auth">
         <span className="brand-mark"><Dumbbell size={28} /></span>
         <span className="eyebrow">Training Log</span>
-        <h1>Журнал тренера и клиента</h1>
+        <h1>Дневник тренера и клиента</h1>
         <p className="muted">Вкладки клиентов в зале, запись подходов в одно касание, подсказки прогрессии и сводка по всем клиентам.</p>
         {err && <div className="alert">{err}</div>}
         {googleOn && (
