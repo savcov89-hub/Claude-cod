@@ -200,6 +200,7 @@ table {
 /* shell */
 .app {
   min-height: 100vh;
+  padding-top: env(safe-area-inset-top, 0px);
 }
 .app.has-nav {
   --nav-h: 54px;
@@ -264,6 +265,43 @@ table {
   font-style: normal;
   display: grid;
   place-items: center;
+}
+/* Phones: the page itself never scrolls, only .main does, so the menu stays put
+   (iOS home-screen apps misplace position: fixed bars after the keyboard or a bounce). */
+@media (max-width: 899px) {
+  html:has(.app.has-nav),
+  html:has(.app.has-nav) body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  .app.has-nav {
+    --foot-gap: 0px;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 0;
+  }
+  .app.has-nav > * {
+    flex: none;
+  }
+  .app.has-nav > .main {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    /* Sticky bars stop short of a scroller's padding, so the top gap lives on the first child. */
+    padding-top: 0;
+  }
+  .app.has-nav > .main > :first-child {
+    margin-top: 8px;
+  }
+  .app.has-nav > .nav {
+    position: relative;
+    order: 1;
+  }
 }
 @media (min-width: 900px) {
   .app.has-nav {
@@ -1104,7 +1142,7 @@ table {
 }
 .journal-foot {
   position: sticky;
-  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 8px);
+  bottom: calc(var(--foot-gap, calc(var(--nav-h) + env(safe-area-inset-bottom, 0px))) + 8px);
   z-index: 10;
 }
 .journal-foot > .btn {
@@ -1691,7 +1729,7 @@ table {
 }
 .sticky-foot {
   position: sticky;
-  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 8px);
+  bottom: calc(var(--foot-gap, calc(var(--nav-h) + env(safe-area-inset-bottom, 0px))) + 8px);
   z-index: 10;
 }
 .sticky-foot .btn {

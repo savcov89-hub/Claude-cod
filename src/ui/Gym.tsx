@@ -69,7 +69,10 @@ export function Gym({
       const pane = document.querySelector('[data-pane="' + activeId + '"]');
       const row = pane?.querySelector('.set-row:not(.set-labels):not(.is-done)') as HTMLElement | null;
       if (row) row.scrollIntoView({ block: 'center', behavior: 'auto' });
-      else window.scrollTo({ top: 0 });
+      else {
+        window.scrollTo({ top: 0 });
+        document.querySelector('.main')?.scrollTo({ top: 0 });
+      }
     });
     return () => cancelAnimationFrame(t);
   }, [activeId]);

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { BookOpen, ClipboardList, Dumbbell, LayoutDashboard, Users } from 'lucide-react';
 import type { Profile } from '../types';
 import { presentClients, useTrainerData } from './data';
@@ -36,6 +36,17 @@ export function TrainerApp({ header }: { profile: Profile; header: ReactNode }) 
     ['library', 'База', <BookOpen size={20} key="i" />, 0],
   ];
   const overlay = builder ? 'builder' : card ? 'card' : null;
+
+  // On phones only .main scrolls; iOS can leave the whole page shifted after the keyboard closes.
+  useEffect(() => {
+    const settle = () =>
+      setTimeout(() => {
+        const locked = getComputedStyle(document.documentElement).overflowY === 'hidden';
+        if (locked && window.scrollY && !(document.activeElement instanceof HTMLInputElement)) window.scrollTo(0, 0);
+      }, 100);
+    document.addEventListener('focusout', settle);
+    return () => document.removeEventListener('focusout', settle);
+  }, []);
 
   return (
     <div className="app has-nav">
