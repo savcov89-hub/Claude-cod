@@ -1276,7 +1276,8 @@ table {
   gap: 4px;
   overflow-x: auto;
   scrollbar-width: none;
-  border-bottom: 1px solid var(--line);
+  /* The line is drawn inside, so the active underline never sticks out and the strip scrolls sideways only. */
+  box-shadow: inset 0 -1px 0 var(--line);
 }
 .subtabs button {
   position: relative;
@@ -1285,7 +1286,6 @@ table {
   font-weight: 500;
   color: var(--ink-2);
   border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
 }
 .subtabs button.on {
   color: var(--ink);
@@ -2609,4 +2609,12 @@ h2 {
 }
 .body-table td:last-child {
   width: 36px;
+}
+
+/* Sideways strips scroll sideways only: no vertical wobble, no bounce into the page. */
+.filters,
+.subtabs,
+.day-tabs {
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
 }
