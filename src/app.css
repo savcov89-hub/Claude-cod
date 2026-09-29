@@ -2369,3 +2369,27 @@ h2 {
 .create-ex svg {
   flex: none;
 }
+
+/* own exercise: equipment type decides plates or kg */
+.equip-types {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+}
+.equip-types .filter {
+  height: auto;
+  min-height: 44px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  display: grid;
+  justify-items: start;
+  text-align: left;
+  line-height: 1.2;
+}
+.equip-types .filter small {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.lib-edit {
+  justify-self: end;
+}

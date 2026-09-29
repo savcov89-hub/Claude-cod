@@ -255,6 +255,13 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
   const withVisit = (visits: string[] | undefined, date: string) =>
     Array.from(new Set([...(visits || []), date])).sort().slice(-180);
 
+  const exerciseRecord = (body: any, name: string) => ({
+    name,
+    muscleGroup: text(body?.muscleGroup, 60) || 'Другое',
+    equipment: text(body?.equipment, 60) || 'Другое',
+    muscles: Array.isArray(body?.muscles) ? body.muscles.map(String).slice(0, 6) : [],
+  });
+
   async function customExercises(trainerId: string): Promise<Exercise[]> {
     const items = await listAll<Omit<Exercise, 'id'>>(customExercisesTable(trainerId), 500);
     return items.map((item) => ({
@@ -296,6 +303,18 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
     }
     if (new Set(out.map((e) => e.exerciseId)).size !== out.length) return null;
     return out;
+  }
+
+  /** Looks up equipment (plates or kilograms in the journal) for catalog and the trainer's own exercises. */
+  function equipmentLookup(trainerId: string) {
+    let custom: Promise<Exercise[]> | null = null;
+    return async (exerciseId: string) => {
+      const known = catalog.find((c) => c.id === exerciseId);
+      if (known) return known.equipment;
+      if (!exerciseId.startsWith('custom:')) return '';
+      custom ||= customExercises(trainerId);
+      return (await custom).find((c) => c.id === exerciseId)?.equipment || '';
+    };
   }
 
   /** Validates and normalises submitted program days. Returns an error string or clean days. */
@@ -623,16 +642,29 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         if (!(await trainerOnly(ctx))) return error('Доступ только для тренера.', 403);
         const name = text(ctx.body?.name, 100);
         if (!name) return error('Введите название упражнения.', 400);
-        const record = {
-          name,
-          muscleGroup: text(ctx.body?.muscleGroup, 60) || 'Другое',
-          equipment: text(ctx.body?.equipment, 60) || 'Другое',
-          muscles: Array.isArray(ctx.body?.muscles) ? ctx.body.muscles.map(String).slice(0, 6) : [],
-        };
+        const record = exerciseRecord(ctx.body, name);
         const [id] = await db.add(customExercisesTable(ctx.user!.userId), [record]);
         return id
           ? json({ exercise: { id: 'custom:' + id, ...record, custom: true } }, 201)
           : error('Не удалось добавить упражнение.', 500);
+      },
+    ],
+
+    'POST /api/exercises/:id': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        if (!(await trainerOnly(ctx))) return error('Доступ только для тренера.', 403);
+        const id = ctx.params.id.replace(/^custom:/, '');
+        const table = customExercisesTable(ctx.user!.userId);
+        const [current] = await db.get<Omit<Exercise, 'id'>>(table, [id]);
+        if (!current) return error('Упражнение не найдено.', 404);
+        const name = text(ctx.body?.name, 100);
+        if (!name) return error('Введите название упражнения.', 400);
+        const record = exerciseRecord(ctx.body, name);
+        const [ok] = await db.update(table, [{ id, record }]);
+        return ok
+          ? json({ exercise: { id: 'custom:' + id, ...record, custom: true } })
+          : error('Не удалось сохранить упражнение.', 500);
       },
     ],
 
@@ -763,10 +795,16 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         const { program, ownerId } = access;
         const day = program.days.find((d) => d.id === dayId);
         if (!day) return error('Тренировка не найдена.', 404);
+        const equipmentOf = equipmentLookup(trainerId);
         const exercises = await Promise.all(
           day.exercises.map(async (e) => {
             const last = await first<{ sets: SetEntry[]; completedAt?: string }>(lastResultTable(ownerId, e.exerciseId));
-            return { ...e, previousSets: last?.sets || [], previousAt: last?.completedAt || null };
+            return {
+              ...e,
+              equipment: await equipmentOf(e.exerciseId),
+              previousSets: last?.sets || [],
+              previousAt: last?.completedAt || null,
+            };
           }),
         );
         const draft = await first<DraftRecord>(draftTable(ownerId, programId, dayId));
@@ -793,7 +831,11 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         const access = await workoutOwner(ctx.user!.userId, trainerId, programId);
         if (!access) return error('Нет доступа к тренировке.', 403);
         const last = await first<{ sets: SetEntry[]; completedAt?: string }>(lastResultTable(access.ownerId, exerciseId));
-        return json({ previousSets: last?.sets || [], previousAt: last?.completedAt || null });
+        return json({
+          equipment: await equipmentLookup(trainerId)(exerciseId),
+          previousSets: last?.sets || [],
+          previousAt: last?.completedAt || null,
+        });
       },
     ],
 

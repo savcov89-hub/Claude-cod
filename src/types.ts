@@ -88,6 +88,8 @@ export interface Session {
   exercises: SessionExercise[];
 }
 export interface WorkoutExercise extends ProgramExercise {
+  /** Decides plates or kilograms; sent by the server for catalog and own exercises. */
+  equipment?: string;
   previousSets: SetEntry[];
   previousAt?: string | null;
 }

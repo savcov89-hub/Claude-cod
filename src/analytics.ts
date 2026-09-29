@@ -149,14 +149,42 @@ export function clientInsights(sessions: SessionLike[], nowMs = Date.now()): Cli
   };
 }
 
+/** Equipment a trainer picks for an own exercise; it decides whether the weight is in plates or kilograms. */
+export const EQUIPMENT_TYPES = [
+  { value: 'Блок', label: 'Блок / кроссовер', unit: 'плитки' },
+  { value: 'Тренажёр (стек)', label: 'Блочный тренажёр', unit: 'плитки' },
+  { value: 'Тренажёр (блины)', label: 'Рычажный на блинах', unit: 'кг' },
+  { value: 'Свободный вес', label: 'Штанга / гантели', unit: 'кг' },
+  { value: 'Собственный вес', label: 'Свой вес', unit: 'доп. вес, кг' },
+] as const;
 const STACK_EQUIPMENT = new Set(['Тренажёр (стек)', 'Блок']);
+const TYPED_EQUIPMENT = new Set<string>(EQUIPMENT_TYPES.map((t) => t.value));
+
+export interface ExerciseRef {
+  exerciseId?: string;
+  exerciseName?: string;
+  equipment?: string;
+}
+/** Catalog equipment first; own exercises carry theirs. Older own exercises without a type are guessed from the text. */
+export function equipmentOf(ex?: ExerciseRef) {
+  return catalog.find((c) => c.id === ex?.exerciseId)?.equipment || ex?.equipment || '';
+}
 /** Stack machines, cables and crossovers are logged and progressed in plates, not kilograms. */
-export const isStack = (exerciseId?: string) =>
-  !!exerciseId && catalog.some((c) => c.id === exerciseId && STACK_EQUIPMENT.has(c.equipment));
-export const weightUnit = (exerciseId?: string) => (isStack(exerciseId) ? 'плит.' : 'кг');
+export function isStack(ex?: ExerciseRef) {
+  const equipment = equipmentOf(ex);
+  if (STACK_EQUIPMENT.has(equipment)) return true;
+  if (TYPED_EQUIPMENT.has(equipment) || catalog.some((c) => c.id === ex?.exerciseId)) return false;
+  const words = searchKeyLite(equipment + ' ' + (ex?.exerciseName || ''));
+  return /блок|блоч|кросов|стек/.test(words) && !/блин/.test(words);
+}
+const searchKeyLite = (text: string) => text.toLowerCase().replace(/ё/g, 'е').replace(/(.)\1+/g, '$1');
+export const weightUnit = (ex?: ExerciseRef) => (isStack(ex) ? 'плит.' : 'кг');
+/** Short note for exercise lists: how the weight of this exercise is counted. */
+export const unitNote = (ex: ExerciseRef) =>
+  isStack(ex) ? 'в плитках' : equipmentOf(ex) === 'Собственный вес' ? '' : 'в кг';
 /** Kilogram step: 1 kg under 10 kg (light dumbbells), 2.5 kg from 10 kg up. */
 export const weightStep = (w: number) => (w < 10 ? 1 : 2.5);
-const stepFor = (exerciseId: string | undefined, w: number) => (isStack(exerciseId) ? 1 : weightStep(w));
+const stepFor = (ex: ExerciseRef, w: number) => (isStack(ex) ? 1 : weightStep(w));
 const roundTo = (w: number, step: number) => Math.round(w / step) * step;
 
 export interface Suggestion {
@@ -168,14 +196,14 @@ export interface Suggestion {
 /** Double progression: add reps up to the top of the range, then add weight. */
 /** Exercises where the loaded weight assists the client (less weight = harder). */
 export const ASSISTED = new Set(['assisted-pull-up', 'stack-assisted-dip']);
-export function suggestNext(plan: PlanLike & { exerciseId?: string }, previous: SetLike[]): Suggestion {
-  const unit = weightUnit(plan.exerciseId);
+export function suggestNext(plan: PlanLike & ExerciseRef, previous: SetLike[]): Suggestion {
+  const unit = weightUnit(plan);
   if (plan.exerciseId && ASSISTED.has(plan.exerciseId) && previous.length) {
     const work = previous.slice(0, plan.sets);
     const w = Math.min(...work.map((s) => s.weight));
     const done = (work.length >= plan.sets && work.every((s) => s.reps >= plan.repMax)) || work.some((s) => s.reps > plan.repMax);
     if (done && w > 0) {
-      const next = Math.max(0, w - stepFor(plan.exerciseId, w));
+      const next = Math.max(0, w - stepFor(plan, w));
       return { kind: 'increase', weight: next, reps: Array(plan.sets).fill(plan.repMin), text: 'Верх диапазона → противовес ' + fmtKg(next) + ' ' + unit };
     }
     const reps = Array.from({ length: plan.sets }, (_, i) => Math.min(plan.repMax, (work[i] || work[work.length - 1]).reps + 1));
@@ -198,7 +226,7 @@ export function suggestNext(plan: PlanLike & { exerciseId?: string }, previous: 
   const over = work.some((s) => s.reps > plan.repMax);
   const progress = allTop || over;
   if (progress && weight > 0) {
-    const step = stepFor(plan.exerciseId, weight);
+    const step = stepFor(plan, weight);
     const next = roundTo(weight + step, step === 2.5 ? 1.25 : step);
     return {
       kind: 'increase',
@@ -226,7 +254,7 @@ export function suggestNext(plan: PlanLike & { exerciseId?: string }, previous: 
   const floor = plan.repMin === plan.repMax ? plan.repMin - 2 : plan.repMin;
   const low = work.filter((s) => s.reps < floor).length;
   if (low > work.length / 2 && weight > 0) {
-    const step = stepFor(plan.exerciseId, weight);
+    const step = stepFor(plan, weight);
     const next = Math.max(0, Math.min(roundTo(weight * 0.92, step), weight - step));
     return {
       kind: 'decrease',
