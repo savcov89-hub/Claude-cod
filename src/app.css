@@ -2480,3 +2480,42 @@ h2 {
   gap: 8px;
   margin-top: 12px;
 }
+
+/* History: by workout or by muscle group. */
+.seg-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+.seg-toggle button {
+  min-height: 40px;
+  text-align: center;
+  border-radius: 8px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.seg-toggle button.on {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+.muscle-group {
+  display: grid;
+  gap: 8px;
+}
+.muscle-group h3 {
+  margin-top: 6px;
+  font-size: 17px;
+}
+.ex-history header {
+  align-items: baseline;
+}
+.ex-history header .muted {
+  flex: none;
+}
+.ex-history .link-btn {
+  justify-self: start;
+}

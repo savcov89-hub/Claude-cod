@@ -120,7 +120,7 @@ export function ClientCard({
               </button>
             </div>
           )}
-          {loading ? <div className="loader-block"><span className="loader" /></div> : <HistoryList sessions={sessions} />}
+          {loading ? <div className="loader-block"><span className="loader" /></div> : <HistoryList sessions={sessions} programs={data.programs.filter((p) => p.clientId === clientId)} exercises={data.exercises} />}
         </>
       )}
       {tab === 'programs' && (

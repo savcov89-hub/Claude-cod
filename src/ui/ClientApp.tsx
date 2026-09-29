@@ -182,7 +182,7 @@ export function ClientApp({ profile, header }: { profile: Profile; header: React
               </>
             )}
             {tab === 'progress' && <ProgressView sessions={sessions} />}
-            {tab === 'history' && <HistoryList sessions={sessions} />}
+            {tab === 'history' && <HistoryList sessions={sessions} programs={programs} />}
           </>
         )}
       </main>
