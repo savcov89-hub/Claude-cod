@@ -98,7 +98,12 @@ export function calories(profile: BodyProfile, weight: number, bodyFat: number |
   const train = steps !== null ? trainingKcal(level.perWeek, weight) : 0;
   const total = steps !== null ? bmr * 1.2 + walk + train : bmr * level.factor;
   const maintain = Math.round(total / 10) * 10;
+  // A lean person loses muscle on a deep deficit: the leaner, the smaller the cut.
+  const lean = bodyFat !== null && bodyFat < (profile.sex === 'm' ? 12 : 20);
+  const moderate = bodyFat !== null && bodyFat < (profile.sex === 'm' ? 20 : 28);
+  const cutShare = lean ? 0.1 : moderate ? 0.15 : 0.2;
   return {
+    cutPct: Math.round(cutShare * 100),
     method: bodyFat !== null ? 'по сухой массе (Кэтч — Макардл)' : 'по формуле Миффлина — Сан Жеора',
     bmr: Math.round(bmr),
     /** Walking and training kcal, only when steps are known. */
@@ -106,7 +111,7 @@ export function calories(profile: BodyProfile, weight: number, bodyFat: number |
     train: Math.round(train),
     factor: Math.round((total / bmr) * 100) / 100,
     maintain,
-    cut: Math.round((maintain * 0.8) / 10) * 10,
+    cut: Math.round((maintain * (1 - cutShare)) / 10) * 10,
     gain: Math.round((maintain * 1.1) / 10) * 10,
     protein: [Math.round(weight * 1.6), Math.round(weight * 2.2)] as [number, number],
   };

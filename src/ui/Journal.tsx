@@ -562,7 +562,9 @@ function JournalBody({
         ? '▲ ' + fmtKg(sug.weight)
         : '▲ сложнее'
       : sug.kind === 'decrease'
-        ? '▼ ' + fmtKg(sug.weight)
+        ? sug.weight > 0
+          ? '▼ ' + fmtKg(sug.weight)
+          : '▼ легче'
         : sug.kind === 'first'
           ? 'подобрать вес'
           : '+1 повт';

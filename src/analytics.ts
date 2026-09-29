@@ -77,6 +77,9 @@ export function compareStep(prev: SetLike[], cur: SetLike[]): Step {
   const reps = (sets: SetLike[], w: number) =>
     sets.slice(0, n).reduce((sum, s) => sum + (s.weight === w ? s.reps : 0), 0);
   if (wC < wP) {
+    // Less weight is usually a planned reset. It is a decline only if it did not bring more reps either
+    // (plates of a stack are not proportional to kilograms, so e1RM alone overstates the drop).
+    if (reps(cur, wC) > reps(prev, wP)) return 'flat';
     const drop = (e1rmBest(cur) - e1rmBest(prev)) / e1rmBest(prev);
     return drop <= -0.05 ? 'down' : 'flat';
   }
@@ -196,17 +199,33 @@ export interface Suggestion {
 /** Double progression: add reps up to the top of the range, then add weight. */
 /** Exercises where the loaded weight assists the client (less weight = harder). */
 export const ASSISTED = new Set(['assisted-pull-up', 'stack-assisted-dip']);
+/**
+ * Reps as if done at the planned reps-in-reserve: a set logged with more in reserve than planned
+ * could have had that many more reps, one taken closer to failure had fewer.
+ */
+const effectiveReps = (s: SetLike, targetRir: number) =>
+  s.rir === null || s.rir === undefined ? s.reps : Math.max(0, s.reps + Number(s.rir) - targetRir);
+/** Weight that should give `reps` at the planned reserve, from the best of `sets` (Epley). */
+const weightFor = (sets: SetLike[], plan: PlanLike, reps: number) => {
+  const best = Math.max(...sets.map((s) => s.weight * (1 + (effectiveReps(s, plan.targetRir) + plan.targetRir) / 30)));
+  return best / (1 + (reps + plan.targetRir) / 30);
+};
+/** Largest jump a hint may make at once, even when the numbers suggest more. */
+const MAX_JUMP = 0.2;
+
 export function suggestNext(plan: PlanLike & ExerciseRef, previous: SetLike[]): Suggestion {
   const unit = weightUnit(plan);
+  const eff = (s: SetLike) => effectiveReps(s, plan.targetRir);
   if (plan.exerciseId && ASSISTED.has(plan.exerciseId) && previous.length) {
     const work = previous.slice(0, plan.sets);
     const w = Math.min(...work.map((s) => s.weight));
-    const done = (work.length >= plan.sets && work.every((s) => s.reps >= plan.repMax)) || work.some((s) => s.reps > plan.repMax);
+    const atW = work.filter((s) => s.weight === w);
+    const done = (work.length >= plan.sets && atW.length === work.length && work.every((s) => eff(s) >= plan.repMax)) || atW.some((s) => eff(s) > plan.repMax);
     if (done && w > 0) {
       const next = Math.max(0, w - stepFor(plan, w));
       return { kind: 'increase', weight: next, reps: Array(plan.sets).fill(plan.repMin), text: 'Верх диапазона → противовес ' + fmtKg(next) + ' ' + unit };
     }
-    const reps = Array.from({ length: plan.sets }, (_, i) => Math.min(plan.repMax, (work[i] || work[work.length - 1]).reps + 1));
+    const reps = Array.from({ length: plan.sets }, (_, i) => Math.min(plan.repMax, Math.max(plan.repMin - 2, eff(work[i] || work[work.length - 1]) + 1)));
     return { kind: 'reps', weight: w, reps, text: 'Тот же противовес, цель +1 повтор: ' + reps.join(' / ') };
   }
   const n = plan.sets;
@@ -219,21 +238,28 @@ export function suggestNext(plan: PlanLike & ExerciseRef, previous: SetLike[]): 
     };
   const work = previous.slice(0, n);
   const weight = Math.max(...work.map((s) => s.weight));
+  // Only sets at the working weight say whether it has become light; a lighter back-off set does not.
   const topSets = work.filter((s) => s.weight === weight);
-  const allTop =
-    work.length >= n && topSets.length === work.length && work.every((s) => s.reps >= plan.repMax);
-  // More reps than the top of the range in any set also means the weight is too light.
-  const over = work.some((s) => s.reps > plan.repMax);
+  // When the next step is a big share of the weight (1→2 plates, 10→12,5 kg dumbbells) reps would crash after it:
+  // first go 2 reps past the top of the range.
+  const bigStep = weight > 0 && stepFor(plan, weight) / weight > 0.2;
+  const top = plan.repMax + (bigStep ? 2 : 0);
+  const allTop = work.length >= n && topSets.length === work.length && work.every((s) => eff(s) >= top);
+  // More reps than the top of the range in any working set also means the weight is too light.
+  const over = topSets.some((s) => eff(s) > top);
   const progress = allTop || over;
   if (progress && weight > 0) {
     const step = stepFor(plan, weight);
-    const next = roundTo(weight + step, step === 2.5 ? 1.25 : step);
+    let next = roundTo(weight + step, step === 2.5 ? 1.25 : step);
+    // Far above the range (or a new, lower rep range): jump to the weight the numbers point to, by whole steps.
+    const target = Math.min(weightFor(topSets, plan, Math.round((plan.repMin + plan.repMax) / 2)), weight * (1 + MAX_JUMP));
+    if (target > next) next = Math.floor(target / step) * step;
     return {
       kind: 'increase',
       weight: next,
       reps: Array(n).fill(plan.repMin),
       text:
-        (allTop ? 'Верх диапазона во всех подходах' : 'Больше ' + plan.repMax + ' повт. в подходе') +
+        (allTop ? (bigStep ? top + '+ повт. во всех подходах' : 'Верх диапазона во всех подходах') : 'Больше ' + top + ' повт. в подходе') +
         ' → ' +
         fmtKg(next) +
         ' ' +
@@ -243,6 +269,14 @@ export function suggestNext(plan: PlanLike & ExerciseRef, previous: SetLike[]): 
         '+ повт.',
     };
   }
+  // Bodyweight far below the range: no weight to take off, so the movement itself must get easier.
+  if (weight === 0 && work.filter((s) => eff(s) < plan.repMin - 2).length > work.length / 2)
+    return {
+      kind: 'decrease',
+      weight: 0,
+      reps: Array(n).fill(plan.repMin),
+      text: 'Ниже диапазона: облегчите вариант (гравитрон, резина, меньше амплитуда) или смените упражнение.',
+    };
   if (progress && weight === 0)
     return {
       kind: 'increase',
@@ -250,12 +284,23 @@ export function suggestNext(plan: PlanLike & ExerciseRef, previous: SetLike[]): 
       reps: Array(n).fill(plan.repMax),
       text: 'Верх диапазона: добавьте отягощение или усложните вариант.',
     };
-  // With a single target (12–12) falling 1–2 reps short is normal; only 3+ short counts as too heavy.
-  const floor = plan.repMin === plan.repMax ? plan.repMin - 2 : plan.repMin;
-  const low = work.filter((s) => s.reps < floor).length;
+  // Falling 1–2 reps short (e.g. right after adding weight) is normal double progression: stay and add reps.
+  // Only 3+ reps short in most sets means the weight is too heavy.
+  const floor = plan.repMin - 2;
+  const low = work.filter((s) => eff(s) < floor).length;
   if (low > work.length / 2 && weight > 0) {
     const step = stepFor(plan, weight);
-    const next = Math.max(0, Math.min(roundTo(weight * 0.92, step), weight - step));
+    // Down by at least a step (or 8 %), more when the numbers show it is far too heavy (e.g. a new, higher rep range).
+    const target = Math.max(weightFor(work, plan, plan.repMin), weight * (1 - MAX_JUMP));
+    const next = Math.max(0, Math.min(roundTo(weight * 0.92, step), weight - step, Math.ceil(target / step) * step));
+    // A stack cannot go below its first plate.
+    if (isStack(plan) && next < 1)
+      return {
+        kind: 'decrease',
+        weight: 1,
+        reps: Array(n).fill(plan.repMin),
+        text: 'Ниже диапазона даже на 1 плитке: сократите диапазон повторов или замените упражнение.',
+      };
     return {
       kind: 'decrease',
       weight: next,
@@ -263,15 +308,17 @@ export function suggestNext(plan: PlanLike & ExerciseRef, previous: SetLike[]): 
       text: 'Ниже диапазона в большинстве подходов → ' + fmtKg(next) + ' ' + unit,
     };
   }
+  // Targets come from sets at the working weight; a lighter back-off set does not set the bar.
+  const lastTop = topSets[topSets.length - 1];
   const reps = Array.from({ length: n }, (_, i) => {
-    const p = work[i] || work[work.length - 1];
-    return Math.min(plan.repMax, Math.max(plan.repMin, p.reps + 1));
+    const p = work[i] && work[i].weight === weight ? work[i] : lastTop;
+    return Math.min(top, Math.max(plan.repMin, eff(p) + 1));
   });
   return {
     kind: 'reps',
     weight,
     reps,
-    text: 'Тот же вес, цель +1 повтор: ' + reps.join(' / '),
+    text: 'Тот же вес, цель +1 повтор: ' + reps.join(' / ') + (bigStep && reps.some((r) => r > plan.repMax) ? ' (шаг веса большой — сначала повторы)' : ''),
   };
 }
 export const fmtKg = (w: number) =>

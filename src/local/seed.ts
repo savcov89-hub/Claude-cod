@@ -1,7 +1,7 @@
 // Realistic sample data for the test build: five clients, 2–6 weeks of history
 // generated through the same request logic the real app uses.
 import { setClockOffset, localDate } from '../clock';
-import { suggestNext, weightStep } from '../analytics';
+import { isStack, suggestNext, weightStep } from '../analytics';
 import { templateDays, templates } from '../templates';
 import { musclesOf } from '../trainingRules';
 
@@ -171,7 +171,9 @@ export async function seed(call: Call) {
         if (stalled && e.previousSets.length) {
           sets = e.previousSets.map((s: any) => ({ ...s, rir: null }));
         } else if (!e.previousSets.length) {
-          const wt = e.exerciseId in base ? roundW(base[e.exerciseId] * mult) : 0;
+          // Stacks and cables are logged in plates (about 6,5 kg each).
+          const kg = e.exerciseId in base ? base[e.exerciseId] * mult : 0;
+          const wt = !kg ? 0 : isStack(e) ? Math.max(1, Math.round(kg / 6.5)) : roundW(kg);
           sets = Array.from({ length: e.sets }, () => ({ weight: wt, reps: e.repMin + 1 + Math.floor(rand() * 2), rir: null }));
         } else {
           const sug = suggestNext(e, e.previousSets);

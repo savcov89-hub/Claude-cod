@@ -16,6 +16,8 @@
 - `npm run check` — типы; `npm run build` — сайт; `npm run build:api` — серверная функция.
 - Интерфейс смотреть в браузере: `npm run dev`, без Supabase — с `?demo=1` (пример данных, переключатель Тренер/Клиент).
 - Изменения в `backend/`: локальный Supabase (`npx supabase start`, нужен Docker) и `scripts/supabase-parity.ts`.
+- Изменения прогрессии или журнала: `npx tsx scripts/simulate-month.ts отчёт.md` — 30 клиентов, месяц Пн/Ср/Пт;
+  сравнить «в диапазоне / легко / тяжело» и число колебаний с прошлым прогоном.
   После `npm run build:api` перезапускать контейнер `supabase_edge_runtime_training-log`.
 
 ## Устройство

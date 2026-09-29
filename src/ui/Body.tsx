@@ -183,7 +183,7 @@ export function BodyView({ clientId }: { clientId?: string }) {
           <div className="kcal">
             <div>
               <strong className="num">{energy.cut}</strong>
-              <span className="muted small">снижение веса (−20&nbsp;%)</span>
+              <span className="muted small">снижение веса (−{energy.cutPct}&nbsp;%)</span>
             </div>
             <div className="on">
               <strong className="num">{energy.maintain}</strong>
