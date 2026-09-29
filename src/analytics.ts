@@ -1,3 +1,4 @@
+import { catalog } from './catalog';
 import { INDIRECT_FACTOR, musclesOf } from './trainingRules';
 
 export interface SetLike {
@@ -148,8 +149,13 @@ export function clientInsights(sessions: SessionLike[], nowMs = Date.now()): Cli
   };
 }
 
-/** Weight step that a typical gym can load. */
-export const weightStep = (w: number) => (w < 10 ? 1 : w < 100 ? 2.5 : 5);
+/** Exercises on a weight stack are logged and progressed in plates, not kilograms. */
+export const isStack = (exerciseId?: string) =>
+  !!exerciseId && catalog.some((c) => c.id === exerciseId && c.equipment === 'Тренажёр (стек)');
+export const weightUnit = (exerciseId?: string) => (isStack(exerciseId) ? 'плит.' : 'кг');
+/** Kilogram step: 1 kg under 10 kg (light dumbbells), 2.5 kg from 10 kg up. */
+export const weightStep = (w: number) => (w < 10 ? 1 : 2.5);
+const stepFor = (exerciseId: string | undefined, w: number) => (isStack(exerciseId) ? 1 : weightStep(w));
 const roundTo = (w: number, step: number) => Math.round(w / step) * step;
 
 export interface Suggestion {
@@ -162,12 +168,14 @@ export interface Suggestion {
 /** Exercises where the loaded weight assists the client (less weight = harder). */
 export const ASSISTED = new Set(['assisted-pull-up', 'stack-assisted-dip']);
 export function suggestNext(plan: PlanLike & { exerciseId?: string }, previous: SetLike[]): Suggestion {
+  const unit = weightUnit(plan.exerciseId);
   if (plan.exerciseId && ASSISTED.has(plan.exerciseId) && previous.length) {
     const work = previous.slice(0, plan.sets);
     const w = Math.min(...work.map((s) => s.weight));
-    if (work.length >= plan.sets && work.every((s) => s.reps >= plan.repMax) && w > 0) {
-      const next = Math.max(0, w - weightStep(w));
-      return { kind: 'increase', weight: next, reps: Array(plan.sets).fill(plan.repMin), text: 'Верх диапазона → противовес ' + fmtKg(next) + ' кг.' };
+    const done = (work.length >= plan.sets && work.every((s) => s.reps >= plan.repMax)) || work.some((s) => s.reps > plan.repMax);
+    if (done && w > 0) {
+      const next = Math.max(0, w - stepFor(plan.exerciseId, w));
+      return { kind: 'increase', weight: next, reps: Array(plan.sets).fill(plan.repMin), text: 'Верх диапазона → противовес ' + fmtKg(next) + ' ' + unit };
     }
     const reps = Array.from({ length: plan.sets }, (_, i) => Math.min(plan.repMax, (work[i] || work[work.length - 1]).reps + 1));
     return { kind: 'reps', weight: w, reps, text: 'Тот же противовес, цель +1 повтор: ' + reps.join(' / ') };
@@ -185,30 +193,45 @@ export function suggestNext(plan: PlanLike & { exerciseId?: string }, previous: 
   const topSets = work.filter((s) => s.weight === weight);
   const allTop =
     work.length >= n && topSets.length === work.length && work.every((s) => s.reps >= plan.repMax);
-  if (allTop && weight > 0) {
-    const next = roundTo(weight + weightStep(weight), weightStep(weight) === 2.5 ? 1.25 : weightStep(weight));
+  // More reps than the top of the range in any set also means the weight is too light.
+  const over = work.some((s) => s.reps > plan.repMax);
+  const progress = allTop || over;
+  if (progress && weight > 0) {
+    const step = stepFor(plan.exerciseId, weight);
+    const next = roundTo(weight + step, step === 2.5 ? 1.25 : step);
     return {
       kind: 'increase',
       weight: next,
       reps: Array(n).fill(plan.repMin),
-      text: 'Верх диапазона во всех подходах → ' + fmtKg(next) + ' кг на ' + plan.repMin + '+ повт.',
+      text:
+        (allTop ? 'Верх диапазона во всех подходах' : 'Больше ' + plan.repMax + ' повт. в подходе') +
+        ' → ' +
+        fmtKg(next) +
+        ' ' +
+        unit +
+        ' на ' +
+        plan.repMin +
+        '+ повт.',
     };
   }
-  if (allTop && weight === 0)
+  if (progress && weight === 0)
     return {
       kind: 'increase',
       weight: 0,
       reps: Array(n).fill(plan.repMax),
       text: 'Верх диапазона: добавьте отягощение или усложните вариант.',
     };
-  const low = work.filter((s) => s.reps < plan.repMin).length;
+  // With a single target (12–12) falling 1–2 reps short is normal; only 3+ short counts as too heavy.
+  const floor = plan.repMin === plan.repMax ? plan.repMin - 2 : plan.repMin;
+  const low = work.filter((s) => s.reps < floor).length;
   if (low > work.length / 2 && weight > 0) {
-    const next = roundTo(weight * 0.92, weightStep(weight));
+    const step = stepFor(plan.exerciseId, weight);
+    const next = Math.max(0, Math.min(roundTo(weight * 0.92, step), weight - step));
     return {
       kind: 'decrease',
       weight: next,
       reps: Array(n).fill(plan.repMin),
-      text: 'Ниже диапазона в большинстве подходов → ' + fmtKg(next) + ' кг.',
+      text: 'Ниже диапазона в большинстве подходов → ' + fmtKg(next) + ' ' + unit,
     };
   }
   const reps = Array.from({ length: n }, (_, i) => {

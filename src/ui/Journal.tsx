@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowLeftRight, Check, ChevronDown, Minus, Plus, Undo2 } from 'lucide-react';
 import { api, isLocal, readError, safeStorage } from '../transport';
-import { fmtKg, suggestNext, type Suggestion } from '../analytics';
+import { fmtKg, suggestNext, weightUnit, type Suggestion } from '../analytics';
 import { localDate } from '../clock';
 import type { Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
 import { Confirm, clock, fmtDate, fmtSets, useNow } from './common';
@@ -659,7 +659,7 @@ function JournalBody({
                 <div className="set-row set-labels" role="row">
                   <span>#</span>
                   <span>было</span>
-                  <span>кг</span>
+                  <span>{weightUnit(e.exerciseId)}</span>
                   <span>повт</span>
                   {showRir && <span>RIR</span>}
                   <span className="set-tools">
@@ -685,7 +685,7 @@ function JournalBody({
                         label={e.exerciseName + ', подход ' + (si + 1) + ', вес'}
                         value={s.weight}
                         showZero={isBodyweight(ei)}
-                        placeholder="кг"
+                        placeholder={weightUnit(e.exerciseId)}
                         onChange={(v) => {
                           if (nudge) setNudge(null);
                           patchSet(ei, si, { weight: v ?? 0 });
