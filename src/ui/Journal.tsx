@@ -35,7 +35,6 @@ export interface JournalActivity {
   current: string | null;
 }
 export type JournalFinisher = () => Promise<boolean>;
-const WEIGHT_STEP = 2.5;
 
 /** Loads a workout and renders the set log. */
 export function Journal({
@@ -345,16 +344,14 @@ function JournalBody({
   };
   const patchSet = (ei: number, si: number, patch: Partial<SetEntry>) => {
     const wasDone = latest.current[ei].sets[si].reps > 0;
-    const oldWeight = latest.current[ei].sets[si].weight;
     const next = latest.current.map((e, i) =>
       i === ei
         ? {
             ...e,
             sets: e.sets.map((s, j) => {
               if (j === si) return { ...s, ...patch };
-              // A new weight carries over to the following sets not done yet.
-              if (patch.weight !== undefined && j > si && s.reps === 0 && (s.weight === oldWeight || s.weight === 0))
-                return { ...s, weight: patch.weight };
+              // A new weight carries over to every following set not done yet.
+              if (patch.weight !== undefined && j > si && s.reps === 0) return { ...s, weight: patch.weight };
               return s;
             }),
           }
@@ -385,11 +382,6 @@ function JournalBody({
     }
     setNudge(null);
     patchSet(ei, si, { reps, weight });
-  };
-  const stepWeight = (ei: number, si: number, delta: number) => {
-    const current = latest.current[ei].sets[si].weight || 0;
-    if (nudge) setNudge(null);
-    patchSet(ei, si, { weight: Math.max(0, Math.round((current + delta) * 100) / 100) });
   };
   const addSet = (ei: number) => {
     const e = latest.current[ei];
@@ -686,38 +678,19 @@ function JournalBody({
                     <div className={'set-row' + (s.reps > 0 ? ' is-done' : '')} role="row" key={si}>
                       <span className="set-n num">{si + 1}</span>
                       <span className="set-prev num">{prev ? fmtKg(prev.weight) + '×' + prev.reps : '—'}</span>
-                      <div className="wfield">
-                        <button
-                          type="button"
-                          className="wstep"
-                          aria-label={e.exerciseName + ', подход ' + (si + 1) + ': минус ' + fmtKg(WEIGHT_STEP) + ' кг'}
-                          disabled={!s.weight}
-                          onClick={() => stepWeight(ei, si, -WEIGHT_STEP)}
-                        >
-                          −{fmtKg(WEIGHT_STEP)}
-                        </button>
-                        <NumberInput
-                          decimal
-                          dataW={ei + '-' + si}
-                          nudge={nudge === ei + '-' + si}
-                          label={e.exerciseName + ', подход ' + (si + 1) + ', вес'}
-                          value={s.weight}
-                          showZero={isBodyweight(ei)}
-                          placeholder="кг"
-                          onChange={(v) => {
-                            if (nudge) setNudge(null);
-                            patchSet(ei, si, { weight: v ?? 0 });
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="wstep"
-                          aria-label={e.exerciseName + ', подход ' + (si + 1) + ': плюс ' + fmtKg(WEIGHT_STEP) + ' кг'}
-                          onClick={() => stepWeight(ei, si, WEIGHT_STEP)}
-                        >
-                          +{fmtKg(WEIGHT_STEP)}
-                        </button>
-                      </div>
+                      <NumberInput
+                        decimal
+                        dataW={ei + '-' + si}
+                        nudge={nudge === ei + '-' + si}
+                        label={e.exerciseName + ', подход ' + (si + 1) + ', вес'}
+                        value={s.weight}
+                        showZero={isBodyweight(ei)}
+                        placeholder="кг"
+                        onChange={(v) => {
+                          if (nudge) setNudge(null);
+                          patchSet(ei, si, { weight: v ?? 0 });
+                        }}
+                      />
                       <NumberInput
                         label={e.exerciseName + ', подход ' + (si + 1) + ', повторы'}
                         value={s.reps || null}

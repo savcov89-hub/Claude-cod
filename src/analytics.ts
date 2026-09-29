@@ -160,7 +160,7 @@ export interface Suggestion {
 }
 /** Double progression: add reps up to the top of the range, then add weight. */
 /** Exercises where the loaded weight assists the client (less weight = harder). */
-export const ASSISTED = new Set(['assisted-pull-up']);
+export const ASSISTED = new Set(['assisted-pull-up', 'stack-assisted-dip']);
 export function suggestNext(plan: PlanLike & { exerciseId?: string }, previous: SetLike[]): Suggestion {
   if (plan.exerciseId && ASSISTED.has(plan.exerciseId) && previous.length) {
     const work = previous.slice(0, plan.sets);
