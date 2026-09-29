@@ -149,9 +149,10 @@ export function clientInsights(sessions: SessionLike[], nowMs = Date.now()): Cli
   };
 }
 
-/** Exercises on a weight stack are logged and progressed in plates, not kilograms. */
+const STACK_EQUIPMENT = new Set(['Тренажёр (стек)', 'Блок']);
+/** Stack machines, cables and crossovers are logged and progressed in plates, not kilograms. */
 export const isStack = (exerciseId?: string) =>
-  !!exerciseId && catalog.some((c) => c.id === exerciseId && c.equipment === 'Тренажёр (стек)');
+  !!exerciseId && catalog.some((c) => c.id === exerciseId && STACK_EQUIPMENT.has(c.equipment));
 export const weightUnit = (exerciseId?: string) => (isStack(exerciseId) ? 'плит.' : 'кг');
 /** Kilogram step: 1 kg under 10 kg (light dumbbells), 2.5 kg from 10 kg up. */
 export const weightStep = (w: number) => (w < 10 ? 1 : 2.5);

@@ -277,8 +277,14 @@ table {
   }
   .app.has-nav {
     --foot-gap: 0px;
+    /* Pinned to the visible area, so with the keyboard open everything can still be scrolled into view. */
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: var(--vv-top, 0px);
     height: 100vh;
     height: 100dvh;
+    height: var(--vv-height, 100dvh);
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -303,6 +309,9 @@ table {
   .app.has-nav > .nav {
     position: relative;
     order: 1;
+  }
+  .kb-open .app.has-nav > .nav {
+    display: none;
   }
 }
 @media (min-width: 900px) {
