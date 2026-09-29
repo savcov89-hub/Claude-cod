@@ -119,7 +119,7 @@ export const TrendChip = ({ trend, extra }: { trend: Trend; extra?: string }) =>
 );
 
 /** e1RM line with an area fill and an emphasised last point. */
-export function Sparkline({ points, width = 132, height = 40 }: { points: SeriesPoint[]; width?: number; height?: number }) {
+export function Sparkline({ points, width = 132, height = 40 }: { points: Array<Pick<SeriesPoint, 'date' | 'e1rm'>>; width?: number; height?: number }) {
   if (points.length < 2)
     return (
       <svg className="spark" width={width} height={height} aria-hidden="true">

@@ -6,9 +6,10 @@ import { lastVisit, programsOf, visits30, type TrainerData } from './data';
 import { Avatar, Confirm, Empty, VisitGrid, ago, fmtDate } from './common';
 import { ProgressView } from './Progress';
 import { HistoryList } from './History';
+import { BodyView } from './Body';
 import { Journal } from './Journal';
 
-type Tab = 'overview' | 'progress' | 'history' | 'programs';
+type Tab = 'overview' | 'progress' | 'history' | 'body' | 'programs';
 
 export function ClientCard({
   data,
@@ -97,6 +98,7 @@ export function ClientCard({
             ['overview', 'Обзор'],
             ['progress', 'Прогресс'],
             ['history', 'История'],
+            ['body', 'Замеры'],
             ['programs', 'Программы'],
           ] as [Tab, string][]
         ).map(([k, label]) => (
@@ -123,6 +125,7 @@ export function ClientCard({
           {loading ? <div className="loader-block"><span className="loader" /></div> : <HistoryList sessions={sessions} programs={data.programs.filter((p) => p.clientId === clientId)} exercises={data.exercises} />}
         </>
       )}
+      {tab === 'body' && <BodyView clientId={clientId} />}
       {tab === 'programs' && (
         <ClientPrograms
           data={data}

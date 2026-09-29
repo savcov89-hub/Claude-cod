@@ -7,9 +7,10 @@ import type { Coach, Profile, Program, Session } from '../types';
 import { Journal } from './Journal';
 import { ProgressView } from './Progress';
 import { HistoryList } from './History';
+import { BodyView } from './Body';
 import { Empty, VisitGrid, fmtDate } from './common';
 
-type Tab = 'workout' | 'progress' | 'history';
+type Tab = 'workout' | 'progress' | 'history' | 'body';
 
 export function ClientApp({ profile, header }: { profile: Profile; header: React.ReactNode }) {
   const [coaches, setCoaches] = useState<Coach[]>([]);
@@ -132,6 +133,7 @@ export function ClientApp({ profile, header }: { profile: Profile; header: React
                   ['workout', 'Тренировка'],
                   ['progress', 'Прогресс'],
                   ['history', 'История'],
+                  ['body', 'Замеры'],
                 ] as [Tab, string][]
               ).map(([k, label]) => (
                 <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
@@ -183,6 +185,7 @@ export function ClientApp({ profile, header }: { profile: Profile; header: React
             )}
             {tab === 'progress' && <ProgressView sessions={sessions} />}
             {tab === 'history' && <HistoryList sessions={sessions} programs={programs} />}
+            {tab === 'body' && <BodyView />}
           </>
         )}
       </main>

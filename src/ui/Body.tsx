@@ -1,0 +1,452 @@
+import { useCallback, useEffect, useState } from 'react';
+import { Ruler, Trash2 } from 'lucide-react';
+import { ACTIVITY, calories, latest, navyBodyFat, weeklyWeights, type BodyEntry, type BodyProfile } from '../body';
+import { fmtKg } from '../analytics';
+import { localDate } from '../clock';
+import { api, readError } from '../transport';
+import { Confirm, Sparkline, fmtDate } from './common';
+
+const num = (v: string) => {
+  const n = Number(v.replace(',', '.').trim());
+  return v.trim() && Number.isFinite(n) ? n : null;
+};
+const signed = (d: number) => {
+  const r = Math.round(d * 10) / 10;
+  return (r > 0 ? '+' : r < 0 ? '−' : '') + fmtKg(Math.abs(r));
+};
+const str = (v?: number | null) => (typeof v === 'number' ? String(v).replace('.', ',') : '');
+
+/** Daily weighing, tape measurements, body fat (US Navy) and calories. `clientId` for the trainer, none for the client. */
+export function BodyView({ clientId }: { clientId?: string }) {
+  const [entries, setEntries] = useState<BodyEntry[]>([]);
+  const [profile, setProfile] = useState<BodyProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  const [editProfile, setEditProfile] = useState(false);
+  const [measuring, setMeasuring] = useState(false);
+  const today = localDate();
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api.get('/api/body' + (clientId ? '?clientId=' + encodeURIComponent(clientId) : ''));
+      setEntries(r.data.entries);
+      setProfile(r.data.profile);
+      setErr('');
+    } catch (e) {
+      setErr(readError(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [clientId]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async (patch: Partial<BodyEntry> & { date: string }) => {
+    await api.post('/api/body', { ...(clientId ? { clientId } : {}), ...patch });
+    await load();
+  };
+
+  if (loading) return <div className="loader-block"><span className="loader" /></div>;
+
+  const last = latest(entries);
+  const bodyFat = profile ? navyBodyFat(profile, { waist: last.waist?.value, neck: last.neck?.value, hips: last.hips?.value }) : null;
+  const measuredAt = [last.waist?.date, last.neck?.date, profile?.sex === 'f' ? last.hips?.date : undefined].filter(Boolean).sort().pop();
+  const week = weeklyWeights(entries, today);
+  const weight = week.current ?? last.weight?.value ?? null;
+  const energy = profile && weight ? calories(profile, weight, bodyFat) : null;
+  const weights = entries.filter((e) => typeof e.weight === 'number').slice(-60);
+
+  return (
+    <div className="body-view">
+      {err && <div className="alert">{err}</div>}
+
+      <WeightCard entries={entries} today={today} onSave={(date, w) => save({ date, weight: w })} />
+
+      <section className="block">
+        <div className="block-head">
+          <h4>Вес</h4>
+          {week.current !== null && (
+            <span className="muted small">
+              среднее за 7 дней <b className="num">{fmtKg(week.current)} кг</b>
+              {week.previous !== null && (
+                <span className={'num ' + (week.current < week.previous ? 'tone-good' : week.current > week.previous ? 'tone-warn' : '')}>
+                  {' '}
+                  ({signed(week.current - week.previous)} за неделю)
+                </span>
+              )}
+            </span>
+          )}
+        </div>
+        {weights.length > 1 ? (
+          <div className="body-spark">
+            <Sparkline points={weights.map((e) => ({ date: e.date, e1rm: e.weight as number }))} width={320} height={64} />
+            <div className="muted small row between">
+              <span>{fmtDate(weights[0].date)}</span>
+              <span>{fmtDate(weights[weights.length - 1].date)}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="muted small">Взвешивайтесь каждое утро натощак: по среднему за неделю видно настоящую динамику, а не колебания воды.</p>
+        )}
+      </section>
+
+      <section className="block">
+        <div className="block-head">
+          <h4>Процент жира</h4>
+          <button className="btn btn-sm" onClick={() => setMeasuring(!measuring)}>
+            <Ruler size={15} /> Замеры
+          </button>
+        </div>
+        {!profile ? (
+          <p className="muted small">Заполните данные для расчёта ниже.</p>
+        ) : bodyFat !== null ? (
+          <div className="stat-row">
+            <div>
+              <strong className="big num">{fmtKg(bodyFat)} %</strong>
+              <span className="muted small">по формуле ВМС США{measuredAt ? ' · замеры ' + fmtDate(measuredAt) : ''}</span>
+            </div>
+            {weight && (
+              <div>
+                <strong className="num">{fmtKg(Math.round(weight * (1 - bodyFat / 100) * 10) / 10)} кг</strong>
+                <span className="muted small">сухая масса</span>
+                <strong className="num">{fmtKg(Math.round(((weight * bodyFat) / 100) * 10) / 10)} кг</strong>
+                <span className="muted small">жир</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="muted small">
+            Нужны обхваты шеи и талии{profile.sex === 'f' ? ' и бёдер' : ''}. Нажмите «Замеры».
+          </p>
+        )}
+        {measuring && profile && (
+          <MeasureForm
+            sex={profile.sex}
+            initial={last}
+            today={today}
+            onCancel={() => setMeasuring(false)}
+            onSave={async (patch) => {
+              await save(patch);
+              setMeasuring(false);
+            }}
+          />
+        )}
+      </section>
+
+      {energy && weight && (
+        <section className="block">
+          <div className="block-head">
+            <h4>Калорийность в день</h4>
+          </div>
+          <div className="kcal">
+            <div>
+              <strong className="num">{energy.cut}</strong>
+              <span className="muted small">снижение веса (−20&nbsp;%)</span>
+            </div>
+            <div className="on">
+              <strong className="num">{energy.maintain}</strong>
+              <span className="muted small">поддержание</span>
+            </div>
+            <div>
+              <strong className="num">{energy.gain}</strong>
+              <span className="muted small">набор (+10&nbsp;%)</span>
+            </div>
+          </div>
+          <p className="muted small">
+            Белок {energy.protein[0]}–{energy.protein[1]} г (1,6–2,2 г на кг). Обмен в покое {energy.bmr} ккал, {energy.method}, вес{' '}
+            {fmtKg(weight)} кг{week.current !== null ? ' (среднее за неделю)' : ''}. Это стартовая точка: сверяйте с динамикой веса за 2–3 недели.
+          </p>
+        </section>
+      )}
+
+      <section className="block">
+        <div className="block-head">
+          <h4>Данные для расчёта</h4>
+          {profile && !editProfile && (
+            <button className="btn btn-sm" onClick={() => setEditProfile(true)}>
+              Изменить
+            </button>
+          )}
+        </div>
+        {profile && !editProfile ? (
+          <p className="muted small">
+            {profile.sex === 'm' ? 'Мужчина' : 'Женщина'} · {profile.heightCm} см · {new Date().getFullYear() - profile.birthYear} лет ·{' '}
+            {ACTIVITY.find((a) => a.id === profile.activity)?.label.toLowerCase()}
+          </p>
+        ) : (
+          <ProfileForm
+            initial={profile}
+            onCancel={profile ? () => setEditProfile(false) : undefined}
+            onSave={async (p) => {
+              await api.post('/api/body/profile', { ...(clientId ? { clientId } : {}), ...p });
+              setEditProfile(false);
+              await load();
+            }}
+          />
+        )}
+      </section>
+
+      {entries.length > 0 && <EntryList entries={entries} profile={profile} onDelete={(date) => save({ date, weight: null, waist: null, neck: null, hips: null })} />}
+    </div>
+  );
+}
+
+function WeightCard({ entries, today, onSave }: { entries: BodyEntry[]; today: string; onSave: (date: string, w: number) => Promise<void> }) {
+  const [date, setDate] = useState(today);
+  const existing = entries.find((e) => e.date === date)?.weight;
+  const [value, setValue] = useState(str(existing));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [saved, setSaved] = useState(false);
+  useEffect(() => setValue(str(entries.find((e) => e.date === date)?.weight)), [date, entries]);
+  const submit = async () => {
+    const w = num(value);
+    if (w === null || w < 20 || w > 400) return setErr('Введите вес в кг, например 82,4.');
+    setBusy(true);
+    try {
+      await onSave(date, w);
+      setErr('');
+      setSaved(true);
+      (document.activeElement as HTMLElement | null)?.blur();
+    } catch (e) {
+      setErr(readError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="block weigh">
+      <label className="field">
+        <span>Вес{date === today ? ' сегодня' : ''}, кг</span>
+        <div className="weigh-row">
+          <input
+            id="body-weight"
+            inputMode="decimal"
+            placeholder="82,4"
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              setSaved(false);
+            }}
+            onKeyDown={(e) => e.key === 'Enter' && void submit()}
+          />
+          <button className="btn btn-primary" disabled={busy} onClick={submit}>
+            {busy ? '…' : typeof existing === 'number' ? 'Обновить' : 'Записать'}
+          </button>
+        </div>
+      </label>
+      <label className="weigh-date muted small">
+        Дата
+        <input type="date" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value)} />
+      </label>
+      {err && <div className="alert">{err}</div>}
+      {saved && !err && <p className="tone-good small">Записано.</p>}
+    </section>
+  );
+}
+
+function MeasureForm({
+  sex,
+  initial,
+  today,
+  onSave,
+  onCancel,
+}: {
+  sex: 'm' | 'f';
+  initial: ReturnType<typeof latest>;
+  today: string;
+  onSave: (patch: BodyEntry) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [date, setDate] = useState(today);
+  const [waist, setWaist] = useState(str(initial.waist?.value));
+  const [neck, setNeck] = useState(str(initial.neck?.value));
+  const [hips, setHips] = useState(str(initial.hips?.value));
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    const w = num(waist);
+    const n = num(neck);
+    const h = num(hips);
+    if (w === null || n === null || (sex === 'f' && h === null)) return setErr('Заполните все обхваты в сантиметрах.');
+    setBusy(true);
+    try {
+      await onSave({ date, waist: w, neck: n, ...(sex === 'f' ? { hips: h } : {}) });
+    } catch (e) {
+      setErr(readError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="measure-form">
+      <div className="measure-grid">
+        <label className="field">
+          <span>Талия, см</span>
+          <input id="body-waist" inputMode="decimal" value={waist} onChange={(e) => setWaist(e.target.value)} placeholder="84" />
+        </label>
+        <label className="field">
+          <span>Шея, см</span>
+          <input id="body-neck" inputMode="decimal" value={neck} onChange={(e) => setNeck(e.target.value)} placeholder="38" />
+        </label>
+        {sex === 'f' && (
+          <label className="field">
+            <span>Бёдра, см</span>
+            <input id="body-hips" inputMode="decimal" value={hips} onChange={(e) => setHips(e.target.value)} placeholder="98" />
+          </label>
+        )}
+        <label className="field">
+          <span>Дата</span>
+          <input type="date" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value)} />
+        </label>
+      </div>
+      <p className="muted small">
+        Сантиметровой лентой, утром, без втягивания. Шея — чуть ниже кадыка.{' '}
+        {sex === 'm' ? 'Талия — на уровне пупка.' : 'Талия — в самом узком месте, бёдра — по самой широкой части ягодиц.'}
+      </p>
+      {err && <div className="alert">{err}</div>}
+      <div className="row gap">
+        <button className="btn" onClick={onCancel} disabled={busy}>
+          Отмена
+        </button>
+        <button className="btn btn-primary" onClick={submit} disabled={busy}>
+          {busy ? 'Сохраняем…' : 'Сохранить замеры'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ProfileForm({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: BodyProfile | null;
+  onSave: (p: BodyProfile) => Promise<void>;
+  onCancel?: () => void;
+}) {
+  const [sex, setSex] = useState<'m' | 'f' | ''>(initial?.sex || '');
+  const [height, setHeight] = useState(str(initial?.heightCm));
+  const [birthYear, setBirthYear] = useState(initial ? String(initial.birthYear) : '');
+  const [activity, setActivity] = useState(initial?.activity || 'light');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    const h = num(height);
+    const y = Number(birthYear);
+    if (!sex || h === null || !Number.isInteger(y)) return setErr('Укажите пол, рост и год рождения.');
+    setBusy(true);
+    try {
+      await onSave({ sex, heightCm: h, birthYear: y, activity });
+    } catch (e) {
+      setErr(readError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="measure-form">
+      <div className="chips">
+        {(
+          [
+            ['m', 'Мужчина'],
+            ['f', 'Женщина'],
+          ] as const
+        ).map(([k, label]) => (
+          <button key={k} className={'filter' + (sex === k ? ' on' : '')} onClick={() => setSex(k)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="measure-grid">
+        <label className="field">
+          <span>Рост, см</span>
+          <input id="body-height" inputMode="decimal" value={height} onChange={(e) => setHeight(e.target.value)} placeholder="178" />
+        </label>
+        <label className="field">
+          <span>Год рождения</span>
+          <input id="body-year" inputMode="numeric" value={birthYear} onChange={(e) => setBirthYear(e.target.value)} placeholder="1990" />
+        </label>
+      </div>
+      <label className="field">
+        <span>Активность</span>
+        <select value={activity} onChange={(e) => setActivity(e.target.value)}>
+          {ACTIVITY.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {err && <div className="alert">{err}</div>}
+      <div className="row gap">
+        {onCancel && (
+          <button className="btn" onClick={onCancel} disabled={busy}>
+            Отмена
+          </button>
+        )}
+        <button className="btn btn-primary" onClick={submit} disabled={busy}>
+          {busy ? 'Сохраняем…' : 'Сохранить'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EntryList({ entries, profile, onDelete }: { entries: BodyEntry[]; profile: BodyProfile | null; onDelete: (date: string) => Promise<void> }) {
+  const [all, setAll] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const list = [...entries].reverse();
+  const shown = all ? list : list.slice(0, 10);
+  return (
+    <section className="block">
+      <div className="block-head">
+        <h4>Записи</h4>
+      </div>
+      <table className="session-table body-table">
+        <tbody>
+          {shown.map((e) => {
+            const tape = [e.waist && 'талия ' + str(e.waist), e.neck && 'шея ' + str(e.neck), e.hips && 'бёдра ' + str(e.hips)].filter(Boolean).join(' · ');
+            const bf = profile && e.waist && e.neck ? navyBodyFat(profile, e) : null;
+            return deleting === e.date ? (
+              <tr key={e.date}>
+                <td colSpan={3}>
+                  <Confirm
+                    text={'Удалить запись за ' + fmtDate(e.date) + '?'}
+                    confirmLabel="Удалить"
+                    onConfirm={async () => {
+                      await onDelete(e.date);
+                      setDeleting(null);
+                    }}
+                    onCancel={() => setDeleting(null)}
+                  />
+                </td>
+              </tr>
+            ) : (
+              <tr key={e.date}>
+                <td className="muted">{fmtDate(e.date)}</td>
+                <td>
+                  {typeof e.weight === 'number' && <b className="num">{fmtKg(e.weight)} кг</b>}
+                  {tape && <span className="muted small"> {tape}</span>}
+                  {bf !== null && <span className="small"> · {fmtKg(bf)} %</span>}
+                </td>
+                <td>
+                  <button className="icon-btn sm" aria-label={'Удалить запись за ' + fmtDate(e.date)} onClick={() => setDeleting(e.date)}>
+                    <Trash2 size={14} />
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {list.length > 10 && (
+        <button className="link-btn" onClick={() => setAll(!all)}>
+          {all ? 'Свернуть' : 'Показать все (' + list.length + ')'}
+        </button>
+      )}
+    </section>
+  );
+}

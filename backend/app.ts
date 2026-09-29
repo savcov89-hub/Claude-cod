@@ -164,6 +164,29 @@ const lastResultTable = (clientId: string, exerciseId: string) =>
 const draftTable = (clientId: string, programId: string, dayId: string) =>
   'draft:' + tableKey(clientId) + ':' + tableKey(programId) + ':' + tableKey(dayId);
 
+/** Body measurements of one client key, one row per date. */
+const bodyTable = (clientId: string) => 'body:' + tableKey(clientId);
+const bodyProfileTable = (clientId: string) => 'body_profile:' + tableKey(clientId);
+const BODY_FIELDS = { weight: [20, 400], waist: [40, 250], neck: [20, 70], hips: [50, 250] } as const;
+type BodyField = keyof typeof BODY_FIELDS;
+interface BodyEntry {
+  date: string;
+  weight?: number | null;
+  waist?: number | null;
+  neck?: number | null;
+  hips?: number | null;
+  updatedAt: string;
+  recordedByRole?: Role;
+}
+const ACTIVITY = ['low', 'light', 'moderate', 'high', 'extreme'];
+interface BodyProfile {
+  sex: 'm' | 'f';
+  heightCm: number;
+  birthYear: number;
+  activity: string;
+  updatedAt?: string;
+}
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const cleanNumber = (value: unknown, fallback = 0) => {
   const n = Number(value);
@@ -400,6 +423,24 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
     return profile?.role === 'trainer' ? profile : null;
   };
 
+  /** Client keys whose measurements the caller may see and edit: the trainer's client, or the client's own keys. */
+  async function bodyKeys(ctx: Ctx, clientId: unknown) {
+    const userId = ctx.user!.userId;
+    const profile = await getProfile(userId);
+    if (profile?.role === 'trainer') {
+      const id = text(clientId, 200);
+      return id && (await findClient(userId, id)) ? { role: profile.role, keys: [id] } : null;
+    }
+    if (profile?.role !== 'client') return null;
+    const keys = (await keysOf(userId)).map((k) => k.clientId);
+    return { role: profile.role, keys: keys.length ? Array.from(new Set(keys)) : [userId] };
+  }
+  const bodyNumber = (v: unknown, [lo, hi]: readonly [number, number]) => {
+    if (v === null || v === '') return null;
+    const n = Math.round(Number(v) * 10) / 10;
+    return Number.isFinite(n) && n >= lo && n <= hi ? n : undefined;
+  };
+
   return router({
     'GET /api/_healthcheck': [async () => json({ message: 'Success' })],
 
@@ -626,6 +667,86 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         const lists = await Promise.all(tables.map((k) => listAll<SessionRecord>(sessionsTable(k), 400)));
         const sessions = lists.flat().sort((a, b) => b.completedAt.localeCompare(a.completedAt));
         return json({ sessions });
+      },
+    ],
+
+    'GET /api/body': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const access = await bodyKeys(ctx, ctx.query.clientId);
+        if (!access) return error('Нет доступа.', 403);
+        // A client with several trainers has a copy per trainer; the latest edit of a date wins.
+        const byDate = new Map<string, BodyEntry>();
+        for (const key of access.keys)
+          for (const e of await listAll<BodyEntry>(bodyTable(key), 2000)) {
+            const cur = byDate.get(e.date);
+            if (!cur || e.updatedAt > cur.updatedAt) byDate.set(e.date, e);
+          }
+        const entries = [...byDate.values()]
+          .filter((e) => (Object.keys(BODY_FIELDS) as BodyField[]).some((f) => typeof e[f] === 'number'))
+          .map(({ id: _id, ...e }: BodyEntry & { id?: string }) => e)
+          .sort((a, b) => a.date.localeCompare(b.date));
+        let profile: BodyProfile | null = null;
+        for (const key of access.keys) {
+          const p = await first<BodyProfile>(bodyProfileTable(key));
+          if (p && (!profile || (p.updatedAt || '') > (profile.updatedAt || ''))) profile = p;
+        }
+        if (profile) {
+          const { id: _id, ...rest } = profile as BodyProfile & { id?: string };
+          profile = rest;
+        }
+        return json({ profile, entries });
+      },
+    ],
+
+    'POST /api/body': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const b = ctx.body || {};
+        const access = await bodyKeys(ctx, b.clientId);
+        if (!access) return error('Нет доступа.', 403);
+        if (!DATE_RE.test(b.date || '')) return error('Укажите дату.', 400);
+        const patch: Partial<Record<BodyField, number | null>> = {};
+        for (const f of Object.keys(BODY_FIELDS) as BodyField[]) {
+          if (b[f] === undefined) continue;
+          const v = bodyNumber(b[f], BODY_FIELDS[f]);
+          if (v === undefined) return error('Проверьте значения: вес 20–400 кг, талия 40–250, шея 20–70, бёдра 50–250 см.', 400);
+          patch[f] = v;
+        }
+        const updatedAt = nowIso();
+        let entry: BodyEntry | null = null;
+        for (const key of access.keys) {
+          const table = bodyTable(key);
+          const current = (await listAll<BodyEntry>(table, 2000)).find((e) => e.date === b.date);
+          if (current) {
+            const { id, ...record } = current;
+            entry = { ...record, ...patch, updatedAt, recordedByRole: access.role };
+            const [ok] = await db.update(table, [{ id, record: entry }]);
+            if (!ok) return error('Не удалось сохранить.', 500);
+          } else {
+            entry = { date: b.date, ...patch, updatedAt, recordedByRole: access.role };
+            const [id] = await db.add(table, [entry]);
+            if (!id) return error('Не удалось сохранить.', 500);
+          }
+        }
+        return json({ entry });
+      },
+    ],
+
+    'POST /api/body/profile': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const b = ctx.body || {};
+        const access = await bodyKeys(ctx, b.clientId);
+        if (!access) return error('Нет доступа.', 403);
+        const year = Number(nowIso().slice(0, 4));
+        const heightCm = bodyNumber(b.heightCm, [100, 250]);
+        const birthYear = Number(b.birthYear);
+        if ((b.sex !== 'm' && b.sex !== 'f') || !heightCm || !Number.isInteger(birthYear) || birthYear < year - 100 || birthYear > year - 10 || !ACTIVITY.includes(b.activity))
+          return error('Укажите пол, рост 100–250 см, год рождения и активность.', 400);
+        const profile: BodyProfile = { sex: b.sex, heightCm, birthYear, activity: b.activity, updatedAt: nowIso() };
+        for (const key of access.keys) await upsertSingle(bodyProfileTable(key), profile);
+        return json({ profile });
       },
     ],
 
