@@ -727,7 +727,13 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         if (!name) return error('Введите название программы.', 400);
         const days = await cleanDays(trainerId, ctx.body?.days);
         if (typeof days === 'string') return error(days, 400);
-        const nextDayId = days.some((d) => d.id === program.nextDayId) ? program.nextDayId : days[0].id;
+        let nextDayId = days.some((d) => d.id === program.nextDayId) ? program.nextDayId : days[0].id;
+        // The next workout wrapped round to the first day after the last one was done; a workout added
+        // right after that last day comes next instead (e.g. a program built one day at a time).
+        const lastIdx = days.findIndex((d) => d.id === program.days[program.days.length - 1]?.id);
+        const after = lastIdx >= 0 ? days[lastIdx + 1] : undefined;
+        if (program.lastCompletedAt && program.nextDayId === program.days[0]?.id && after && !program.days.some((d) => d.id === after.id))
+          nextDayId = after.id;
         const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
         const [ok] = await db.update(programsTable(trainerId), [
           { id: programId, record: { ...rest, name, days, nextDayId, updatedAt: nowIso() } },
