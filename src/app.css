@@ -2532,15 +2532,21 @@ h2 {
   gap: 8px;
   flex-wrap: wrap;
 }
-.weigh-row {
-  display: flex;
+.morning-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
-.weigh-row input {
-  flex: 1;
+.morning-grid input {
   min-width: 0;
   font-size: 22px;
   font-weight: 600;
+}
+.weigh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .weigh-date {
   display: flex;

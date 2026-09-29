@@ -119,7 +119,18 @@ export const TrendChip = ({ trend, extra }: { trend: Trend; extra?: string }) =>
 );
 
 /** e1RM line with an area fill and an emphasised last point. */
-export function Sparkline({ points, width = 132, height = 40 }: { points: Array<Pick<SeriesPoint, 'date' | 'e1rm'>>; width?: number; height?: number }) {
+/** `fromZero` draws the scale from 0 (counts like steps), otherwise from the lowest point. */
+export function Sparkline({
+  points,
+  width = 132,
+  height = 40,
+  fromZero = false,
+}: {
+  points: Array<Pick<SeriesPoint, 'date' | 'e1rm'>>;
+  width?: number;
+  height?: number;
+  fromZero?: boolean;
+}) {
   if (points.length < 2)
     return (
       <svg className="spark" width={width} height={height} aria-hidden="true">
@@ -131,7 +142,7 @@ export function Sparkline({ points, width = 132, height = 40 }: { points: Array<
   const ys = points.map((p) => p.e1rm);
   const x0 = Math.min(...xs);
   const x1 = Math.max(...xs);
-  const lo = Math.min(...ys);
+  const lo = fromZero ? 0 : Math.min(...ys);
   const hi = Math.max(...ys);
   const span = hi - lo || 1;
   const px = (x: number) => pad + ((x - x0) / (x1 - x0 || 1)) * (width - pad * 2);

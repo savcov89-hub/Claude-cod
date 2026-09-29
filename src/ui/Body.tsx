@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Ruler, Trash2 } from 'lucide-react';
-import { ACTIVITY, calories, latest, navyBodyFat, weeklyWeights, type BodyEntry, type BodyProfile } from '../body';
+import { ACTIVITY, calories, latest, navyBodyFat, weeklyAverage, type BodyEntry, type BodyProfile } from '../body';
 import { fmtKg } from '../analytics';
 import { localDate } from '../clock';
 import { api, readError } from '../transport';
@@ -13,6 +13,13 @@ const num = (v: string) => {
 const signed = (d: number) => {
   const r = Math.round(d * 10) / 10;
   return (r > 0 ? '+' : r < 0 ? '−' : '') + fmtKg(Math.abs(r));
+};
+const fmtSteps = (n: number) => Math.round(n).toLocaleString('ru-RU');
+/** The day before `date` (yyyy-mm-dd): steps are entered the next morning. */
+const dayBefore = (date: string) => {
+  const d = new Date(date + 'T12:00:00');
+  d.setDate(d.getDate() - 1);
+  return localDate(d);
 };
 const str = (v?: number | null) => (typeof v === 'number' ? String(v).replace('.', ',') : '');
 
@@ -52,16 +59,27 @@ export function BodyView({ clientId }: { clientId?: string }) {
   const last = latest(entries);
   const bodyFat = profile ? navyBodyFat(profile, { waist: last.waist?.value, neck: last.neck?.value, hips: last.hips?.value }) : null;
   const measuredAt = [last.waist?.date, last.neck?.date, profile?.sex === 'f' ? last.hips?.date : undefined].filter(Boolean).sort().pop();
-  const week = weeklyWeights(entries, today);
+  const week = weeklyAverage(entries, today);
+  const stepsWeek = weeklyAverage(entries, today, 'steps');
   const weight = week.current ?? last.weight?.value ?? null;
-  const energy = profile && weight ? calories(profile, weight, bodyFat) : null;
+  const level = ACTIVITY.find((a) => a.id === profile?.activity);
+  const energy = profile && weight ? calories(profile, weight, bodyFat, stepsWeek.current) : null;
   const weights = entries.filter((e) => typeof e.weight === 'number').slice(-60);
+  const steps = entries.filter((e) => typeof e.steps === 'number').slice(-60);
 
   return (
     <div className="body-view">
       {err && <div className="alert">{err}</div>}
 
-      <WeightCard entries={entries} today={today} onSave={(date, w) => save({ date, weight: w })} />
+      <MorningCard
+        entries={entries}
+        today={today}
+        onSave={async (date, w, st) => {
+          if (w !== null) await api.post('/api/body', { ...(clientId ? { clientId } : {}), date, weight: w });
+          if (st !== null) await api.post('/api/body', { ...(clientId ? { clientId } : {}), date: dayBefore(date), steps: st });
+          await load();
+        }}
+      />
 
       <section className="block">
         <div className="block-head">
@@ -88,6 +106,29 @@ export function BodyView({ clientId }: { clientId?: string }) {
           </div>
         ) : (
           <p className="muted small">Взвешивайтесь каждое утро натощак: по среднему за неделю видно настоящую динамику, а не колебания воды.</p>
+        )}
+      </section>
+
+      <section className="block">
+        <div className="block-head">
+          <h4>Шаги</h4>
+          {stepsWeek.current !== null && (
+            <span className="muted small">
+              в среднем за 7 дней <b className="num">{fmtSteps(stepsWeek.current)}</b> в день
+              {stepsWeek.previous !== null && <span className="num"> (неделей раньше {fmtSteps(stepsWeek.previous)})</span>}
+            </span>
+          )}
+        </div>
+        {steps.length > 1 ? (
+          <div className="body-spark">
+            <Sparkline points={steps.map((e) => ({ date: e.date, e1rm: e.steps as number }))} width={320} height={64} fromZero />
+            <div className="muted small row between">
+              <span>{fmtDate(steps[0].date)}</span>
+              <span>{fmtDate(steps[steps.length - 1].date)}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="muted small">Утром вместе с весом запишите шаги за вчера (из «Здоровья» или часов). Калорийность будет считаться по реальной активности.</p>
         )}
       </section>
 
@@ -154,8 +195,19 @@ export function BodyView({ clientId }: { clientId?: string }) {
             </div>
           </div>
           <p className="muted small">
-            Белок {energy.protein[0]}–{energy.protein[1]} г (1,6–2,2 г на кг). Обмен в покое {energy.bmr} ккал, {energy.method}, вес{' '}
-            {fmtKg(weight)} кг{week.current !== null ? ' (среднее за неделю)' : ''}. Это стартовая точка: сверяйте с динамикой веса за 2–3 недели.
+            {stepsWeek.current !== null ? (
+              <>
+                Расход: обмен в покое {energy.bmr} × 1,2 + шаги ≈{energy.walk} ккал ({fmtSteps(stepsWeek.current)} в день) + тренировки ≈
+                {energy.train} ккал ({level?.label.toLowerCase()}). Активность ×{fmtKg(energy.factor)}.
+              </>
+            ) : (
+              <>
+                Шаги не записаны, поэтому активность только по тренировкам: ×{fmtKg(energy.factor)} ({level?.label.toLowerCase()}). Запишите шаги —
+                расчёт станет точнее.
+              </>
+            )}{' '}
+            Обмен {energy.method}, вес {fmtKg(weight)} кг{week.current !== null ? ' (среднее за неделю)' : ''}. Белок {energy.protein[0]}–
+            {energy.protein[1]} г (1,6–2,2 г на кг). Это стартовая точка: сверяйте с динамикой веса за 2–3 недели.
           </p>
         </section>
       )}
@@ -187,25 +239,44 @@ export function BodyView({ clientId }: { clientId?: string }) {
         )}
       </section>
 
-      {entries.length > 0 && <EntryList entries={entries} profile={profile} onDelete={(date) => save({ date, weight: null, waist: null, neck: null, hips: null })} />}
+      {entries.length > 0 && <EntryList entries={entries} profile={profile} onDelete={(date) => save({ date, weight: null, waist: null, neck: null, hips: null, steps: null })} />}
     </div>
   );
 }
 
-function WeightCard({ entries, today, onSave }: { entries: BodyEntry[]; today: string; onSave: (date: string, w: number) => Promise<void> }) {
+/** Morning entry: today's weight and yesterday's steps together. */
+function MorningCard({
+  entries,
+  today,
+  onSave,
+}: {
+  entries: BodyEntry[];
+  today: string;
+  onSave: (date: string, weight: number | null, steps: number | null) => Promise<void>;
+}) {
   const [date, setDate] = useState(today);
-  const existing = entries.find((e) => e.date === date)?.weight;
-  const [value, setValue] = useState(str(existing));
+  const stepsDate = dayBefore(date);
+  const hadWeight = entries.find((e) => e.date === date)?.weight;
+  const hadSteps = entries.find((e) => e.date === stepsDate)?.steps;
+  const [weight, setWeight] = useState(str(hadWeight));
+  const [steps, setSteps] = useState(typeof hadSteps === 'number' ? String(hadSteps) : '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [saved, setSaved] = useState(false);
-  useEffect(() => setValue(str(entries.find((e) => e.date === date)?.weight)), [date, entries]);
+  useEffect(() => {
+    setWeight(str(entries.find((e) => e.date === date)?.weight));
+    const st = entries.find((e) => e.date === dayBefore(date))?.steps;
+    setSteps(typeof st === 'number' ? String(st) : '');
+  }, [date, entries]);
   const submit = async () => {
-    const w = num(value);
-    if (w === null || w < 20 || w > 400) return setErr('Введите вес в кг, например 82,4.');
+    const w = num(weight);
+    const st = steps.trim() ? Number(steps.replace(/[\s\u00a0]/g, '')) : null;
+    if (weight.trim() && (w === null || w < 20 || w > 400)) return setErr('Введите вес в кг, например 82,4.');
+    if (st !== null && (!Number.isFinite(st) || st < 0 || st > 100000)) return setErr('Шаги — число до 100 000.');
+    if (w === null && st === null) return setErr('Введите вес или шаги.');
     setBusy(true);
     try {
-      await onSave(date, w);
+      await onSave(date, w, st === null ? null : Math.round(st));
       setErr('');
       setSaved(true);
       (document.activeElement as HTMLElement | null)?.blur();
@@ -215,31 +286,47 @@ function WeightCard({ entries, today, onSave }: { entries: BodyEntry[]; today: s
       setBusy(false);
     }
   };
+  const edit = () => setSaved(false);
   return (
     <section className="block weigh">
-      <label className="field">
-        <span>Вес{date === today ? ' сегодня' : ''}, кг</span>
-        <div className="weigh-row">
+      <div className="morning-grid">
+        <label className="field">
+          <span>Вес{date === today ? ' сегодня' : ' ' + fmtDate(date)}, кг</span>
           <input
             id="body-weight"
             inputMode="decimal"
             placeholder="82,4"
-            value={value}
+            value={weight}
             onChange={(e) => {
-              setValue(e.target.value);
-              setSaved(false);
+              setWeight(e.target.value);
+              edit();
+            }}
+          />
+        </label>
+        <label className="field">
+          <span>Шаги {date === today ? 'вчера' : fmtDate(stepsDate)}</span>
+          <input
+            id="body-steps"
+            inputMode="numeric"
+            placeholder="10 000"
+            value={steps}
+            onChange={(e) => {
+              setSteps(e.target.value);
+              edit();
             }}
             onKeyDown={(e) => e.key === 'Enter' && void submit()}
           />
-          <button className="btn btn-primary" disabled={busy} onClick={submit}>
-            {busy ? '…' : typeof existing === 'number' ? 'Обновить' : 'Записать'}
-          </button>
-        </div>
-      </label>
-      <label className="weigh-date muted small">
-        Дата
-        <input type="date" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value)} />
-      </label>
+        </label>
+      </div>
+      <div className="weigh-row">
+        <label className="weigh-date muted small">
+          Дата
+          <input type="date" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value)} />
+        </label>
+        <button className="btn btn-primary" disabled={busy} onClick={submit}>
+          {busy ? 'Сохраняем…' : typeof hadWeight === 'number' || typeof hadSteps === 'number' ? 'Обновить' : 'Записать'}
+        </button>
+      </div>
       {err && <div className="alert">{err}</div>}
       {saved && !err && <p className="tone-good small">Записано.</p>}
     </section>
@@ -371,7 +458,7 @@ function ProfileForm({
         </label>
       </div>
       <label className="field">
-        <span>Активность</span>
+        <span>Тренировки</span>
         <select value={activity} onChange={(e) => setActivity(e.target.value)}>
           {ACTIVITY.map((a) => (
             <option key={a.id} value={a.id}>
@@ -429,6 +516,7 @@ function EntryList({ entries, profile, onDelete }: { entries: BodyEntry[]; profi
                 <td className="muted">{fmtDate(e.date)}</td>
                 <td>
                   {typeof e.weight === 'number' && <b className="num">{fmtKg(e.weight)} кг</b>}
+                  {typeof e.steps === 'number' && <span className="small"> {fmtSteps(e.steps)} шаг.</span>}
                   {tape && <span className="muted small"> {tape}</span>}
                   {bf !== null && <span className="small"> · {fmtKg(bf)} %</span>}
                 </td>
