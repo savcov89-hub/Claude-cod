@@ -787,6 +787,10 @@ function JournalBody({
             (swapping.list.find((x) => x.id === workout.day.exercises[swapping.ei].exerciseId)?.muscleGroup || '').split(' / ')[0]
           }
           autoFocusSearch={false}
+          allowCreate={workout.actorRole === 'trainer'}
+          onCreated={() => {
+            exerciseList = null;
+          }}
           onPick={(x) => void swapExercise(swapping.ei, x)}
           onClose={() => setSwapping(null)}
         />

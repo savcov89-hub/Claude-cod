@@ -14,7 +14,8 @@ import {
 } from '../trainingRules';
 import { fmtKg } from '../analytics';
 import type { ClientItem, Exercise, Program, ProgramDay, ProgramExercise } from '../types';
-import { Sheet } from './common';
+import { Sheet, searchKey } from './common';
+import { AddExercise } from './Library';
 
 export interface BuilderOptions {
   clientId?: string;
@@ -30,12 +31,14 @@ export function ProgramBuilder({
   options,
   onClose,
   onSaved,
+  onExerciseCreated,
 }: {
   clients: ClientItem[];
   exercises: Exercise[];
   options: BuilderOptions;
   onClose: () => void;
   onSaved: () => Promise<void>;
+  onExerciseCreated?: () => void;
 }) {
   const editing = !!options.program && !options.copy;
   const active = clients.filter((c) => !c.archived);
@@ -397,6 +400,8 @@ export function ProgramBuilder({
           exercises={exercises}
           exclude={day.exercises.filter((_, i) => i !== picker.replace).map((e) => e.exerciseId)}
           title={picker.replace === null ? 'Добавить упражнение' : 'Заменить упражнение'}
+          allowCreate
+          onCreated={onExerciseCreated}
           onPick={pick}
           onClose={() => setPicker(null)}
         />
@@ -411,6 +416,8 @@ export function ExercisePicker({
   title,
   initialGroup = '',
   autoFocusSearch = true,
+  allowCreate = false,
+  onCreated,
   onPick,
   onClose,
 }: {
@@ -420,11 +427,15 @@ export function ExercisePicker({
   /** Muscle group to show first, e.g. the group of the exercise being replaced. */
   initialGroup?: string;
   autoFocusSearch?: boolean;
+  /** Trainer only: offer to create an exercise that is not in the list. */
+  allowCreate?: boolean;
+  onCreated?: (e: Exercise) => void;
   onPick: (e: Exercise) => void;
   onClose: () => void;
 }) {
   const [q, setQ] = useState('');
   const [group, setGroup] = useState(initialGroup);
+  const [creating, setCreating] = useState(false);
   const filtersRef = useRef<HTMLDivElement>(null);
   // Show the preselected muscle group chip, which may sit far right in the row.
   useEffect(() => {
@@ -435,8 +446,20 @@ export function ExercisePicker({
     (e) =>
       !exclude.includes(e.id) &&
       (!group || e.muscleGroup.startsWith(group)) &&
-      (e.name + ' ' + e.muscleGroup + ' ' + e.equipment).toLowerCase().includes(q.trim().toLowerCase()),
+      searchKey(e.name + ' ' + e.muscleGroup + ' ' + e.equipment).includes(searchKey(q.trim())),
   );
+  if (creating)
+    return (
+      <AddExercise
+        initialName={q.trim()}
+        initialGroup={group}
+        onClose={() => setCreating(false)}
+        onCreated={(e) => {
+          onCreated?.(e);
+          onPick(e);
+        }}
+      />
+    );
   return (
     <Sheet title={title} onClose={onClose}>
       <label className="search">
@@ -466,6 +489,12 @@ export function ExercisePicker({
             <Plus size={18} />
           </button>
         ))}
+        {!list.length && <p className="muted small center-text">Ничего не найдено.</p>}
+        {allowCreate && (
+          <button className="btn btn-block create-ex" onClick={() => setCreating(true)}>
+            <Plus size={16} /> {q.trim() ? `Создать своё упражнение «${q.trim()}»` : 'Создать своё упражнение'}
+          </button>
+        )}
       </div>
     </Sheet>
   );

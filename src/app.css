@@ -2399,3 +2399,16 @@ h2 {
 .with-rir .set-labels > span:nth-last-child(2) {
   text-align: left;
 }
+
+/* Long search text must wrap, not widen the sheet. */
+.create-ex {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  line-height: 1.3;
+  padding-block: 10px;
+}
+.create-ex svg {
+  flex: none;
+}

@@ -13,6 +13,13 @@ export const fmtDateTime = (v: string) =>
 export const fmtSets = (sets: SetEntry[]) =>
   sets.length ? sets.map((s) => fmtKg(s.weight) + '×' + s.reps).join('  ') : '—';
 
+/** Search key that forgives case, ё/е and doubled letters («пуловер» finds «Пулловер»). */
+export const searchKey = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/(.)\1+/g, '$1');
+
 export function ago(iso?: string | null) {
   if (!iso) return 'нет тренировок';
   const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);

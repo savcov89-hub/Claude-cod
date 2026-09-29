@@ -74,6 +74,7 @@ export function TrainerApp({ header }: { profile: Profile; header: ReactNode }) 
                 clients={data.clients}
                 exercises={data.exercises}
                 options={builder!}
+                onExerciseCreated={() => void data.reload()}
                 onClose={() => setBuilder(null)}
                 onSaved={async () => {
                   setBuilder(null);

@@ -3,15 +3,15 @@ import { Plus, Search } from 'lucide-react';
 import { api, readError } from '../transport';
 import { exerciseRules, muscleNames } from '../trainingRules';
 import type { Exercise } from '../types';
-import { Sheet } from './common';
+import { Sheet, searchKey } from './common';
 
 export function Library({ exercises, onCreated }: { exercises: Exercise[]; onCreated: () => Promise<void> }) {
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const list = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    return exercises.filter((e) => !s || (e.name + ' ' + e.muscleGroup + ' ' + e.equipment).toLowerCase().includes(s));
+    const s = searchKey(q.trim());
+    return exercises.filter((e) => !s || searchKey(e.name + ' ' + e.muscleGroup + ' ' + e.equipment).includes(s));
   }, [exercises, q]);
   return (
     <div className="library">
@@ -57,19 +57,33 @@ export function Library({ exercises, onCreated }: { exercises: Exercise[]; onCre
   );
 }
 
-function AddExercise({ onClose, onCreated }: { onClose: () => void; onCreated: () => Promise<void> }) {
-  const [name, setName] = useState('');
-  const [group, setGroup] = useState('');
+export function AddExercise({
+  initialName = '',
+  initialGroup = '',
+  onClose,
+  onCreated,
+}: {
+  initialName?: string;
+  initialGroup?: string;
+  onClose: () => void;
+  onCreated: (exercise: Exercise) => void | Promise<void>;
+}) {
+  const [name, setName] = useState(initialName);
+  const [group, setGroup] = useState(initialGroup);
+  const [busy, setBusy] = useState(false);
   const [equipment, setEquipment] = useState('');
   const [muscles, setMuscles] = useState<string[]>([]);
   const [err, setErr] = useState('');
   const add = async () => {
     if (!name.trim()) return setErr('Введите название.');
+    setBusy(true);
     try {
-      await api.post('/api/exercises', { name, muscleGroup: group, equipment, muscles });
-      await onCreated();
+      const r = await api.post('/api/exercises', { name: name.trim(), muscleGroup: group.trim(), equipment: equipment.trim(), muscles });
+      await onCreated(r.data.exercise as Exercise);
     } catch (e) {
       setErr(readError(e));
+    } finally {
+      setBusy(false);
     }
   };
   return (
@@ -77,7 +91,7 @@ function AddExercise({ onClose, onCreated }: { onClose: () => void; onCreated: (
       {err && <div className="alert">{err}</div>}
       <label className="field">
         <span>Название</span>
-        <input id="ex-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Например, тяга Хаммера" />
+        <input id="ex-name" autoFocus={!initialName} value={name} onChange={(e) => setName(e.target.value)} placeholder="Например, тяга Хаммера" />
       </label>
       <div className="builder-grid">
         <label className="field">
@@ -103,8 +117,8 @@ function AddExercise({ onClose, onCreated }: { onClose: () => void; onCreated: (
           ))}
         </div>
       </div>
-      <button className="btn btn-primary btn-block" onClick={add}>
-        Добавить в базу
+      <button className="btn btn-primary btn-block" disabled={busy} onClick={add}>
+        {busy ? 'Сохраняем…' : 'Добавить в базу'}
       </button>
     </Sheet>
   );
