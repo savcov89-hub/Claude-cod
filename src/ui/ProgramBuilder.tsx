@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowLeft, ArrowUp, Plus, RefreshCw, Search, Trash2, Undo2 } from 'lucide-react';
 import { api, readError } from '../transport';
 import { templateDays, templates } from '../templates';
@@ -437,10 +437,13 @@ export function ExercisePicker({
   initialGroup = '',
   autoFocusSearch = true,
   allowCreate = false,
+  top,
   onCreated,
   onPick,
   onClose,
 }: {
+  /** Shown above the search, e.g. a way back to the planned exercise. */
+  top?: ReactNode;
   exercises: Exercise[];
   exclude: string[];
   title: string;
@@ -482,6 +485,7 @@ export function ExercisePicker({
     );
   return (
     <Sheet title={title} onClose={onClose}>
+      {top}
       <label className="search">
         <Search size={16} />
         <input id="picker-search" autoFocus={autoFocusSearch} placeholder="Поиск" value={q} onChange={(e) => setQ(e.target.value)} />

@@ -2318,13 +2318,13 @@ h2 {
   background: color-mix(in srgb, var(--bg) 16%, transparent);
 }
 
-/* One-off exercise swap in the journal. */
-.swap-btn {
+/* One-off exercise swap in the journal; actions live in the «⋯» menu. */
+.ex-menu-btn {
   position: relative;
   flex: none;
   color: var(--ink-2);
 }
-.swap-btn::after {
+.ex-menu-btn::after {
   content: '';
   position: absolute;
   inset: -6px -4px;
@@ -2392,4 +2392,91 @@ h2 {
 }
 .lib-edit {
   justify-self: end;
+}
+
+/* Exercise menu: replace, skip, order, remove. */
+.ex-menu {
+  display: grid;
+  gap: 6px;
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.menu-item svg {
+  flex: none;
+  color: var(--ink-2);
+}
+.menu-item small {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+.menu-item.danger,
+.menu-item.danger svg {
+  color: var(--bad);
+}
+.pick-original {
+  margin-bottom: 4px;
+  border-color: var(--accent);
+}
+.pick-original svg {
+  flex: none;
+  color: var(--accent);
+}
+.ex-skipped {
+  border-style: dashed;
+  border-color: var(--line);
+  opacity: 0.75;
+}
+.ex-skipped .ex-num {
+  background: var(--surface-2, var(--line));
+  color: var(--ink-2);
+}
+.ex-skipped .ex-c-name {
+  text-decoration: line-through;
+  font-weight: 500;
+}
+.order-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.order-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+.order-list .grow {
+  min-width: 0;
+}
+.order-list .icon-btn.sm {
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
+.order-list .icon-btn:disabled {
+  opacity: 0.3;
+}
+.order-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
 }

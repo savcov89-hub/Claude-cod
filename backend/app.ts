@@ -125,6 +125,8 @@ interface SessionExercise {
   exerciseName: string;
   /** Planned exercise this one stands in for during a single workout (the program is unchanged). */
   replaces?: string;
+  /** Left out of this workout only; done sets still count. */
+  skipped?: boolean;
   sets: SetEntry[];
 }
 interface SessionRecord {
@@ -288,8 +290,9 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
     for (const e of submitted) {
       const planned = day.exercises.find((p) => p.exerciseId === String(e.replaces || e.exerciseId))!;
       const id = String(e.exerciseId);
+      const skipped = e.skipped === true ? { skipped: true } : {};
       if (id === planned.exerciseId) {
-        out.push({ exerciseId: planned.exerciseId, exerciseName: planned.exerciseName, sets: e.sets });
+        out.push({ exerciseId: planned.exerciseId, exerciseName: planned.exerciseName, ...skipped, sets: e.sets });
         continue;
       }
       if (day.exercises.some((p) => p.exerciseId === id)) return null;
@@ -299,7 +302,7 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         known = custom.find((c) => c.id === id);
       }
       if (!known) return null;
-      out.push({ exerciseId: id, exerciseName: known.name, replaces: planned.exerciseId, sets: e.sets });
+      out.push({ exerciseId: id, exerciseName: known.name, replaces: planned.exerciseId, ...skipped, sets: e.sets });
     }
     if (new Set(out.map((e) => e.exerciseId)).size !== out.length) return null;
     return out;
@@ -741,6 +744,45 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
       },
     ],
 
+    /**
+     * Keeps the listed exercises of a day in the given order (a subset removes the rest) and
+     * applies the same to the client's open workout, so the gym journal carries on without a conflict.
+     */
+    'POST /api/programs/:programId/days/:dayId/exercises': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        if (!(await trainerOnly(ctx))) return error('Доступ только для тренера.', 403);
+        const trainerId = ctx.user!.userId;
+        const { programId, dayId } = ctx.params;
+        const [program] = await db.get<ProgramRecord>(programsTable(trainerId), [programId]);
+        if (!program || program.trainerId !== trainerId) return error('Программа не найдена.', 404);
+        const day = program.days.find((d) => d.id === dayId);
+        if (!day) return error('Тренировка не найдена.', 404);
+        const ids: string[] = Array.isArray(ctx.body?.exerciseIds) ? ctx.body.exerciseIds.map(String) : [];
+        if (!ids.length) return error('В тренировке должно остаться хотя бы одно упражнение.', 400);
+        if (new Set(ids).size !== ids.length || ids.some((id) => !day.exercises.some((e) => e.exerciseId === id)))
+          return error('Упражнения не совпадают с программой. Обновите журнал.', 400);
+        const draftT = draftTable(program.clientId, programId, dayId);
+        const draft = await first<DraftRecord>(draftT);
+        if (draft && !draft.closed && (draft.revision || null) !== (ctx.body?.baseRevision || null))
+          return error('Запись уже изменена на другом устройстве. Обновите журнал перед продолжением.', 409);
+        const exercises = ids.map((id) => day.exercises.find((e) => e.exerciseId === id)!);
+        const days = program.days.map((d) => (d.id === dayId ? { ...d, exercises } : d));
+        const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
+        const [ok] = await db.update(programsTable(trainerId), [{ id: programId, record: { ...rest, days, updatedAt: nowIso() } }]);
+        if (!ok) return error('Не удалось сохранить программу.', 500);
+        let revision = draft?.revision || null;
+        if (draft && !draft.closed) {
+          const { id: draftId, ...record } = draft;
+          const slot = (e: SessionExercise) => e.replaces || e.exerciseId;
+          const kept = ids.map((id) => draft.exercises.find((e) => slot(e) === id)).filter(Boolean) as SessionExercise[];
+          revision = randomId();
+          await db.update(draftT, [{ id: draftId, record: { ...record, exercises: kept, revision } }]);
+        }
+        return json({ saved: true, revision });
+      },
+    ],
+
     'POST /api/programs/:programId/archive': [
       requireAuth(),
       async (ctx: Ctx) => {
@@ -899,7 +941,7 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         const matched = await matchPlan(trainerId, day, submitted);
         if (!matched) return error('Состав тренировки не совпадает с программой.', 400);
         const performed = matched
-          .map((e) => ({ ...e, sets: e.sets.filter((s) => s.reps > 0).map(cleanSet) }))
+          .map(({ skipped: _skipped, ...e }) => ({ ...e, sets: e.sets.filter((s) => s.reps > 0).map(cleanSet) }))
           .filter((e) => e.sets.length > 0);
         if (!performed.length) return error('Нет выполненных подходов. Черновик сохранён — продолжите позже.', 400);
         // A workout left unfinished on an earlier day can be recorded with its own date (up to 14 days back).

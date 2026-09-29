@@ -75,6 +75,8 @@ export interface SessionExercise {
   exerciseName: string;
   /** Planned exercise this one replaces for a single workout. */
   replaces?: string;
+  /** Left out of this workout only; done sets still count. */
+  skipped?: boolean;
   sets: SetEntry[];
 }
 export interface Session {

@@ -9,8 +9,12 @@ interface Source {
   programId: string;
   dayId: string;
 }
-type Finisher = () => Promise<boolean>;
+type Finisher = (at?: string) => Promise<boolean>;
 const UNDO_MS = 5000;
+/** A workout with no new set for this long is recorded by itself (dated to its last set) and the client leaves. */
+const IDLE_MS = 60 * 60000;
+/** Someone checked in who has not done a single set leaves the gym list after this long. */
+const EMPTY_MS = 2 * 3600000;
 
 const defaultProgram = (list: Program[]) =>
   [...list].sort((a, b) => (b.lastCompletedAt || b.createdAt).localeCompare(a.lastCompletedAt || a.createdAt))[0];
@@ -36,6 +40,9 @@ export function Gym({
   const [slide, setSlide] = useState<{ id: string; from: 'left' | 'right' } | null>(null);
   // Clients who just pressed «Ушёл»: hidden at once, saved after UNDO_MS unless undone.
   const [going, setGoing] = useState<string[]>([]);
+  // Workouts closed automatically after a long pause, shown until dismissed.
+  const [autoClosed, setAutoClosed] = useState<Array<{ id: string; name: string; text: string }>>([]);
+  const autoTried = useRef(new Set<string>());
   const goingClients = useRef<Record<string, { client: ClientItem; timer: ReturnType<typeof setTimeout> }>>({});
   const shown = present.filter((c) => !going.includes(c.clientId));
   const activeId = shown.some((c) => c.clientId === active) ? active : shown[0]?.clientId || null;
@@ -86,6 +93,7 @@ export function Gym({
     setPicker(false);
     for (const id of ids) {
       const c = data.clients.find((x) => x.clientId === id);
+      autoTried.current.delete(id);
       if (c) await data.setPresence(c, true);
     }
     if (ids.length && !activeId) setActive(ids[0]);
@@ -138,6 +146,46 @@ export function Gym({
     document.addEventListener('visibilitychange', onHide);
     return () => document.removeEventListener('visibilitychange', onHide);
   }, []);
+
+  // Closes workouts left open: nobody pressed «Ушёл», e.g. the client just went home.
+  const autoCloseRef = useRef<() => void>(() => undefined);
+  autoCloseRef.current = () => {
+    const now = Date.now();
+    for (const c of shown) {
+      const id = c.clientId;
+      if (autoTried.current.has(id) || leaving === id) continue;
+      const a = activity[id];
+      const idle = a?.lastSetAt && a.done > 0 && now - a.lastSetAt > IDLE_MS;
+      const empty = !a?.done && !!c.checkedInAt && now - new Date(c.checkedInAt).getTime() > EMPTY_MS;
+      if (!idle && !empty) continue;
+      autoTried.current.add(id);
+      void (async () => {
+        const finish = finishers.current[id];
+        let recorded = false;
+        if (idle && finish && finished[id] === undefined) {
+          // Not saved (e.g. changed on another device): leave the client in the gym for the trainer to decide.
+          if (!(await finish(new Date(a!.lastSetAt!).toISOString()))) return;
+          recorded = true;
+        }
+        await data.setPresence(c, false);
+        setFinished((f) => {
+          const { [id]: _drop, ...rest } = f;
+          return rest;
+        });
+        const text = recorded
+          ? 'тренировка записана сама: час без новых подходов'
+          : idle
+            ? 'уход отмечен: час без новых подходов'
+            : 'уход отмечен: 2 часа без подходов';
+        setAutoClosed((list) => [...list, { id, name: c.clientName, text }]);
+      })();
+    }
+  };
+  useEffect(() => {
+    autoCloseRef.current();
+    const t = window.setInterval(() => autoCloseRef.current(), 60000);
+    return () => clearInterval(t);
+  }, [activity, presentKey]);
 
   const nextWorkout = (clientId: string) => {
     setFinished((f) => {
@@ -193,6 +241,31 @@ export function Gym({
     if (Math.abs(dx) >= 60 && Math.abs(dx) > 2 * Math.abs(dy) && Date.now() - start.t < 700) switchBy(dx < 0 ? 1 : -1);
   };
 
+  const notices = (going.length > 0 || autoClosed.length > 0) && (
+    <div className="undo-stack" role="status">
+      {autoClosed.map((n) => (
+        <div className="undo-toast" key={'auto-' + n.id}>
+          <span>
+            <strong>{n.name}</strong> · {n.text}
+          </span>
+          <button className="undo-btn" onClick={() => setAutoClosed((list) => list.filter((x) => x !== n))}>
+            Ок
+          </button>
+        </div>
+      ))}
+      {going.map((id) => (
+        <div className="undo-toast" key={id}>
+          <span>
+            <strong>{present.find((c) => c.clientId === id)?.clientName || 'Клиент'}</strong> · уход из зала
+          </span>
+          <button className="undo-btn" onClick={() => undoLeave(id)}>
+            Отменить
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+
   if (!present.length)
     return (
       <div className="gym">
@@ -207,6 +280,7 @@ export function Gym({
         ) : (
           <Empty title="Клиентов пока нет" text="Добавьте их в разделе «Клиенты» — они появятся здесь." />
         )}
+        {notices}
       </div>
     );
 
@@ -322,6 +396,7 @@ export function Gym({
                 onRegisterFinish={handlers[c.clientId]?.register}
                 onDayChange={(dayId) => setSources((s) => ({ ...s, [c.clientId]: { programId: src.programId, dayId } }))}
                 onCompleted={onCompleted}
+                onProgramChanged={data.reload}
               />
             )}
           </div>
@@ -330,20 +405,7 @@ export function Gym({
 
       {!shown.length && <Empty title="В зале никого" text="Отметьте пришедших кнопкой «+»." />}
 
-      {going.length > 0 && (
-        <div className="undo-stack" role="status">
-          {going.map((id) => (
-            <div className="undo-toast" key={id}>
-              <span>
-                <strong>{present.find((c) => c.clientId === id)?.clientName || 'Клиент'}</strong> · уход из зала
-              </span>
-              <button className="undo-btn" onClick={() => undoLeave(id)}>
-                Отменить
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      {notices}
 
       {picker && (
         <Sheet title="Кто пришёл?" onClose={() => setPicker(false)}>
@@ -374,6 +436,7 @@ const GymJournal = memo(
     onRegisterFinish?: (f: Finisher | null) => void;
     onDayChange: (dayId: string) => void;
     onCompleted: (clientId: string, sets: number) => void;
+    onProgramChanged: () => void;
   }) {
     return (
       <Journal
@@ -383,6 +446,7 @@ const GymJournal = memo(
         onRegisterFinish={props.onRegisterFinish}
         onDayChange={props.onDayChange}
         onCompleted={({ sets }) => props.onCompleted(props.clientId, sets)}
+        onProgramChanged={props.onProgramChanged}
       />
     );
   },

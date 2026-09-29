@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowLeftRight, Check, ChevronDown, Minus, Plus, Undo2 } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, Check, ChevronDown, ListOrdered, Minus, MoreHorizontal, Plus, SkipForward, Trash2, Undo2 } from 'lucide-react';
 import { api, isLocal, readError, safeStorage } from '../transport';
 import { equipmentOf, fmtKg, suggestNext, weightUnit, type Suggestion } from '../analytics';
 import { localDate } from '../clock';
 import type { Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
-import { Confirm, clock, fmtDate, fmtSets, useNow } from './common';
+import { Confirm, Sheet, clock, fmtDate, fmtSets, useNow } from './common';
 import { ExercisePicker } from './ProgramBuilder';
 
 let exerciseList: Promise<Exercise[]> | null = null;
@@ -16,6 +16,8 @@ const loadExercises = () =>
       throw err;
     },
   ));
+/** The program exercise an entry stands for (itself, or the one it replaces today). */
+const slotOf = (e: SessionExercise) => e.replaces || e.exerciseId;
 interface Previous {
   equipment?: string;
   previousSets: SetEntry[];
@@ -34,7 +36,8 @@ export interface JournalActivity {
   /** Exercise with the next set to do, e.g. "Жим ногами 2/3". */
   current: string | null;
 }
-export type JournalFinisher = () => Promise<boolean>;
+/** Records the workout; `at` backdates it (e.g. to the last set of a workout left open). */
+export type JournalFinisher = (at?: string) => Promise<boolean>;
 
 /** Loads a workout and renders the set log. */
 export function Journal({
@@ -44,9 +47,12 @@ export function Journal({
   onActivity,
   onDayChange,
   onRegisterFinish,
+  onProgramChanged,
   embedded = false,
 }: {
   onRegisterFinish?: (f: JournalFinisher | null) => void;
+  /** The trainer changed the day's exercises in the program from the journal. */
+  onProgramChanged?: () => void;
   source: JournalSource;
   onBack?: () => void;
   onCompleted: (summary: { sets: number }) => void;
@@ -54,7 +60,8 @@ export function Journal({
   onDayChange?: (dayId: string) => void;
   embedded?: boolean;
 }) {
-  const [payload, setPayload] = useState<WorkoutPayload | null>(null);
+  // Tagged with its request, so a switch of day never renders the new day with the old day's workout.
+  const [payload, setPayload] = useState<{ key: string; data: WorkoutPayload } | null>(null);
   const [errorText, setErrorText] = useState('');
   const [nonce, setNonce] = useState(0);
   const key = source.trainerId + '/' + source.programId + '/' + source.dayId;
@@ -64,7 +71,7 @@ export function Journal({
     setErrorText('');
     api
       .get('/api/workout/' + key)
-      .then((r) => alive && setPayload(r.data))
+      .then((r) => alive && setPayload({ key: key + ':' + nonce, data: r.data }))
       .catch((err) => alive && setErrorText(readError(err)));
     return () => {
       alive = false;
@@ -79,17 +86,18 @@ export function Journal({
         </button>
       </div>
     );
-  if (!payload) return <div className="loader-block"><span className="loader" /></div>;
+  if (payload?.key !== key + ':' + nonce) return <div className="loader-block"><span className="loader" /></div>;
   return (
     <JournalBody
       key={key + ':' + nonce}
-      workout={payload}
+      workout={payload.data}
       embedded={embedded}
       onBack={onBack}
       onCompleted={onCompleted}
       onActivity={onActivity}
       onDayChange={onDayChange}
       onRegisterFinish={onRegisterFinish}
+      onProgramChanged={onProgramChanged}
       onReload={() => setNonce((n) => n + 1)}
     />
   );
@@ -123,9 +131,11 @@ function JournalBody({
   onActivity,
   onDayChange,
   onRegisterFinish,
+  onProgramChanged,
   onReload,
 }: {
   onRegisterFinish?: (f: JournalFinisher | null) => void;
+  onProgramChanged?: () => void;
   workout: WorkoutPayload;
   embedded: boolean;
   onBack?: () => void;
@@ -140,11 +150,12 @@ function JournalBody({
     [workout],
   );
   const initialCache = useMemo(() => readCache(workout), [workout]);
-  // Saved entries are reused only when they match the current plan exercise-for-exercise.
+  // Saved entries are reused only when they cover the current plan exercise-for-exercise (in any order).
   const matchesPlan = (list?: SessionExercise[]) =>
     !!list &&
     list.length === workout.day.exercises.length &&
-    list.every((e, i) => (e.replaces || e.exerciseId) === workout.day.exercises[i].exerciseId);
+    new Set(list.map(slotOf)).size === list.length &&
+    list.every((e) => workout.day.exercises.some((p) => p.exerciseId === slotOf(e)));
   const cacheUsable =
     !!initialCache?.pending &&
     (initialCache.baseRevision || null) === (workout.revision || null) &&
@@ -182,13 +193,14 @@ function JournalBody({
   const [nudge, setNudge] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [showRir, setShowRir] = useState(() => safeStorage.get('tl-show-rir') === '1');
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // Open/edited exercises are keyed by plan slot, so they stay right when the order changes.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // A finished exercise stays open while its numbers are being typed, so the field is not unmounted mid-entry.
-  const [editing, setEditing] = useState<number | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
   const editTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const startEditing = (ei: number) => {
+  const startEditing = (slot: string) => {
     if (editTimer.current) clearTimeout(editTimer.current);
-    setEditing(ei);
+    setEditing(slot);
   };
   const stopEditing = () => {
     if (editTimer.current) clearTimeout(editTimer.current);
@@ -196,7 +208,7 @@ function JournalBody({
   };
   // True when ✓ is pressed while a number in the same row is being typed.
   const confirmTap = useRef(false);
-  const toggleExpanded = (i: number) =>
+  const toggleExpanded = (i: string) =>
     setExpanded((cur) => {
       const next = new Set(cur);
       if (next.has(i)) next.delete(i);
@@ -207,11 +219,29 @@ function JournalBody({
   // Previous results of exercises swapped in for this workout, keyed by exercise id.
   const [swapInfo, setSwapInfo] = useState<Record<string, Previous>>({});
   const [swapping, setSwapping] = useState<{ ei: number; list: Exercise[] } | null>(null);
+  const [menu, setMenu] = useState<number | null>(null);
+  const [ordering, setOrdering] = useState<SessionExercise[] | null>(null);
+  const [programBusy, setProgramBusy] = useState(false);
+  // Exercise menu confirmations: replacing or restoring drops ticked sets; removal changes the program.
+  const [menuConfirm, setMenuConfirm] = useState<'swap' | 'revert' | 'remove' | null>(null);
+  const closeMenu = () => {
+    setMenu(null);
+    setMenuConfirm(null);
+  };
+  const askRevert = (ei: number) => {
+    setSwapping(null);
+    if (latest.current[ei].sets.some((x) => x.reps > 0)) {
+      setMenu(ei);
+      setMenuConfirm('revert');
+    } else void swapExercise(ei, null);
+  };
+  const plannedOf = (r: SessionExercise) => workout.day.exercises.find((p) => p.exerciseId === slotOf(r))!;
+  // Entries follow the journal's own order, which may differ from the program for this workout.
   const plan = useMemo<WorkoutExercise[]>(
     () =>
-      workout.day.exercises.map((p, i) => {
-        const r = results[i];
-        if (!r?.replaces || r.exerciseId === p.exerciseId) return p;
+      results.map((r) => {
+        const p = plannedOf(r);
+        if (!r.replaces || r.exerciseId === p.exerciseId) return p;
         const info = swapInfo[r.exerciseId];
         return {
           ...p,
@@ -317,8 +347,9 @@ function JournalBody({
 
   const countDone = (list: SessionExercise[]) => list.reduce((n, e) => n + e.sets.filter((s) => s.reps > 0).length, 0);
   const done = countDone(results);
-  const total = results.reduce((n, e) => n + e.sets.length, 0);
-  const currentIdx = results.findIndex((e) => e.sets.some((x) => x.reps === 0));
+  // A skipped exercise only counts the sets already done.
+  const total = results.reduce((n, e) => n + (e.skipped ? e.sets.filter((s) => s.reps > 0).length : e.sets.length), 0);
+  const currentIdx = results.findIndex((e) => !e.skipped && e.sets.some((x) => x.reps === 0));
   const current =
     currentIdx < 0
       ? null
@@ -398,7 +429,8 @@ function JournalBody({
   /** Puts `next` in place of the planned exercise at `ei` for this workout only; `null` restores the plan. */
   const swapExercise = async (ei: number, next: Exercise | null) => {
     setSwapping(null);
-    const planned = workout.day.exercises[ei];
+    closeMenu();
+    const planned = plannedOf(latest.current[ei]);
     const id = next ? next.id : planned.exerciseId;
     let info: Previous = { previousSets: planned.previousSets, previousAt: planned.previousAt || null };
     if (next) {
@@ -427,10 +459,42 @@ function JournalBody({
     update(latest.current.map((x, i) => (i === ei ? entry : x)));
   };
   const openSwap = async (ei: number) => {
+    closeMenu();
     try {
       setSwapping({ ei, list: await loadExercises() });
     } catch (err) {
       setErrorText(readError(err));
+    }
+  };
+  const setSkipped = (ei: number, skipped: boolean) => {
+    closeMenu();
+    update(latest.current.map((x, i) => (i === ei ? { ...x, skipped } : x)));
+  };
+  const moveBy = (list: SessionExercise[], ei: number, step: -1 | 1) => {
+    const to = ei + step;
+    if (to < 0 || to >= list.length) return list;
+    const next = [...list];
+    [next[ei], next[to]] = [next[to], next[ei]];
+    return next;
+  };
+  /** Trainer only: saves the day's exercises (order, or without removed ones) into the program, then reloads the journal. */
+  const saveDayToProgram = async (entries: SessionExercise[]) => {
+    setProgramBusy(true);
+    try {
+      if (timer.current) clearTimeout(timer.current);
+      await persist();
+      await api.post(`/api/programs/${workout.programId}/days/${workout.day.id}/exercises`, {
+        exerciseIds: entries.map(slotOf),
+        baseRevision: baseRevision.current,
+      });
+      completed.current = true;
+      safeStorage.remove(cacheKey);
+      onProgramChanged?.();
+      onReload();
+    } catch (err) {
+      setErrorText(readError(err));
+    } finally {
+      setProgramBusy(false);
     }
   };
 
@@ -462,7 +526,7 @@ function JournalBody({
   finishRef.current = finish;
   useEffect(() => {
     if (!onRegisterFinish) return;
-    onRegisterFinish(() => finishRef.current());
+    onRegisterFinish((at) => finishRef.current(at));
     return () => onRegisterFinish(null);
   }, [onRegisterFinish]);
 
@@ -472,6 +536,7 @@ function JournalBody({
       exerciseId: e.exerciseId,
       exerciseName: e.exerciseName,
       ...(latest.current[i]?.replaces ? { replaces: latest.current[i].replaces } : {}),
+      ...(latest.current[i]?.skipped ? { skipped: true } : {}),
       sets: Array.from({ length: e.sets }, (_, si) => ({
         weight: planSuggestions[i].weight || e.previousSets[si]?.weight || 0,
         reps: 0,
@@ -605,13 +670,26 @@ function JournalBody({
       <fieldset className={'exercise-list' + (showRir ? ' with-rir' : '')} disabled={finishing || conflict}>
         {plan.map((e, ei) => {
           const sug = planSuggestions[ei];
-          const original = results[ei]?.replaces ? workout.day.exercises[ei] : null;
           const r = results[ei];
+          const slot = slotOf(r);
+          const original = r.replaces ? plannedOf(r) : null;
           const exDone = r.sets.filter((s) => s.reps > 0).length;
           const complete = exDone === r.sets.length;
-          if (complete && !expanded.has(ei) && editing !== ei)
+          if (r.skipped)
             return (
-              <button key={e.exerciseId} className="ex ex-collapsed" onClick={() => toggleExpanded(ei)}>
+              <button key={e.exerciseId} className="ex ex-collapsed ex-skipped" onClick={() => setSkipped(ei, false)}>
+                <span className="ex-num num">
+                  <SkipForward size={13} />
+                </span>
+                <span className="ex-c-name">{e.exerciseName}</span>
+                <span className="ex-c-sets">
+                  {exDone ? fmtSets(r.sets.filter((x) => x.reps > 0)) + ' · ' : ''}пропущено · <u>вернуть</u>
+                </span>
+              </button>
+            );
+          if (complete && !expanded.has(slot) && editing !== slot)
+            return (
+              <button key={e.exerciseId} className="ex ex-collapsed" onClick={() => toggleExpanded(slot)}>
                 <span className="ex-num num">
                   <Check size={13} strokeWidth={3} />
                 </span>
@@ -623,10 +701,10 @@ function JournalBody({
             <section
               className={'ex' + (complete ? ' ex-done' : '')}
               key={e.exerciseId}
-              onFocus={(ev) => ev.target instanceof HTMLInputElement && startEditing(ei)}
+              onFocus={(ev) => ev.target instanceof HTMLInputElement && startEditing(slot)}
               onBlur={(ev) => ev.target instanceof HTMLInputElement && stopEditing()}
             >
-              <header className="ex-head" onClick={complete ? () => toggleExpanded(ei) : undefined}>
+              <header className="ex-head" onClick={complete ? () => toggleExpanded(slot) : undefined}>
                 <span className="ex-num num">{ei + 1}</span>
                 <div className="ex-name">
                   <h3>{e.exerciseName}</h3>
@@ -637,27 +715,25 @@ function JournalBody({
                   {original && (
                     <span className="ex-swapped">
                       вместо «{original.exerciseName}»
-                      {exDone === 0 && (
-                        <button className="link-btn" onClick={() => void swapExercise(ei, null)}>
-                          <Undo2 size={13} /> вернуть
-                        </button>
-                      )}
+                      <button className="link-btn" onClick={(ev) => { ev.stopPropagation(); askRevert(ei); }}>
+                        <Undo2 size={13} /> вернуть
+                      </button>
                     </span>
                   )}
                 </div>
                 <span className={'hint hint-' + sug.kind} title={sug.text}>
                   {shortHint(sug)}
                 </span>
-                {exDone === 0 && (
-                  <button
-                    className="icon-btn sm swap-btn"
-                    aria-label={'Заменить упражнение: ' + e.exerciseName}
-                    title="Заменить только в этой тренировке"
-                    onClick={() => void openSwap(ei)}
-                  >
-                    <ArrowLeftRight size={16} />
-                  </button>
-                )}
+                <button
+                  className="icon-btn sm ex-menu-btn"
+                  aria-label={'Действия с упражнением: ' + e.exerciseName}
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    setMenu(ei);
+                  }}
+                >
+                  <MoreHorizontal size={18} />
+                </button>
               </header>
               <div className="sets" role="table" aria-label={'Подходы: ' + e.exerciseName}>
                 <div className="set-row set-labels" role="row">
@@ -761,7 +837,18 @@ function JournalBody({
           exercises={swapping.list}
           exclude={[...workout.day.exercises.map((x) => x.exerciseId), ...plan.map((x) => x.exerciseId)]}
           initialGroup={
-            (swapping.list.find((x) => x.id === workout.day.exercises[swapping.ei].exerciseId)?.muscleGroup || '').split(' / ')[0]
+            (swapping.list.find((x) => x.id === slotOf(results[swapping.ei]))?.muscleGroup || '').split(' / ')[0]
+          }
+          top={
+            results[swapping.ei]?.replaces ? (
+              <button className="pick pick-original" onClick={() => askRevert(swapping.ei)}>
+                <span className="grow">
+                  <strong>{plannedOf(results[swapping.ei]).exerciseName}</strong>
+                  <span className="muted small">было в программе · вернуть</span>
+                </span>
+                <Undo2 size={18} />
+              </button>
+            ) : undefined
           }
           autoFocusSearch={false}
           allowCreate={workout.actorRole === 'trainer'}
@@ -771,6 +858,79 @@ function JournalBody({
           onPick={(x) => void swapExercise(swapping.ei, x)}
           onClose={() => setSwapping(null)}
         />
+      )}
+
+      {menu !== null && results[menu] && (
+        <ExerciseMenu
+          entry={results[menu]}
+          name={plan[menu].exerciseName}
+          planned={plannedOf(results[menu])}
+          confirm={menuConfirm}
+          canRemove={workout.actorRole === 'trainer' && workout.day.exercises.length > 1}
+          busy={programBusy}
+          onConfirm={setMenuConfirm}
+          onSwap={() => void openSwap(menu)}
+          onRevert={() => void swapExercise(menu, null)}
+          onSkip={() => setSkipped(menu, true)}
+          onOrder={() => {
+            closeMenu();
+            setOrdering(latest.current);
+          }}
+          onRemove={async () => {
+            const keep = latest.current.filter((_, i) => i !== menu);
+            await saveDayToProgram(keep);
+            closeMenu();
+          }}
+          onClose={closeMenu}
+        />
+      )}
+
+      {ordering && (
+        <Sheet title="Порядок упражнений" onClose={() => setOrdering(null)}>
+          <ol className="order-list">
+            {ordering.map((x, i) => (
+              <li key={slotOf(x)} className={x.skipped ? 'muted' : ''}>
+                <span className="ex-num num">{i + 1}</span>
+                <span className="grow">{x.exerciseName}</span>
+                <button className="icon-btn sm" aria-label={'Выше: ' + x.exerciseName} disabled={i === 0} onClick={() => setOrdering(moveBy(ordering, i, -1))}>
+                  <ArrowUp size={16} />
+                </button>
+                <button
+                  className="icon-btn sm"
+                  aria-label={'Ниже: ' + x.exerciseName}
+                  disabled={i === ordering.length - 1}
+                  onClick={() => setOrdering(moveBy(ordering, i, 1))}
+                >
+                  <ArrowDown size={16} />
+                </button>
+              </li>
+            ))}
+          </ol>
+          <div className="order-actions">
+            <button
+              className="btn btn-block"
+              disabled={programBusy}
+              onClick={() => {
+                update(ordering);
+                setOrdering(null);
+              }}
+            >
+              Только в этой тренировке
+            </button>
+            {workout.actorRole === 'trainer' && (
+              <button
+                className="btn btn-primary btn-block"
+                disabled={programBusy}
+                onClick={async () => {
+                  await saveDayToProgram(ordering);
+                  setOrdering(null);
+                }}
+              >
+                {programBusy ? 'Сохраняем…' : 'Сохранить в программе'}
+              </button>
+            )}
+          </div>
+        </Sheet>
       )}
 
       <div className="j-foot">
@@ -802,6 +962,104 @@ function JournalBody({
         )}
       </div>
     </div>
+  );
+}
+
+/** Actions for one exercise of the workout: replace, skip, order, remove from the program. */
+function ExerciseMenu({
+  entry,
+  name,
+  planned,
+  confirm,
+  canRemove,
+  busy,
+  onConfirm,
+  onSwap,
+  onRevert,
+  onSkip,
+  onOrder,
+  onRemove,
+  onClose,
+}: {
+  entry: SessionExercise;
+  name: string;
+  planned: WorkoutExercise;
+  confirm: 'swap' | 'revert' | 'remove' | null;
+  canRemove: boolean;
+  busy: boolean;
+  onConfirm: (c: 'swap' | 'revert' | 'remove' | null) => void;
+  onSwap: () => void;
+  onRevert: () => void;
+  onSkip: () => void;
+  onOrder: () => void;
+  onRemove: () => void;
+  onClose: () => void;
+}) {
+  const ticked = entry.sets.filter((x) => x.reps > 0).length;
+  const lost = ticked ? ` Отмеченные подходы (${ticked}) не сохранятся.` : '';
+  return (
+    <Sheet title={name} onClose={onClose}>
+      {confirm === 'swap' ? (
+        <Confirm text={'Заменить упражнение?' + lost} confirmLabel="Выбрать замену" onConfirm={onSwap} onCancel={() => onConfirm(null)} />
+      ) : confirm === 'revert' ? (
+        <Confirm
+          text={`Вернуть «${planned.exerciseName}»?` + lost}
+          confirmLabel="Вернуть"
+          onConfirm={onRevert}
+          onCancel={() => onConfirm(null)}
+        />
+      ) : confirm === 'remove' ? (
+        <Confirm
+          text={`Убрать «${planned.exerciseName}» из программы? В следующих тренировках его не будет.` + lost}
+          confirmLabel="Убрать"
+          busy={busy}
+          onConfirm={onRemove}
+          onCancel={() => onConfirm(null)}
+        />
+      ) : (
+        <div className="ex-menu">
+          <button className="menu-item" onClick={() => (ticked ? onConfirm('swap') : onSwap())}>
+            <ArrowLeftRight size={18} />
+            <span className="grow">
+              Заменить на сегодня
+              <small>в программе останется «{planned.exerciseName}»</small>
+            </span>
+          </button>
+          {entry.replaces && (
+            <button className="menu-item" onClick={() => (ticked ? onConfirm('revert') : onRevert())}>
+              <Undo2 size={18} />
+              <span className="grow">
+                Вернуть «{planned.exerciseName}»
+                <small>как в программе</small>
+              </span>
+            </button>
+          )}
+          <button className="menu-item" onClick={onSkip}>
+            <SkipForward size={18} />
+            <span className="grow">
+              Пропустить сегодня
+              <small>{ticked ? 'отмеченные подходы сохранятся' : 'в следующий раз будет по плану'}</small>
+            </span>
+          </button>
+          <button className="menu-item" onClick={onOrder}>
+            <ListOrdered size={18} />
+            <span className="grow">
+              Изменить порядок
+              <small>сегодня или в программе</small>
+            </span>
+          </button>
+          {canRemove && (
+            <button className="menu-item danger" onClick={() => onConfirm('remove')}>
+              <Trash2 size={18} />
+              <span className="grow">
+                Убрать из программы
+                <small>насовсем, из этой тренировки программы</small>
+              </span>
+            </button>
+          )}
+        </div>
+      )}
+    </Sheet>
   );
 }
 
