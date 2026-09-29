@@ -339,18 +339,7 @@ export function ProgramBuilder({
                   ).map(([k, label, min, max]) => (
                     <label key={k}>
                       <span>{label}</span>
-                      <input
-                        className="num"
-                        type="number"
-                        inputMode="numeric"
-                        min={min}
-                        max={max}
-                        value={e[k]}
-                        onChange={(ev) => {
-                          const n = Math.round(Number(ev.target.value));
-                          if (Number.isFinite(n)) patchExercise(i, { [k]: Math.max(min, Math.min(max, n)) });
-                        }}
-                      />
+                      <RxInput value={e[k]} min={min} max={max} onChange={(n) => patchExercise(i, { [k]: n })} />
                     </label>
                   ))}
                 </div>
@@ -407,6 +396,37 @@ export function ProgramBuilder({
         />
       )}
     </div>
+  );
+}
+
+/** Whole-number field that lets the value be typed freely and only clamps it to [min, max] on leaving. */
+function RxInput({ value, min, max, onChange }: { value: number; min: number; max: number; onChange: (n: number) => void }) {
+  const [text, setText] = useState(String(value));
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setText(String(value));
+  }, [value]);
+  return (
+    <input
+      className="num"
+      inputMode="numeric"
+      value={text}
+      onFocus={(ev) => {
+        focused.current = true;
+        ev.target.select();
+      }}
+      onChange={(ev) => {
+        const t = ev.target.value.replace(/\D/g, '').slice(0, 3);
+        setText(t);
+        if (t !== '' && Number(t) >= min && Number(t) <= max) onChange(Number(t));
+      }}
+      onBlur={() => {
+        focused.current = false;
+        const n = text === '' ? value : Math.max(min, Math.min(max, Number(text)));
+        setText(String(n));
+        onChange(n);
+      }}
+    />
   );
 }
 
