@@ -40,6 +40,15 @@ export const clock = (ms: number) => {
   return m >= 60 ? Math.floor(m / 60) + ' ч' : m + ':' + String(s % 60).padStart(2, '0');
 };
 
+/** Time in the gym: 47:05, 1:12:40. */
+export const elapsed = (ms: number) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h ? h + ':' + String(mm).padStart(2, '0') + ':' + ss : mm + ':' + ss;
+};
+
 export function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {

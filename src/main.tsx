@@ -47,6 +47,13 @@ if (vv) {
   document.addEventListener("focusin", later);
 }
 
+// The app is kept on the phone and opens without a network (public/sw.js). Not in development or the one-file test build.
+if (import.meta.env.PROD && import.meta.env.VITE_LOCAL_ONLY !== "1" && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => undefined);
+  });
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />

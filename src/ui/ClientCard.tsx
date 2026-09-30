@@ -31,6 +31,9 @@ export function ClientCard({
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [journal, setJournal] = useState<{ program: Program; dayId: string } | null>(null);
+  // Renaming: the new name while the field is open.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
 
   const loadHistory = async () => {
     try {
@@ -65,6 +68,21 @@ export function ClientCard({
     );
 
   const here = inGym(client.checkedInAt);
+  const rename = async () => {
+    const name = (renaming || '').trim();
+    if (!name) return;
+    if (name === client.clientName) return setRenaming(null);
+    setRenameBusy(true);
+    try {
+      await api.post('/api/client/' + clientId + '/update', { clientName: name });
+      await data.reload();
+      setRenaming(null);
+    } catch (e) {
+      setErr(readError(e));
+    } finally {
+      setRenameBusy(false);
+    }
+  };
   const review = async () => {
     try {
       await api.post('/api/client/' + clientId + '/review', { sessionId: client.latestSessionId });
@@ -82,7 +100,30 @@ export function ClientCard({
         </button>
         <Avatar name={client.clientName} live={here} />
         <div className="grow">
-          <h2>{client.clientName}</h2>
+          {renaming !== null ? (
+            <form
+              className="rename-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void rename();
+              }}
+            >
+              <input id="client-rename" autoFocus maxLength={80} value={renaming} onChange={(e) => setRenaming(e.target.value)} aria-label="Имя клиента" />
+              <button className="btn btn-sm btn-primary" disabled={renameBusy || !renaming.trim()} type="submit">
+                {renameBusy ? '…' : 'OK'}
+              </button>
+              <button className="btn btn-sm btn-quiet" type="button" onClick={() => setRenaming(null)}>
+                Отмена
+              </button>
+            </form>
+          ) : (
+            <h2 className="client-name">
+              {client.clientName}
+              <button className="icon-btn sm" aria-label="Изменить имя" onClick={() => setRenaming(client.clientName)}>
+                <Pencil size={15} />
+              </button>
+            </h2>
+          )}
           <span className="muted small">
             {here ? 'В зале · ' : ''}последний раз {ago(lastVisit(client))}
           </span>

@@ -26,6 +26,7 @@ interface Entry {
   sessionId: string;
   completedAt: string;
   sets: SetEntry[];
+  note?: string;
 }
 interface ExerciseHistory {
   exerciseId: string;
@@ -96,7 +97,10 @@ function SessionList({ sessions }: { sessions: Session[] }) {
             <tbody>
               {s.exercises.map((e) => (
                 <tr key={e.exerciseId}>
-                  <td>{e.exerciseName}</td>
+                  <td>
+                    {e.exerciseName}
+                    {e.note && <span className="ex-note-line">«{e.note}»</span>}
+                  </td>
                   <td className="num">{fmtSets(e.sets)}</td>
                 </tr>
               ))}
@@ -127,7 +131,7 @@ function MuscleHistory({ sessions, programs, exercises }: { sessions: Session[];
           h = { exerciseId: e.exerciseId, name: e.exerciseName, segment: segmentOf(mainMuscle(e.exerciseId)), entries: [] };
           byId.set(e.exerciseId, h);
         }
-        h.entries.push({ sessionId: s.id, completedAt: s.completedAt, sets: e.sets });
+        h.entries.push({ sessionId: s.id, completedAt: s.completedAt, sets: e.sets, note: e.note });
       }
     return [...byId.values()];
   }, [sessions, programs, exercises]);
@@ -176,7 +180,10 @@ function ExerciseCard({ history: h }: { history: ExerciseHistory }) {
         <tbody>
           {entries.map((e) => (
             <tr key={e.sessionId}>
-              <td className="muted">{fmtDate(e.completedAt)}</td>
+              <td className="muted">
+                {fmtDate(e.completedAt)}
+                {e.note && <span className="ex-note-line">«{e.note}»</span>}
+              </td>
               <td className="num">{fmtSets(e.sets)}</td>
             </tr>
           ))}

@@ -2661,3 +2661,90 @@ h2 {
   flex: 1;
   min-width: 0;
 }
+
+/* Exercise comment at the bottom of a journal card */
+.ex-note {
+  display: grid;
+  gap: 2px;
+}
+.ex-note-prev {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.ex-note-add {
+  justify-self: start;
+  font-size: 12px;
+  padding-block: 2px;
+}
+.ex-note-input {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 14px;
+}
+.ex-note-line {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+/* Time in the gym since «Пришёл» */
+.save-dot.session {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.save-dot.session.saving {
+  color: var(--ink-2);
+}
+/* Own rep range in the targets sheet */
+.range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.range-inputs input {
+  width: 64px;
+  min-height: 36px;
+  text-align: center;
+}
+/* Client name with its edit button */
+.client-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.rename-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rename-form input {
+  min-width: 0;
+  flex: 1;
+  min-height: 36px;
+  padding: 4px 8px;
+}
+/* No network / records waiting to be sent */
+.offline-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  background: var(--warn-soft);
+  color: var(--ink);
+}
+.offline-bar.sending {
+  background: var(--line);
+}
+.offline-failed ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+.save-dot.offline,
+.save-dot.session.offline {
+  color: var(--warn);
+}
+.offline-bar svg {
+  flex: none;
+}

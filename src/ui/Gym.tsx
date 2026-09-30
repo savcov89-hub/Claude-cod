@@ -4,7 +4,7 @@ import type { ClientItem, Program } from '../types';
 import { api, readError } from '../transport';
 import { Journal, type JournalActivity } from './Journal';
 import { activeClients, lastVisit, presentClients, programsOf, type TrainerData } from './data';
-import { Avatar, Empty, Sheet, ago, clock, useNow } from './common';
+import { Avatar, Empty, Sheet, ago, clock, elapsed, useNow } from './common';
 
 interface Source {
   programId: string;
@@ -321,6 +321,7 @@ export function Gym({
           <GymTab
             key={c.clientId}
             name={c.clientName}
+            since={c.checkedInAt}
             active={c.clientId === activeId}
             activity={activity[c.clientId]}
             done={finished[c.clientId] !== undefined}
@@ -498,12 +499,14 @@ const GymJournal = memo(
 
 function GymTab({
   name,
+  since,
   active,
   activity: a,
   done,
   onClick,
 }: {
   name: string;
+  since?: string | null;
   active: boolean;
   activity?: JournalActivity;
   done: boolean;
@@ -520,8 +523,8 @@ function GymTab({
     >
       <strong className="gt-name">{name}</strong>
       <span className="gt-sub">
-        <span className="num" title={rest !== null ? 'С последнего подхода' : 'Подходов сделано'}>
-          {done ? <Check size={12} /> : rest !== null ? clock(rest) : a ? a.done + '/' + a.total : ''}
+        <span className="num" title={since ? 'На тренировке с отметки «Пришёл»' : rest !== null ? 'С последнего подхода' : 'Подходов сделано'}>
+          {done ? <Check size={12} /> : since ? elapsed(now - Date.parse(since)) : rest !== null ? clock(rest) : a ? a.done + '/' + a.total : ''}
         </span>
         <span className="gt-cur">{done ? 'записано' : a?.current || (a ? 'всё отмечено' : '…')}</span>
       </span>

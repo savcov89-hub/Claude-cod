@@ -79,6 +79,8 @@ export interface SessionExercise {
   skipped?: boolean;
   /** Added in the gym for this workout only, with its own targets (sets = sets.length). */
   extra?: { repMin: number; repMax: number; targetRir: number };
+  /** Short comment on this exercise in this workout. */
+  note?: string;
   sets: SetEntry[];
 }
 export interface Session {
@@ -96,9 +98,13 @@ export interface WorkoutExercise extends ProgramExercise {
   equipment?: string;
   previousSets: SetEntry[];
   previousAt?: string | null;
+  /** Comment left on this exercise last time. */
+  previousNote?: string;
 }
 export interface WorkoutPayload {
   revision?: string | null;
+  /** When the client was marked «Пришёл». */
+  checkedInAt?: string | null;
   ownerName?: string;
   actorRole?: Role;
   ownerId: string;

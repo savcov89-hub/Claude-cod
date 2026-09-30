@@ -1,4 +1,5 @@
-import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
+import { createClient, type Session, type SupabaseClient, type User } from '@supabase/supabase-js';
+import { afterPost, clearCached, flushOutbox, isNetworkError, loadCached, networkError, outbox, queueIfPossible, saveCached } from './offline';
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -20,11 +21,34 @@ const toUser = (u: User): AuthUser => ({
   name: u.user_metadata?.full_name || u.user_metadata?.name,
 });
 
+/**
+ * The signed-in session. Offline, an expired token cannot be refreshed and supabase-js reports no session;
+ * the stored one still says who is signed in, so the app opens with its saved data.
+ */
+async function currentSession(): Promise<Session | null> {
+  const { data, error } = await sb().auth.getSession();
+  if (data.session) return data.session;
+  if (error && (!navigator.onLine || /fetch|network|load failed/i.test(error.message))) {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && /^sb-.+-auth-token$/.test(k)) {
+          const stored = JSON.parse(localStorage.getItem(k) || 'null');
+          if (stored?.user?.id) return stored as Session;
+        }
+      }
+    } catch {
+      /* no stored session */
+    }
+  }
+  if (error) throw error;
+  return null;
+}
+
 export const auth = {
   async getUser() {
-    const { data, error } = await sb().auth.getSession();
-    if (error) throw error;
-    return data.session ? toUser(data.session.user) : null;
+    const session = await currentSession();
+    return session ? toUser(session.user) : null;
   },
   /** Whether Google sign-in is switched on in the Supabase project. */
   async googleEnabled() {
@@ -72,22 +96,34 @@ export const auth = {
     return data.user ? toUser(data.user) : null;
   },
   async signOut() {
+    const session = await currentSession().catch(() => null);
     await sb().auth.signOut();
+    if (session) clearCached(session.user.id);
   },
 };
 
-async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ data: any }> {
-  const { data } = await sb().auth.getSession();
-  const token = data.session?.access_token;
-  const res = await fetch(`${url}/functions/v1/api${path}`, {
-    method,
-    headers: {
-      apikey: key!,
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+/** One request to the server; a request that never got an answer throws a network error. */
+async function send(method: 'GET' | 'POST', path: string, body: unknown, token?: string): Promise<{ data: any }> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) throw networkError();
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), method === 'GET' ? 12000 : 20000);
+  let res: Response;
+  try {
+    res = await fetch(`${url}/functions/v1/api${path}`, {
+      method,
+      signal: abort.signal,
+      headers: {
+        apikey: key!,
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (err) {
+    throw networkError(err);
+  } finally {
+    clearTimeout(timer);
+  }
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err: any = new Error(payload?.error || 'Ошибка ' + res.status);
@@ -95,6 +131,60 @@ async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promi
     throw err;
   }
   return { data: payload };
+}
+
+/**
+ * Online: the answer, and a GET is saved on the device. Offline: the saved answer of a GET, or a check-in,
+ * workout or measurement put in the outbox (sent in order when the network is back).
+ */
+async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ data: any }> {
+  const session = await currentSession().catch(() => null);
+  const userId = session?.user.id;
+  // Something is still waiting to be sent: new records of the same kind go after it.
+  if (method === 'POST' && userId && outbox(userId).length) {
+    const queued = queueIfPossible(userId, path, body);
+    if (queued) {
+      afterPost(userId, path, body, queued);
+      void syncOutbox();
+      return { data: queued };
+    }
+  }
+  try {
+    const res = await send(method, path, body, session?.access_token);
+    if (method === 'GET' && userId) saveCached(userId, path, res.data);
+    if (method === 'POST' && userId) afterPost(userId, path, body, res.data);
+    return res;
+  } catch (err) {
+    if (!isNetworkError(err) || !userId) throw err;
+    if (method === 'GET') {
+      const saved = loadCached(userId, path);
+      if (saved) return { data: saved.data };
+      throw err;
+    }
+    const queued = queueIfPossible(userId, path, body);
+    if (queued) {
+      afterPost(userId, path, body, queued);
+      return { data: queued };
+    }
+    throw err;
+  }
+}
+
+/** Sends what waited for the network; runs on start, when the network comes back and every half minute. */
+export async function syncOutbox() {
+  const session = await currentSession().catch(() => null);
+  if (!session || !outbox(session.user.id).length) return;
+  await flushOutbox(session.user.id, async (path, body) => {
+    const fresh = await currentSession();
+    return send('POST', path, body, fresh?.access_token);
+  });
+}
+/** Id of the signed-in account, also offline. */
+export const currentUserId = async () => (await currentSession().catch(() => null))?.user.id || null;
+if (typeof window !== 'undefined' && url && key && !/[?&]demo=1/.test(location.search)) {
+  window.addEventListener('online', () => void syncOutbox());
+  setInterval(() => navigator.onLine && void syncOutbox(), 30000);
+  setTimeout(() => void syncOutbox(), 2000);
 }
 
 export const remoteApi = {

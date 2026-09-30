@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Activity, ChevronRight, ClipboardList, Dumbbell, KeyRound, LogOut, Mail, RotateCcw } from 'lucide-react';
 import { api, isArtifactBuild, isLocal, readError } from './transport';
 import { auth, type AuthUser } from './supabase';
+import { OfflineBar } from './ui/OfflineBar';
 import { captureInvite, clearInvite, pendingInvite } from './invite';
 import { getActor, initLocal, localActors, resetLocal, setActor, storageMode } from './local/runtime';
 import type { Profile, Role } from './types';
@@ -537,6 +538,7 @@ function RealApp() {
   const top = (
     <>
       {header}
+      <OfflineBar userId={user.userId} />
       {newPassword !== null && (
         <form className="password-bar" onSubmit={savePassword}>
           <input

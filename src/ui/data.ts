@@ -60,7 +60,7 @@ export function useTrainerData(): TrainerData {
 
   const setPresence = useCallback(async (client: ClientItem, present: boolean) => {
     try {
-      const r = await api.post('/api/attendance', { clientId: client.clientId, present, localDate: localDate() });
+      const r = await api.post('/api/attendance', { clientId: client.clientId, present, localDate: localDate(), at: new Date().toISOString() });
       const today = localDate();
       setClients((list) =>
         list.map((c) =>

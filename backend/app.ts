@@ -158,6 +158,8 @@ interface SessionExercise {
   skipped?: boolean;
   /** Added in the gym for this workout only, with its own targets (sets = sets.length). */
   extra?: ExtraPlan;
+  /** Short comment on this exercise in this workout, e.g. "seat at 4, knee ok". */
+  note?: string;
   sets: SetEntry[];
 }
 interface ExtraPlan {
@@ -363,22 +365,23 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     for (const e of submitted) {
       const id = String(e.exerciseId);
       const skipped = e.skipped === true ? { skipped: true } : {};
+      const note = text(e.note, 200) ? { note: text(e.note, 200) } : {};
       if (e.extra) {
         const extra = cleanExtra(e.extra);
         const known = await findKnown(id);
         if (!extra || !known || day.exercises.some((p) => p.exerciseId === id)) return null;
-        out.push({ exerciseId: id, exerciseName: known.name, extra, sets: e.sets });
+        out.push({ exerciseId: id, exerciseName: known.name, extra, ...note, sets: e.sets });
         continue;
       }
       const planned = day.exercises.find((p) => p.exerciseId === String(e.replaces || e.exerciseId))!;
       if (id === planned.exerciseId) {
-        out.push({ exerciseId: planned.exerciseId, exerciseName: planned.exerciseName, ...skipped, sets: e.sets });
+        out.push({ exerciseId: planned.exerciseId, exerciseName: planned.exerciseName, ...skipped, ...note, sets: e.sets });
         continue;
       }
       if (day.exercises.some((p) => p.exerciseId === id)) return null;
       const known = await findKnown(id);
       if (!known) return null;
-      out.push({ exerciseId: id, exerciseName: known.name, replaces: planned.exerciseId, ...skipped, sets: e.sets });
+      out.push({ exerciseId: id, exerciseName: known.name, replaces: planned.exerciseId, ...skipped, ...note, sets: e.sets });
     }
     if (new Set(out.map((e) => e.exerciseId)).size !== out.length) return null;
     return out;
@@ -642,6 +645,15 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           patch.notes = { goal: text(b.notes.goal, 300), limits: text(b.notes.limits, 500), notes: text(b.notes.notes, 2000) };
         if (typeof b.archived === 'boolean') patch.archived = b.archived;
         const ok = await saveClient(ctx.user!.userId, client, patch);
+        if (ok && patch.clientName && patch.clientName !== client.clientName) {
+          // Programs carry the client's name (journal header, program lists).
+          const programs = (await listAll<ProgramRecord>(programsTable(ctx.user!.userId), 1000)).filter((p) => p.clientId === client.clientId);
+          if (programs.length)
+            await db.update(
+              programsTable(ctx.user!.userId),
+              programs.map(({ id, ...record }) => ({ id, record: { ...record, clientName: patch.clientName! } })),
+            );
+        }
         return ok ? json({ saved: true }) : error('Не удалось сохранить.', 500);
       },
     ],
@@ -793,7 +805,11 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         if (!trainerId || !clientId) return error('Нет доступа', 403);
         const client = await findClient(trainerId, clientId);
         if (!client) return error('Нет доступа', 403);
-        const checkedInAt = b.present ? nowIso() : null;
+        // A check-in made offline arrives later with its own time (up to 12 hours back).
+        const nowMs = Date.parse(nowIso());
+        const sent = typeof b.at === 'string' ? Date.parse(b.at) : NaN;
+        const at = Number.isFinite(sent) && sent <= nowMs + 60000 && sent >= nowMs - 12 * 3600000 ? new Date(Math.min(sent, nowMs)).toISOString() : nowIso();
+        const checkedInAt = b.present ? at : null;
         const date = DATE_RE.test(b.localDate || '') ? b.localDate : nowIso().slice(0, 10);
         const ok = await saveClient(trainerId, client, {
           checkedInAt,
@@ -1107,6 +1123,63 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
       },
     ],
 
+    /**
+     * One exercise of a day, from the gym journal: new sets / rep range / reserve, and/or another exercise
+     * in its place for good (targets kept). An open workout that already swapped it in today takes it as planned.
+     */
+    'POST /api/programs/:programId/days/:dayId/exercise': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        if (!(await trainerOnly(ctx))) return error('Доступ только для тренера.', 403);
+        const trainerId = ctx.user!.userId;
+        const { programId, dayId } = ctx.params;
+        const b = ctx.body || {};
+        const [program] = await db.get<ProgramRecord>(programsTable(trainerId), [programId]);
+        if (!program || program.trainerId !== trainerId) return error('Программа не найдена.', 404);
+        const day = program.days.find((d) => d.id === dayId);
+        const current = day?.exercises.find((e) => e.exerciseId === String(b.exerciseId));
+        if (!day || !current) return error('Упражнение не найдено в программе. Обновите журнал.', 404);
+        let next: ProgramExercise = { ...current };
+        if (b.sets !== undefined || b.repMin !== undefined || b.repMax !== undefined || b.targetRir !== undefined) {
+          const sets = Math.round(Number(b.sets ?? current.sets));
+          const targets = cleanExtra({ repMin: b.repMin ?? current.repMin, repMax: b.repMax ?? current.repMax, targetRir: b.targetRir ?? current.targetRir });
+          if (!targets || !(sets >= 1 && sets <= 10)) return error('Подходы 1–10, повторы от 1 до 100 (от меньшего к большему), RIR 0–6.', 400);
+          next = { ...next, sets, ...targets };
+        }
+        const replaceWith = b.replaceWith ? String(b.replaceWith) : '';
+        if (replaceWith && replaceWith !== current.exerciseId) {
+          if (day.exercises.some((e) => e.exerciseId === replaceWith)) return error('Это упражнение уже есть в тренировке.', 409);
+          const known = await knownExercises(trainerId)(replaceWith);
+          if (!known) return error('Упражнение не найдено.', 404);
+          const { sets, repMin, repMax, targetRir } = next;
+          next = toProgramExercise({ sets, repMin, repMax, targetRir }, known);
+        }
+        const draftT = draftTable(program.clientId, programId, dayId);
+        const draft = await first<DraftRecord>(draftT);
+        if (draft && !draft.closed && (draft.revision || null) !== (b.baseRevision || null))
+          return error('Запись уже изменена на другом устройстве. Обновите журнал перед продолжением.', 409);
+        const days = program.days.map((d) =>
+          d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.exerciseId === current.exerciseId ? next : e)) } : d,
+        );
+        const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
+        const [ok] = await db.update(programsTable(trainerId), [{ id: programId, record: { ...rest, days, updatedAt: nowIso() } }]);
+        if (!ok) return error('Не удалось сохранить программу.', 500);
+        let revision = draft?.revision || null;
+        if (draft && !draft.closed && next.exerciseId !== current.exerciseId) {
+          const { id: draftId, ...record } = draft;
+          const exercises = draft.exercises.map((e) => {
+            if ((e.replaces || e.exerciseId) !== current.exerciseId) return e;
+            // Already swapped in today: now it is the planned one. Still the old one: it becomes the new one, sets kept.
+            const { replaces: _r, ...plain } = e;
+            return { ...plain, exerciseId: next.exerciseId, exerciseName: next.exerciseName };
+          });
+          revision = randomId();
+          await db.update(draftT, [{ id: draftId, record: { ...record, exercises, revision } }]);
+        }
+        return json({ saved: true, revision, exercise: next });
+      },
+    ],
+
     /** The client's hidden program for a workout made up in the gym; created on first use. */
     'POST /api/free/:clientId': [
       requireAuth(),
@@ -1254,18 +1327,22 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const equipmentOf = equipmentLookup(trainerId);
         const exercises = await Promise.all(
           day.exercises.map(async (e) => {
-            const last = await first<{ sets: SetEntry[]; completedAt?: string }>(lastResultTable(ownerId, e.exerciseId));
+            const last = await first<{ sets: SetEntry[]; completedAt?: string; note?: string }>(lastResultTable(ownerId, e.exerciseId));
             return {
               ...e,
               equipment: await equipmentOf(e.exerciseId),
               previousSets: last?.sets || [],
               previousAt: last?.completedAt || null,
+              ...(last?.note ? { previousNote: last.note } : {}),
             };
           }),
         );
         const draft = await first<DraftRecord>(draftTable(ownerId, programId, dayId));
+        const client = await findClient(trainerId, program.clientId);
         return json({
           draft: draft?.closed ? null : draft || null,
+          // When the client was marked «Пришёл»: the journal shows the time spent in the gym.
+          checkedInAt: client?.checkedInAt || null,
           revision: draft?.revision || null,
           ownerId,
           ownerName: program.clientName,
@@ -1287,11 +1364,12 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const { trainerId, programId, exerciseId } = ctx.params;
         const access = await workoutOwner(ctx.user!.userId, trainerId, programId);
         if (!access) return error('Нет доступа к тренировке.', 403);
-        const last = await first<{ sets: SetEntry[]; completedAt?: string }>(lastResultTable(access.ownerId, exerciseId));
+        const last = await first<{ sets: SetEntry[]; completedAt?: string; note?: string }>(lastResultTable(access.ownerId, exerciseId));
         return json({
           equipment: await equipmentLookup(trainerId)(exerciseId),
           previousSets: last?.sets || [],
           previousAt: last?.completedAt || null,
+          ...(last?.note ? { previousNote: last.note } : {}),
         });
       },
     ],
@@ -1381,7 +1459,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const [sessionId] = await db.add(sessionsTable(ownerId), [session]);
         if (!sessionId) return error('Не удалось сохранить тренировку.', 500);
         for (const e of performed)
-          await upsertSingle(lastResultTable(ownerId, e.exerciseId), { sets: e.sets, completedAt });
+          await upsertSingle(lastResultTable(ownerId, e.exerciseId), { sets: e.sets, completedAt, ...(e.note ? { note: e.note } : {}) });
         await upsertSingle<DraftRecord>(table, { exercises: [], updatedAt: completedAt, closed: true, revision: randomId() });
         const client = await findClient(trainerId, ownerId);
         const date = DATE_RE.test(b.localDate || '') ? b.localDate : completedAt.slice(0, 10);

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, Check, ChevronDown, ListOrdered, Minus, MoreHorizontal, Plus, SkipForward, Trash2, Undo2 } from 'lucide-react';
-import { api, isLocal, readError, safeStorage } from '../transport';
+import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, Check, ChevronDown, ListOrdered, Minus, MoreHorizontal, Pencil, Plus, SkipForward, Trash2, Undo2 } from 'lucide-react';
+import { api, inGym, isLocal, readError, safeStorage } from '../transport';
 import { equipmentOf, fmtKg, isStack, suggestNext, weightUnit, type Suggestion } from '../analytics';
 import { localDate } from '../clock';
+import { isNetworkError } from '../offline';
 import type { Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
-import { Confirm, Sheet, clock, fmtDate, fmtSets, useNow } from './common';
+import { Confirm, Sheet, clock, elapsed, fmtDate, fmtSets, useNow } from './common';
 import { ExercisePicker } from './ProgramBuilder';
 
 let exerciseList: Promise<Exercise[]> | null = null;
@@ -22,6 +23,7 @@ interface Previous {
   equipment?: string;
   previousSets: SetEntry[];
   previousAt: string | null;
+  previousNote?: string;
 }
 
 export interface JournalSource {
@@ -145,6 +147,19 @@ function JournalBody({
   onReload: () => void;
 }) {
   const cacheKey = cacheKeyOf(workout);
+  // A workout finished offline waits in the outbox; until the server has it, its old draft is not reopened.
+  const doneKey = 'tl-done:' + cacheKey;
+  const finishedOffline = useMemo(() => {
+    const at = Number(safeStorage.get(doneKey) || 0);
+    if (!at) return false;
+    if (!workout.draft || Date.parse(workout.draft.updatedAt) > at) {
+      safeStorage.remove(doneKey);
+      return false;
+    }
+    return true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workout]);
+  const draftOf = finishedOffline ? null : workout.draft;
   const suggestions = useMemo<Suggestion[]>(
     () => workout.day.exercises.map((e) => suggestNext(e, e.previousSets)),
     [workout],
@@ -167,7 +182,7 @@ function JournalBody({
     matchesPlan(initialCache.results);
   const [results, setResults] = useState<SessionExercise[]>(() => {
     if (cacheUsable) return initialCache!.results;
-    if (matchesPlan(workout.draft?.exercises)) return workout.draft!.exercises;
+    if (matchesPlan(draftOf?.exercises)) return draftOf!.exercises;
     return workout.day.exercises.map((e, i) => ({
       exerciseId: e.exerciseId,
       exerciseName: e.exerciseName,
@@ -178,8 +193,8 @@ function JournalBody({
       })),
     }));
   });
-  const [feedback, setFeedback] = useState(() => (cacheUsable ? initialCache!.feedback || '' : workout.draft?.feedback || ''));
-  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>(workout.draft ? 'saved' : 'idle');
+  const [feedback, setFeedback] = useState(() => (cacheUsable ? initialCache!.feedback || '' : draftOf?.feedback || ''));
+  const [status, setStatus] = useState<SaveStatus>(draftOf ? 'saved' : 'idle');
   const [errorText, setErrorText] = useState('');
   const [conflict, setConflict] = useState(
     () => !!initialCache?.pending && (initialCache.baseRevision || null) !== (workout.revision || null),
@@ -189,11 +204,11 @@ function JournalBody({
   const [finishing, setFinishing] = useState(false);
   const [showNote, setShowNote] = useState(!!feedback);
   const [lastSetAt, setLastSetAt] = useState<number | null>(() =>
-    workout.draft ? new Date(workout.draft.updatedAt).getTime() : null,
+    draftOf ? new Date(draftOf.updatedAt).getTime() : null,
   );
-  const draftDone = (workout.draft?.exercises || []).reduce((n, e) => n + e.sets.filter((x) => x.reps > 0).length, 0);
+  const draftDone = (draftOf?.exercises || []).reduce((n, e) => n + e.sets.filter((x) => x.reps > 0).length, 0);
   const [stale, setStale] = useState(
-    () => !!workout.draft && draftDone > 0 && Date.now() - new Date(workout.draft.updatedAt).getTime() > 8 * 3600000,
+    () => !!draftOf && draftDone > 0 && Date.now() - new Date(draftOf.updatedAt).getTime() > 8 * 3600000,
   );
   const [nudge, setNudge] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -232,6 +247,13 @@ function JournalBody({
   const isFree = !!workout.day.id && workout.day.id === 'free';
   /** The trainer's additions join the program when the workout is finished. */
   const addsJoin = workout.actorRole === 'trainer' && !isFree;
+  /** The trainer can change the program from the journal. */
+  const canProgram = workout.actorRole === 'trainer' && !isFree;
+  const since = inGym(workout.checkedInAt) ? new Date(workout.checkedInAt!).getTime() : null;
+  // A replacement picked for a planned exercise: today only, or in the program for good.
+  const [swapChoice, setSwapChoice] = useState<{ ei: number; ex: Exercise } | null>(null);
+  // Sets / rep range being changed for the exercise at this index.
+  const [targetsFor, setTargetsFor] = useState<number | null>(null);
   const [repeating, setRepeating] = useState(false);
   const [savingDay, setSavingDay] = useState(false);
   const [savedDay, setSavedDay] = useState('');
@@ -263,6 +285,7 @@ function JournalBody({
             equipment: info?.equipment,
             previousSets: info?.previousSets || [],
             previousAt: info?.previousAt || null,
+            previousNote: info?.previousNote,
           };
         const p = plannedOf(r);
         if (!r.replaces || r.exerciseId === p.exerciseId) return p;
@@ -273,6 +296,7 @@ function JournalBody({
           equipment: info?.equipment,
           previousSets: info?.previousSets || [],
           previousAt: info?.previousAt || null,
+          previousNote: info?.previousNote,
         };
       }),
     [workout, results, swapInfo],
@@ -336,6 +360,11 @@ function JournalBody({
           setStatus(settled ? 'saved' : 'saving');
           setErrorText('');
         } catch (err: any) {
+          if (isNetworkError(err)) {
+            // Kept on the device (pending) and sent when the network is back.
+            setStatus('offline');
+            throw err;
+          }
           const msg = readError(err);
           if (err?.response?.status === 409 || /обнов/i.test(msg)) {
             conflictRef.current = true;
@@ -360,6 +389,11 @@ function JournalBody({
     timer.current = setTimeout(() => void persist().catch(() => undefined), 700);
   };
 
+  useEffect(() => {
+    const retry = () => pending.current && !completed.current && void persist().catch(() => undefined);
+    window.addEventListener('online', retry);
+    return () => window.removeEventListener('online', retry);
+  }, [persist]);
   useEffect(() => {
     if (pending.current) void persist().catch(() => undefined);
     return () => {
@@ -575,15 +609,15 @@ function JournalBody({
     return next;
   };
   /** Trainer only: saves the day's exercises (order, or without removed ones) into the program, then reloads the journal. */
-  const saveDayToProgram = async (entries: SessionExercise[], join?: SessionExercise) => {
+  const saveDayToProgram = async (entries: SessionExercise[], join: SessionExercise[] = []) => {
     setProgramBusy(true);
     try {
       if (timer.current) clearTimeout(timer.current);
       await persist();
       // Program exercises in the journal's order; an added one listed in `join` becomes part of the program.
       await api.post(`/api/programs/${workout.programId}/days/${workout.day.id}/exercises`, {
-        exerciseIds: entries.filter((e) => !e.extra || e === join).map(slotOf),
-        added: join?.extra ? [{ exerciseId: join.exerciseId, sets: join.sets.length, ...join.extra }] : [],
+        exerciseIds: entries.filter((e) => !e.extra || join.includes(e)).map(slotOf),
+        added: join.filter((e) => e.extra).map((e) => ({ exerciseId: e.exerciseId, sets: e.sets.length, ...e.extra })),
         order: entries.map((e) => e.exerciseId),
         baseRevision: baseRevision.current,
       });
@@ -598,6 +632,58 @@ function JournalBody({
     }
   };
 
+  /** Trainer: one planned exercise changed in the program (targets, or another exercise for good), then the journal reloads. */
+  const saveExerciseToProgram = async (slot: string, change: { replaceWith?: string } & Partial<Targets>) => {
+    setProgramBusy(true);
+    try {
+      if (timer.current) clearTimeout(timer.current);
+      await persist();
+      await api.post(`/api/programs/${workout.programId}/days/${workout.day.id}/exercise`, {
+        exerciseId: slot,
+        ...change,
+        baseRevision: baseRevision.current,
+      });
+      completed.current = true;
+      safeStorage.remove(cacheKey);
+      onProgramChanged?.();
+      onReload();
+      return true;
+    } catch (err) {
+      setErrorText(readError(err));
+      return false;
+    } finally {
+      setProgramBusy(false);
+    }
+  };
+  /** Today's sets follow a new set count: empty sets are added or dropped, done ones stay. */
+  const resizeSets = (ei: number, count: number) => {
+    const e = latest.current[ei];
+    let sets = [...e.sets];
+    while (sets.length < count) sets.push({ weight: sets.at(-1)?.weight || 0, reps: 0, rir: null });
+    while (sets.length > count && sets.at(-1)!.reps === 0) sets = sets.slice(0, -1);
+    return sets;
+  };
+  const applyTargets = async (ei: number, t: Targets) => {
+    const e = latest.current[ei];
+    const sets = resizeSets(ei, t.sets);
+    if (e.extra) {
+      const { sets: _n, ...extra } = t;
+      update(latest.current.map((x, i) => (i === ei ? { ...x, sets, extra } : x)));
+      setTargetsFor(null);
+      return;
+    }
+    update(latest.current.map((x, i) => (i === ei ? { ...x, sets } : x)));
+    if (await saveExerciseToProgram(slotOf(e), t)) setTargetsFor(null);
+  };
+  /** A replacement for good: swapped in today, then put in the program in place of the planned one. */
+  const replaceInProgram = async (ei: number, ex: Exercise) => {
+    const slot = slotOf(latest.current[ei]);
+    if (latest.current[ei].exerciseId !== ex.id) await swapExercise(ei, ex);
+    await saveExerciseToProgram(slot, { replaceWith: ex.id });
+  };
+  const setNote = (ei: number, note: string) =>
+    update(latest.current.map((x, i) => (i === ei ? { ...x, note: note || undefined } : x)));
+
   const finish = async (at?: string): Promise<boolean> => {
     setConfirmFinish(false);
     const performed = countDone(latest.current);
@@ -609,10 +695,14 @@ function JournalBody({
     if (timer.current) clearTimeout(timer.current);
     try {
       pending.current = true;
-      await persist();
-      await api.post('/api/sessions', body(latest.current, feedbackRef.current, at));
+      // Offline the draft stays unsaved: the workout itself goes to the outbox with all its sets.
+      await persist().catch((err) => {
+        if (!isNetworkError(err)) throw err;
+      });
+      const r = await api.post('/api/sessions', body(latest.current, feedbackRef.current, at));
       completed.current = true;
       safeStorage.remove(cacheKey);
+      if (r.data?.queued) safeStorage.set(doneKey, String(Date.now()));
       onCompleted({ sets: performed });
       return true;
     } catch (err) {
@@ -713,7 +803,7 @@ function JournalBody({
           <strong className="num">
             {done}/{total}
           </strong>
-          <SaveState status={status} lastSetAt={done > 0 && done < total ? lastSetAt : null} />
+          <SaveState status={status} since={since} lastSetAt={done > 0 && done < total ? lastSetAt : null} />
         </div>
       </div>
       <div className="meter" aria-hidden="true">
@@ -723,7 +813,7 @@ function JournalBody({
       {stale && !conflict && (
         <div className="stale">
           <span>
-            Тренировка от {fmtDate(workout.draft!.updatedAt)} не завершена: {draftDone} подх. Записать её в историю?
+            Тренировка от {fmtDate(draftOf!.updatedAt)} не завершена: {draftDone} подх. Записать её в историю?
           </span>
           <div className="row gap">
             <button className="btn btn-sm" disabled={finishing} onClick={startOver}>
@@ -733,7 +823,7 @@ function JournalBody({
               className="btn btn-sm btn-primary"
               disabled={finishing}
               onClick={async () => {
-                if (await finish(workout.draft!.updatedAt)) setStale(false);
+                if (await finish(draftOf!.updatedAt)) setStale(false);
               }}
             >
               Записать
@@ -907,6 +997,7 @@ function JournalBody({
                   );
                 })}
               </div>
+              <ExerciseNote value={r.note || ''} previous={e.previousNote} onChange={(v) => setNote(ei, v)} />
             </section>
           );
         })}
@@ -970,7 +1061,12 @@ function JournalBody({
           onCreated={() => {
             exerciseList = null;
           }}
-          onPick={(x) => void swapExercise(swapping.ei, x)}
+          onPick={(x) => {
+            if (canProgram && !results[swapping.ei].extra) {
+              setSwapping(null);
+              setSwapChoice({ ei: swapping.ei, ex: x });
+            } else void swapExercise(swapping.ei, x);
+          }}
           onClose={() => setSwapping(null)}
         />
       )}
@@ -981,9 +1077,11 @@ function JournalBody({
           name={plan[menu].exerciseName}
           planned={results[menu].extra ? plan[menu] : plannedOf(results[menu])}
           confirm={menuConfirm}
-          canRemove={workout.actorRole === 'trainer' && !isFree && workout.day.exercises.length > 1}
-          canJoin={workout.actorRole === 'trainer' && !isFree}
-          canSaveOrder={workout.actorRole === 'trainer' && !isFree}
+          canProgram={canProgram}
+          removeBlocked={!results[menu].extra && latest.current.length === 1}
+          canEditTargets={canProgram || !!results[menu].extra}
+          canJoin={canProgram}
+          canSaveOrder={canProgram}
           busy={programBusy}
           onConfirm={setMenuConfirm}
           onSwap={() => void openSwap(menu)}
@@ -992,8 +1090,16 @@ function JournalBody({
           onDrop={() => removeExtra(menu)}
           onJoin={async () => {
             const entry = latest.current[menu];
-            await saveDayToProgram(latest.current, entry);
+            await saveDayToProgram(latest.current, [entry]);
             closeMenu();
+          }}
+          onTargets={() => {
+            setTargetsFor(menu);
+            closeMenu();
+          }}
+          onKeepSwap={async () => {
+            const entry = latest.current[menu];
+            if (entry.replaces && (await saveExerciseToProgram(entry.replaces, { replaceWith: entry.exerciseId }))) closeMenu();
           }}
           onOrder={() => {
             closeMenu();
@@ -1001,7 +1107,8 @@ function JournalBody({
           }}
           onRemove={async () => {
             const keep = latest.current.filter((_, i) => i !== menu);
-            await saveDayToProgram(keep);
+            // The last planned exercise can go when exercises added today stay: they become the program day.
+            await saveDayToProgram(keep, keep.every((e) => e.extra) ? keep : []);
             closeMenu();
           }}
           onClose={closeMenu}
@@ -1036,6 +1143,57 @@ function JournalBody({
       )}
       {adding?.picked && (
         <AddTargets exercise={adding.picked} onBack={() => setAdding({ list: adding.list })} onAdd={(t) => void addExercise(adding.picked!, t)} />
+      )}
+      {targetsFor !== null && results[targetsFor] && (
+        <TargetsSheet
+          title={plan[targetsFor].exerciseName}
+          initial={{
+            sets: results[targetsFor].sets.length,
+            repMin: plan[targetsFor].repMin,
+            repMax: plan[targetsFor].repMax,
+            targetRir: plan[targetsFor].targetRir,
+          }}
+          note={
+            results[targetsFor].extra
+              ? addsJoin
+                ? 'Для этой тренировки; при завершении упражнение войдёт в программу с этими цифрами.'
+                : 'Для этой тренировки.'
+              : 'Сохранится в программе: в следующий раз будет так же. Отмеченные подходы останутся.'
+          }
+          submitLabel={results[targetsFor].extra ? 'Применить' : 'Сохранить в программе'}
+          busy={programBusy}
+          onSubmit={(t) => void applyTargets(targetsFor, t)}
+          onBack={() => setTargetsFor(null)}
+        />
+      )}
+      {swapChoice && (
+        <Sheet title={'Замена: ' + swapChoice.ex.name} onClose={() => setSwapChoice(null)}>
+          <p className="muted small">
+            Вместо «{plan[swapChoice.ei]?.exerciseName}». Подходы, повторы и RIR останутся прежними.
+          </p>
+          <div className="order-actions">
+            <button
+              className="btn btn-block"
+              disabled={programBusy}
+              onClick={() => {
+                void swapExercise(swapChoice.ei, swapChoice.ex);
+                setSwapChoice(null);
+              }}
+            >
+              Только сегодня
+            </button>
+            <button
+              className="btn btn-primary btn-block"
+              disabled={programBusy}
+              onClick={async () => {
+                await replaceInProgram(swapChoice.ei, swapChoice.ex);
+                setSwapChoice(null);
+              }}
+            >
+              {programBusy ? 'Сохраняем…' : 'В программе насовсем'}
+            </button>
+          </div>
+        </Sheet>
       )}
 
       {ordering && (
@@ -1124,15 +1282,19 @@ function JournalBody({
   );
 }
 
-/** Actions for one exercise of the workout: replace, skip, order, remove from the program. */
 type MenuConfirm = 'swap' | 'revert' | 'remove' | 'drop';
-/** Actions for one exercise of the workout: replace, skip, order, remove; for one added today — drop or add to the program. */
+/**
+ * Actions for one exercise of the workout: replace (today or for good), sets and reps, skip, order, delete;
+ * for one added today — delete or add to the program.
+ */
 function ExerciseMenu({
   entry,
   name,
   planned,
   confirm,
-  canRemove,
+  canProgram,
+  removeBlocked,
+  canEditTargets,
   canJoin,
   canSaveOrder,
   busy,
@@ -1142,6 +1304,8 @@ function ExerciseMenu({
   onSkip,
   onDrop,
   onJoin,
+  onTargets,
+  onKeepSwap,
   onOrder,
   onRemove,
   onClose,
@@ -1150,7 +1314,10 @@ function ExerciseMenu({
   name: string;
   planned: WorkoutExercise;
   confirm: MenuConfirm | null;
-  canRemove: boolean;
+  canProgram: boolean;
+  /** The only exercise of the workout: deleting it would leave the program day empty. */
+  removeBlocked: boolean;
+  canEditTargets: boolean;
   canJoin: boolean;
   canSaveOrder: boolean;
   busy: boolean;
@@ -1160,6 +1327,8 @@ function ExerciseMenu({
   onSkip: () => void;
   onDrop: () => void;
   onJoin: () => void;
+  onTargets: () => void;
+  onKeepSwap: () => void;
   onOrder: () => void;
   onRemove: () => void;
   onClose: () => void;
@@ -1167,6 +1336,7 @@ function ExerciseMenu({
   const ticked = entry.sets.filter((x) => x.reps > 0).length;
   const lost = ticked ? ` Отмеченные подходы (${ticked}) не сохранятся.` : '';
   const extra = entry.extra;
+  const targets = extra || planned;
   return (
     <Sheet title={name} onClose={onClose}>
       {confirm === 'swap' ? (
@@ -1179,11 +1349,11 @@ function ExerciseMenu({
           onCancel={() => onConfirm(null)}
         />
       ) : confirm === 'drop' ? (
-        <Confirm text={`Убрать «${name}» из этой тренировки?` + lost} confirmLabel="Убрать" onConfirm={onDrop} onCancel={() => onConfirm(null)} />
+        <Confirm text={`Удалить «${name}» из этой тренировки?` + lost} confirmLabel="Удалить" onConfirm={onDrop} onCancel={() => onConfirm(null)} />
       ) : confirm === 'remove' ? (
         <Confirm
-          text={`Убрать «${planned.exerciseName}» из программы? В следующих тренировках его не будет.` + lost}
-          confirmLabel="Убрать"
+          text={`Удалить «${planned.exerciseName}» из программы? В следующих тренировках его не будет.` + lost}
+          confirmLabel="Удалить"
           busy={busy}
           onConfirm={onRemove}
           onCancel={() => onConfirm(null)}
@@ -1193,8 +1363,10 @@ function ExerciseMenu({
           <button className="menu-item" onClick={() => (ticked ? onConfirm('swap') : onSwap())}>
             <ArrowLeftRight size={18} />
             <span className="grow">
-              {extra ? 'Заменить другим' : 'Заменить на сегодня'}
-              <small>{extra ? 'с теми же подходами и повторами' : `в программе останется «${planned.exerciseName}»`}</small>
+              {extra ? 'Заменить другим' : 'Заменить'}
+              <small>
+                {extra ? 'с теми же подходами и повторами' : canProgram ? 'на сегодня или в программе насовсем' : `в программе останется «${planned.exerciseName}»`}
+              </small>
             </span>
           </button>
           {entry.replaces && (
@@ -1206,15 +1378,28 @@ function ExerciseMenu({
               </span>
             </button>
           )}
-          {extra ? (
-            <button className="menu-item" onClick={() => (ticked ? onConfirm('drop') : onDrop())}>
-              <Minus size={18} />
+          {entry.replaces && canProgram && (
+            <button className="menu-item" onClick={onKeepSwap} disabled={busy}>
+              <Check size={18} />
               <span className="grow">
-                Убрать из тренировки
-                <small>{canJoin ? 'в программу не попадёт' : 'добавлено сегодня'}</small>
+                {busy ? 'Сохраняем…' : `Оставить «${name}» в программе`}
+                <small>вместо «{planned.exerciseName}» насовсем</small>
               </span>
             </button>
-          ) : (
+          )}
+          {canEditTargets && (
+            <button className="menu-item" onClick={onTargets}>
+              <Pencil size={18} />
+              <span className="grow">
+                Подходы и повторы
+                <small>
+                  {entry.sets.length}×{targets.repMin}–{targets.repMax}, RIR {targets.targetRir}
+                  {extra ? ' · на эту тренировку' : ' · сохранится в программе'}
+                </small>
+              </span>
+            </button>
+          )}
+          {!extra && (
             <button className="menu-item" onClick={onSkip}>
               <SkipForward size={18} />
               <span className="grow">
@@ -1227,9 +1412,9 @@ function ExerciseMenu({
             <button className="menu-item" onClick={onJoin} disabled={busy}>
               <Plus size={18} />
               <span className="grow">
-                {busy ? 'Сохраняем…' : 'Добавить в программу'}
+                {busy ? 'Сохраняем…' : 'Добавить в программу сейчас'}
                 <small>
-                  {entry.sets.length}×{extra.repMin}–{extra.repMax}, RIR {extra.targetRir} — в следующий раз будет по плану
+                  {entry.sets.length}×{extra.repMin}–{extra.repMax}, RIR {extra.targetRir} — иначе войдёт при завершении, если сделан подход
                 </small>
               </span>
             </button>
@@ -1241,15 +1426,23 @@ function ExerciseMenu({
               <small>{canSaveOrder ? 'сегодня или в программе' : 'в этой тренировке'}</small>
             </span>
           </button>
-          {canRemove && !extra && (
-            <button className="menu-item danger" onClick={() => onConfirm('remove')}>
+          {extra ? (
+            <button className="menu-item danger" onClick={() => (ticked ? onConfirm('drop') : onDrop())}>
               <Trash2 size={18} />
               <span className="grow">
-                Убрать из программы
-                <small>насовсем, из этой тренировки программы</small>
+                Удалить упражнение
+                <small>добавлено сегодня{canJoin ? ' — в программу не попадёт' : ''}</small>
               </span>
             </button>
-          )}
+          ) : canProgram ? (
+            <button className="menu-item danger" onClick={() => onConfirm('remove')} disabled={removeBlocked}>
+              <Trash2 size={18} />
+              <span className="grow">
+                Удалить из программы
+                <small>{removeBlocked ? 'единственное упражнение — сначала добавьте другое' : 'насовсем, из этой тренировки программы'}</small>
+              </span>
+            </button>
+          ) : null}
         </div>
       )}
     </Sheet>
@@ -1350,34 +1543,45 @@ function SaveAsDay({
   );
 }
 
-/** Sets, rep range and reserve for an exercise added in the gym. */
-function AddTargets({
-  exercise,
-  onAdd,
+type Targets = { sets: number; repMin: number; repMax: number; targetRir: number };
+const RANGES: Array<[number, number]> = [
+  [5, 8],
+  [6, 10],
+  [8, 12],
+  [10, 15],
+  [12, 20],
+];
+/** Sets, rep range and reserve: for an exercise added in the gym, or to change one in the workout. */
+function TargetsSheet({
+  title,
+  initial,
+  note,
+  submitLabel,
+  busy = false,
+  onSubmit,
   onBack,
 }: {
-  exercise: Exercise;
-  onAdd: (t: { sets: number; repMin: number; repMax: number; targetRir: number }) => void;
+  title: string;
+  initial: Targets;
+  note?: string;
+  submitLabel: string;
+  busy?: boolean;
+  onSubmit: (t: Targets) => void;
   onBack: () => void;
 }) {
-  // Isolation and cable work: more reps, closer to failure; big lifts: fewer reps, more in reserve.
-  const light = isStack({ exerciseId: exercise.id, equipment: exercise.equipment }) || /Бицепс|Трицепс|Плечи|Икры|Пресс/.test(exercise.muscleGroup);
-  const [sets, setSets] = useState(3);
-  const [range, setRange] = useState<[number, number]>(light ? [10, 15] : [8, 12]);
-  const [rir, setRir] = useState(light ? 1 : 2);
-  const RANGES: Array<[number, number]> = [
-    [5, 8],
-    [6, 10],
-    [8, 12],
-    [10, 15],
-    [12, 20],
-  ];
+  const [sets, setSets] = useState(initial.sets);
+  const [repMin, setRepMin] = useState(String(initial.repMin));
+  const [repMax, setRepMax] = useState(String(initial.repMax));
+  const [rir, setRir] = useState(initial.targetRir);
+  const lo = Number(repMin);
+  const hi = Number(repMax);
+  const valid = Number.isInteger(lo) && Number.isInteger(hi) && lo >= 1 && hi >= lo && hi <= 100;
   return (
-    <Sheet title={exercise.name} onClose={onBack}>
+    <Sheet title={title} onClose={onBack}>
       <div className="field">
         <span>Подходы</span>
         <div className="chips">
-          {[1, 2, 3, 4, 5].map((n) => (
+          {[1, 2, 3, 4, 5, 6].map((n) => (
             <button key={n} className={'filter' + (sets === n ? ' on' : '')} onClick={() => setSets(n)}>
               {n}
             </button>
@@ -1388,26 +1592,56 @@ function AddTargets({
         <span>Повторы</span>
         <div className="chips">
           {RANGES.map(([a, b]) => (
-            <button key={a + '-' + b} className={'filter' + (range[0] === a && range[1] === b ? ' on' : '')} onClick={() => setRange([a, b])}>
+            <button
+              key={a + '-' + b}
+              className={'filter' + (lo === a && hi === b ? ' on' : '')}
+              onClick={() => {
+                setRepMin(String(a));
+                setRepMax(String(b));
+              }}
+            >
               {a}–{b}
             </button>
           ))}
+        </div>
+        <div className="range-inputs">
+          <input id="targets-min" inputMode="numeric" aria-label="Повторов от" value={repMin} onChange={(e) => setRepMin(e.target.value.replace(/\D/g, ''))} />
+          <span>–</span>
+          <input id="targets-max" inputMode="numeric" aria-label="Повторов до" value={repMax} onChange={(e) => setRepMax(e.target.value.replace(/\D/g, ''))} />
+          <span className="muted small">свой диапазон</span>
         </div>
       </div>
       <div className="field">
         <span>Запас повторов (RIR)</span>
         <div className="chips">
-          {[0, 1, 2, 3].map((n) => (
+          {[0, 1, 2, 3, 4].map((n) => (
             <button key={n} className={'filter' + (rir === n ? ' on' : '')} onClick={() => setRir(n)}>
               {n}
             </button>
           ))}
         </div>
       </div>
-      <button className="btn btn-primary btn-block" onClick={() => onAdd({ sets, repMin: range[0], repMax: range[1], targetRir: rir })}>
-        <Plus size={16} /> Добавить в тренировку
+      {note && <p className="muted small">{note}</p>}
+      {!valid && <p className="tone-warn small">Повторы: от 1 до 100, первое число не больше второго.</p>}
+      <button className="btn btn-primary btn-block" disabled={!valid || busy} onClick={() => onSubmit({ sets, repMin: lo, repMax: hi, targetRir: rir })}>
+        {busy ? 'Сохраняем…' : submitLabel}
       </button>
     </Sheet>
+  );
+}
+
+/** Starting targets for an exercise added in the gym. */
+function AddTargets({ exercise, onAdd, onBack }: { exercise: Exercise; onAdd: (t: Targets) => void; onBack: () => void }) {
+  // Isolation and cable work: more reps, closer to failure; big lifts: fewer reps, more in reserve.
+  const light = isStack({ exerciseId: exercise.id, equipment: exercise.equipment }) || /Бицепс|Трицепс|Плечи|Икры|Пресс/.test(exercise.muscleGroup);
+  return (
+    <TargetsSheet
+      title={exercise.name}
+      initial={{ sets: 3, repMin: light ? 10 : 8, repMax: light ? 15 : 12, targetRir: light ? 1 : 2 }}
+      submitLabel="Добавить в тренировку"
+      onSubmit={onAdd}
+      onBack={onBack}
+    />
   );
 }
 
@@ -1466,11 +1700,45 @@ function NumberInput({
 }
 
 /** Save status, or time since the last set while the workout is in progress. */
-function SaveState({ status, lastSetAt }: { status: 'idle' | 'saving' | 'saved' | 'error'; lastSetAt: number | null }) {
+/**
+ * Time in the gym since «Пришёл» (keeps running, never resets); without a check-in, time since the last set.
+ * The colour tells whether the entries are saved.
+ */
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error' | 'offline';
+function SaveState({ status, since, lastSetAt }: { status: SaveStatus; since: number | null; lastSetAt: number | null }) {
   const now = useNow(1000);
+  if (status === 'error') return <span className="save-dot error">не сохр.</span>;
+  if (status === 'offline' && !since) return <span className="save-dot offline" title="Нет сети: подходы на телефоне, отправятся сами">офлайн</span>;
+  if (since)
+    return (
+      <span className={'save-dot session ' + status} title="Время на тренировке с отметки «Пришёл»">
+        {elapsed(now - since)}
+      </span>
+    );
+  return <span className={'save-dot ' + status}>{status === 'saving' ? 'сохр…' : lastSetAt ? clock(now - lastSetAt) : 'сохр.'}</span>;
+}
+
+/** A small comment line at the bottom of an exercise; last time's comment is shown above it. */
+function ExerciseNote({ value, previous, onChange }: { value: string; previous?: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(!!value);
   return (
-    <span className={'save-dot ' + status}>
-      {status === 'error' ? 'не сохр.' : status === 'saving' ? 'сохр…' : lastSetAt ? clock(now - lastSetAt) : 'сохр.'}
-    </span>
+    <div className="ex-note">
+      {previous && <span className="ex-note-prev">в прошлый раз: «{previous}»</span>}
+      {open || value ? (
+        <input
+          className="ex-note-input"
+          maxLength={200}
+          placeholder="Комментарий: настройки, самочувствие…"
+          value={value}
+          autoFocus={open && !value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={() => !value && setOpen(false)}
+        />
+      ) : (
+        <button className="link-btn ex-note-add" onClick={() => setOpen(true)}>
+          <Plus size={12} /> комментарий
+        </button>
+      )}
+    </div>
   );
 }

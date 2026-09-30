@@ -62,7 +62,7 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
   const toggleGym = async () => {
     setBusy(true);
     try {
-      for (const c of coaches) await api.post('/api/attendance', { trainerId: c.trainerId, present: !here, localDate: localDate() });
+      for (const c of coaches) await api.post('/api/attendance', { trainerId: c.trainerId, present: !here, localDate: localDate(), at: new Date().toISOString() });
       await load();
     } catch (e) {
       setErr(readError(e));
