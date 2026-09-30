@@ -230,6 +230,8 @@ function JournalBody({
   // Adding an exercise for today: pick it, then its sets and reps.
   const [adding, setAdding] = useState<{ list: Exercise[]; picked?: Exercise } | null>(null);
   const isFree = !!workout.day.id && workout.day.id === 'free';
+  /** The trainer's additions join the program when the workout is finished. */
+  const addsJoin = workout.actorRole === 'trainer' && !isFree;
   const [repeating, setRepeating] = useState(false);
   const [savingDay, setSavingDay] = useState(false);
   const [savedDay, setSavedDay] = useState('');
@@ -368,6 +370,7 @@ function JournalBody({
 
   const countDone = (list: SessionExercise[]) => list.reduce((n, e) => n + e.sets.filter((s) => s.reps > 0).length, 0);
   const done = countDone(results);
+  const joinNote = addsJoin && results.some((e) => e.extra && e.sets.some((s) => s.reps > 0)) ? ' Добавленные упражнения войдут в программу.' : '';
   // A skipped exercise only counts the sets already done.
   const total = results.reduce((n, e) => n + (e.skipped ? e.sets.filter((s) => s.reps > 0).length : e.sets.length), 0);
   const currentIdx = results.findIndex((e) => !e.skipped && e.sets.some((x) => x.reps === 0));
@@ -810,7 +813,7 @@ function JournalBody({
                   <span className="ex-plan">
                     {e.sets}×{e.repMin}–{e.repMax} · RIR {e.targetRir}
                     {e.previousAt ? ' · прошл. ' + fmtDate(e.previousAt) : ''}
-                    {r.extra && !isFree ? ' · добавлено сегодня' : ''}
+                    {r.extra && !isFree ? (addsJoin ? ' · войдёт в программу' : ' · добавлено сегодня') : ''}
                   </span>
                   {original && (
                     <span className="ex-swapped">
@@ -1088,8 +1091,8 @@ function JournalBody({
           <Confirm
             text={
               done < total
-                ? `Выполнено ${done} из ${total} подходов. Пустые подходы не попадут в историю${isFree ? '.' : ', дальше откроется следующая тренировка программы.'}`
-                : `Все ${total} подходов выполнены. Записать тренировку в историю?`
+                ? `Выполнено ${done} из ${total} подходов. Пустые подходы не попадут в историю${isFree ? '.' : ', дальше откроется следующая тренировка программы.'}${joinNote}`
+                : `Все ${total} подходов выполнены. Записать тренировку в историю?${joinNote}`
             }
             confirmLabel="Завершить"
             onConfirm={() => void finish()}
@@ -1208,7 +1211,7 @@ function ExerciseMenu({
               <Minus size={18} />
               <span className="grow">
                 Убрать из тренировки
-                <small>добавлено сегодня</small>
+                <small>{canJoin ? 'в программу не попадёт' : 'добавлено сегодня'}</small>
               </span>
             </button>
           ) : (

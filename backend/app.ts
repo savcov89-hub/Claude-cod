@@ -1393,12 +1393,31 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         });
         const idx = program.days.findIndex((d) => d.id === dayId);
         const nextDayId = program.days[(idx + 1) % program.days.length].id;
+        // Exercises the trainer added in the gym and did join the program day, each after the planned
+        // exercise it followed in the journal; the planned ones keep their order.
+        const joined = program.free || access.role !== 'trainer' ? [] : matched.filter((e) => e.extra && performed.some((p) => p.exerciseId === e.exerciseId));
+        let days = program.days;
+        if (joined.length && day.exercises.length + joined.length <= 30) {
+          const findKnown = knownExercises(trainerId);
+          const after = new Map<string, ProgramExercise[]>();
+          let prev = '';
+          for (const e of matched) {
+            if (!e.extra) prev = String(e.replaces || e.exerciseId);
+            else if (joined.includes(e)) {
+              const known = await findKnown(e.exerciseId);
+              if (known) after.set(prev, [...(after.get(prev) || []), toProgramExercise({ ...e.extra, sets: e.sets.length }, known)]);
+            }
+          }
+          const exercises = [...(after.get('') || []), ...day.exercises.flatMap((p) => [p, ...(after.get(p.exerciseId) || [])])];
+          days = program.days.map((d) => (d.id === dayId ? { ...d, exercises } : d));
+        }
         const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
         const [updated] = await db.update(programsTable(trainerId), [
           {
             id: programId,
             record: {
               ...rest,
+              ...(days !== program.days ? { days, updatedAt: completedAt } : {}),
               nextDayId,
               lastCompletedAt: completedAt,
               lastRecordedByRole: access.role,
