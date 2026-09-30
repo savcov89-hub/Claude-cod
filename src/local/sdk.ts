@@ -63,5 +63,15 @@ export const db: Db = {
   },
 };
 
-export const sdk = { db, error, json, requireAuth, router } as unknown as Sdk;
+// The demo has no real sign-in: an account is just a new id (one per email).
+const demoAccounts = new Map<string, string>();
+const accounts = {
+  async createUser(email: string) {
+    if (demoAccounts.has(email)) return { exists: true };
+    const userId = 'demo-login-' + newId();
+    demoAccounts.set(email, userId);
+    return { userId };
+  },
+};
+export const sdk = { db, accounts, error, json, requireAuth, router } as unknown as Sdk;
 export type LocalHandler = Handler;

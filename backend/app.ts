@@ -20,8 +20,14 @@ export interface Ctx {
   params: Record<string, string>;
   query: Record<string, string | undefined>;
 }
+/** Creating sign-in accounts: only the server has the rights (the demo fakes it). */
+export interface Accounts {
+  /** A confirmed email + password account, so nobody waits for an email. */
+  createUser(email: string, password: string): Promise<{ userId?: string; exists?: boolean }>;
+}
 export interface Sdk {
   db: Db;
+  accounts?: Accounts;
   error: (message: string, status?: number) => any;
   json: (data: unknown, status?: number) => any;
   requireAuth: () => any;
@@ -239,7 +245,7 @@ const randomId = () =>
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2) + Date.now().toString(36);
 
-export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
+export function createHandler({ db, accounts, error, json, requireAuth, router }: Sdk) {
   async function listAll<T>(table: string, max = 1000) {
     const items: Array<T & { id: string }> = [];
     let nextToken: string | undefined;
@@ -631,6 +637,38 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
           { trainerId: ctx.user!.userId, trainerName: profile.name, clientName, clientId, createdAt: nowIso(), usedBy: null } satisfies InviteRecord,
         ]);
         return id ? json({ code, clientId }) : error('Не удалось сохранить код.', 500);
+      },
+    ],
+
+    /**
+     * The trainer makes a client's sign-in: email + password, confirmed at once, no email sent.
+     * The account is created as this client and connected to the trainer; an email already registered is refused.
+     */
+    'POST /api/client/:clientId/login': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const profile = await trainerOnly(ctx);
+        if (!profile) return error('Доступ только для тренера.', 403);
+        if (!accounts) return error('Создание входа недоступно.', 501);
+        const trainerId = ctx.user!.userId;
+        const client = await findClient(trainerId, ctx.params.clientId);
+        if (!client) return error('Клиент не найден.', 404);
+        if (client.userId || client.userId === undefined) return error('Клиент уже подключён к приложению.', 409);
+        const email = text(ctx.body?.email, 200).toLowerCase();
+        const password = text(ctx.body?.password, 72);
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return error('Проверьте адрес почты.', 400);
+        if (password.length < 6) return error('Пароль — не короче 6 символов.', 400);
+        const made = await accounts.createUser(email, password);
+        if (made.exists || !made.userId)
+          return error('Эта почта уже зарегистрирована. Укажите другую — или клиент входит сам и подключается по приглашению.', 409);
+        const userId = made.userId;
+        const connectedAt = nowIso();
+        await db.add(profileTable(userId), [{ role: 'client', name: client.clientName, email } satisfies Profile]);
+        await saveClient(trainerId, client, { userId, clientEmail: email, connectedAt });
+        await db.add(coachesTable(userId), [
+          { trainerId, trainerName: profile.name, connectedAt, clientId: client.clientId } satisfies CoachRecord,
+        ]);
+        return json({ email, password }, 201);
       },
     ],
 

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Activity, ChevronRight, ClipboardList, Dumbbell, LogOut, Mail, RotateCcw } from 'lucide-react';
+import { Activity, ChevronRight, ClipboardList, Dumbbell, KeyRound, LogOut, Mail, RotateCcw } from 'lucide-react';
 import { api, isArtifactBuild, isLocal, readError } from './transport';
 import { auth, type AuthUser } from './supabase';
 import { captureInvite, clearInvite, pendingInvite } from './invite';
@@ -116,6 +116,10 @@ function RealApp() {
   const [name, setName] = useState('');
   const [googleOn, setGoogleOn] = useState(false);
   const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  // Password first; the emailed code stays as a fallback (the project's own mail is limited).
+  const [byEmail, setByEmail] = useState(false);
+  const [newPassword, setNewPassword] = useState<string | null>(null);
   const [picked, setPicked] = useState<Role | null>(null);
   // An invite link (?invite=CODE) waits here until the client has signed in.
   const [invite, setInvite] = useState(() => {
@@ -175,6 +179,33 @@ function RealApp() {
       );
     } finally {
       setBusy(false);
+    }
+  };
+  const signInPassword = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !password) return;
+    setBusy(true);
+    setErr('');
+    try {
+      const signed = await auth.signInWithPassword(email.trim(), password);
+      setUser(signed);
+      setName(signed?.name || '');
+      if (signed) setProfile((await api.get('/api/me')).data.profile || null);
+    } catch (e) {
+      setErr(/invalid/i.test(readError(e)) ? 'Неверная почта или пароль.' : readError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const savePassword = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!newPassword || newPassword.length < 6) return setNote('Пароль — не короче 6 символов.');
+    try {
+      await auth.setPassword(newPassword);
+      setNewPassword(null);
+      setNote('Пароль сохранён. Теперь можно входить по почте и паролю.');
+    } catch (e) {
+      setNote(readError(e));
     }
   };
   const verify = async (e: FormEvent) => {
@@ -260,10 +291,29 @@ function RealApp() {
             <button className="btn btn-primary btn-lg btn-block" disabled={busy} onClick={google}>
               <GoogleMark /> Войти через Google
             </button>
-            <p className="muted small center-text">или по ссылке на почту</p>
+            <p className="muted small center-text">или по почте</p>
           </>
         )}
-        {sentTo ? (
+        {!byEmail && !sentTo ? (
+          <>
+            <form className="auth-form" onSubmit={signInPassword}>
+              <label className="field">
+                <span>Электронная почта</span>
+                <input type="email" autoComplete="username" inputMode="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              </label>
+              <label className="field">
+                <span>Пароль</span>
+                <input id="login-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              </label>
+              <button className={'btn btn-lg btn-block' + (googleOn ? '' : ' btn-primary')} disabled={busy || !email.trim() || !password} type="submit">
+                {busy ? 'Входим…' : 'Войти'}
+              </button>
+            </form>
+            <button className="btn btn-quiet" onClick={() => setByEmail(true)}>
+              Нет пароля? Войти по коду из письма
+            </button>
+          </>
+        ) : sentTo ? (
           <div className="notice">
             <Mail size={18} />
             <p>
@@ -311,7 +361,10 @@ function RealApp() {
               />
             </label>
             <button className={'btn btn-lg btn-block' + (googleOn ? '' : ' btn-primary')} disabled={busy || !email.trim()} type="submit">
-              {busy ? 'Отправляем…' : 'Получить ссылку для входа'} <ChevronRight size={18} />
+              {busy ? 'Отправляем…' : 'Получить код для входа'} <ChevronRight size={18} />
+            </button>
+            <button className="btn btn-quiet" type="button" onClick={() => setByEmail(false)}>
+              Войти по паролю
             </button>
           </form>
         )}
@@ -395,6 +448,9 @@ function RealApp() {
         <Dumbbell size={18} /> Training Log
       </span>
       <span className="muted small grow">{profile.name}</span>
+      <button className="icon-btn sm" aria-label="Пароль для входа" title="Пароль для входа" onClick={() => setNewPassword(newPassword === null ? '' : null)}>
+        <KeyRound size={16} />
+      </button>
       <button className="icon-btn sm" aria-label="Выйти" onClick={signOut}>
         <LogOut size={16} />
       </button>
@@ -403,6 +459,21 @@ function RealApp() {
   const top = (
     <>
       {header}
+      {newPassword !== null && (
+        <form className="password-bar" onSubmit={savePassword}>
+          <input
+            id="new-password"
+            type="password"
+            autoComplete="new-password"
+            placeholder="Новый пароль, от 6 символов"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+          />
+          <button className="btn btn-primary btn-sm" type="submit">
+            Сохранить
+          </button>
+        </form>
+      )}
       {note && (
         <button className="success note-bar" onClick={() => setNote('')}>
           {note}

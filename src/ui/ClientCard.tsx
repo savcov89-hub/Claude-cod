@@ -139,6 +139,12 @@ export function ClientCard({
   );
 }
 
+/** Easy to read out and type on a phone: no 0/O, 1/l. */
+const newPassword = () => {
+  const abc = 'abcdefghjkmnpqrstuvwxyz23456789';
+  return Array.from({ length: 8 }, () => abc[Math.floor(Math.random() * abc.length)]).join('');
+};
+
 function Overview({ data, clientId, sessionsCount }: { data: TrainerData; clientId: string; sessionsCount: number }) {
   const client = data.clients.find((c) => c.clientId === clientId)!;
   const [notes, setNotes] = useState({ goal: '', limits: '', notes: '', ...client.notes });
@@ -146,6 +152,36 @@ function Overview({ data, clientId, sessionsCount }: { data: TrainerData; client
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState('');
   const [shared, setShared] = useState('');
+  // Sign-in made by the trainer: email + password, no email needed.
+  const [login, setLogin] = useState<{ email: string; password: string } | null>(null);
+  const [made, setMade] = useState<{ email: string; password: string } | null>(null);
+  const makeLogin = async () => {
+    if (!login) return;
+    setBusy(true);
+    setErr('');
+    try {
+      const r = await api.post('/api/client/' + clientId + '/login', login);
+      setMade(r.data);
+      setLogin(null);
+      await data.reloadClients();
+    } catch (e) {
+      setErr(readError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const shareLogin = async (m: { email: string; password: string }) => {
+    const text = `${client.clientName}, ваш дневник тренировок: ${location.origin + location.pathname}\nПочта: ${m.email}\nПароль: ${m.password}\nПароль можно сменить в приложении (значок ключа).`;
+    try {
+      if (navigator.share) await navigator.share({ title: 'Вход в дневник тренировок', text });
+      else {
+        await navigator.clipboard.writeText(text);
+        setShared('Скопировано');
+      }
+    } catch {
+      /* closed the share sheet */
+    }
+  };
   const shareInvite = async (c: string, clientName: string) => {
     const url = inviteLink(c);
     const text = `${clientName}, ваш дневник тренировок: откройте ссылку и войдите по почте — подключение произойдёт само.`;
@@ -242,7 +278,16 @@ function Overview({ data, clientId, sessionsCount }: { data: TrainerData; client
       </section>
       <section className="block">
         <h4>Приложение клиента</h4>
-        {client.userId ? (
+        {made ? (
+          <div className="invite">
+            <span className="muted small">Вход создан — письма не нужны. Отправьте клиенту:</span>
+            <strong>{made.email}</strong>
+            <strong className="code num">{made.password}</strong>
+            <button className="btn btn-primary btn-block" onClick={() => void shareLogin(made)}>
+              <Share2 size={16} /> {shared || 'Отправить данные для входа'}
+            </button>
+          </div>
+        ) : client.userId ? (
           <p className="muted">
             <Smartphone size={14} className="inline-icon" /> Подключён{client.clientEmail ? ' · ' + client.clientEmail : ''}. Клиент видит программу и может сам записывать подходы.
           </p>
@@ -258,9 +303,35 @@ function Overview({ data, clientId, sessionsCount }: { data: TrainerData; client
         ) : (
           <>
             <p className="muted">Клиент без приложения — тренировки записываете вы. Можно выдать код, чтобы он видел программу и прогресс.</p>
-            <button className="btn" onClick={invite}>
-              Выдать код подключения
-            </button>
+            {login ? (
+              <div className="login-form">
+                <label className="field">
+                  <span>Почта клиента (логин)</span>
+                  <input id="client-login-email" type="email" inputMode="email" value={login.email} onChange={(e) => setLogin({ ...login, email: e.target.value })} placeholder="client@mail.ru" />
+                </label>
+                <label className="field">
+                  <span>Пароль</span>
+                  <input id="client-login-password" value={login.password} onChange={(e) => setLogin({ ...login, password: e.target.value })} />
+                </label>
+                <div className="row gap">
+                  <button className="btn" onClick={() => setLogin(null)} disabled={busy}>
+                    Отмена
+                  </button>
+                  <button className="btn btn-primary" onClick={() => void makeLogin()} disabled={busy || !login.email.trim() || login.password.length < 6}>
+                    {busy ? 'Создаём…' : 'Создать вход'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="row gap wrap">
+                <button className="btn btn-primary" onClick={() => setLogin({ email: '', password: newPassword() })}>
+                  Создать вход по паролю
+                </button>
+                <button className="btn" onClick={invite}>
+                  Выдать код подключения
+                </button>
+              </div>
+            )}
           </>
         )}
       </section>

@@ -2646,3 +2646,18 @@ h2 {
   text-align: left;
   border-radius: 0;
 }
+.login-form {
+  display: grid;
+  gap: 8px;
+}
+.password-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.password-bar input {
+  flex: 1;
+  min-width: 0;
+}

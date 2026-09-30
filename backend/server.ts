@@ -1,6 +1,6 @@
 // HTTP entry for backend/app.ts on Supabase: web-standard Request/Response, rows kept in one Postgres table.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { createHandler, type Ctx, type Db, type Sdk } from './app';
+import { createHandler, type Accounts, type Ctx, type Db, type Sdk } from './app';
 import { error, json, requireAuth, router, type Handler } from './router';
 
 const ROWS = 'kv_rows';
@@ -71,8 +71,8 @@ export function routePath(pathname: string) {
   return p === '/api/api' || p.startsWith('/api/api/') ? p.slice(4) : p;
 }
 
-export function createServer(deps: { db: Db; getUser: (token: string) => Promise<Ctx['user']> }) {
-  const handle = createHandler({ db: deps.db, error, json, requireAuth, router } as unknown as Sdk) as Handler;
+export function createServer(deps: { db: Db; getUser: (token: string) => Promise<Ctx['user']>; accounts?: Accounts }) {
+  const handle = createHandler({ db: deps.db, accounts: deps.accounts, error, json, requireAuth, router } as unknown as Sdk) as Handler;
   return async (req: Request): Promise<Response> => {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     try {
@@ -101,6 +101,16 @@ export function createSupabaseServer(supabaseUrl: string, serviceRoleKey: string
   const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
   return createServer({
     db: supabaseDb(admin),
+    accounts: {
+      async createUser(email, password) {
+        const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+        if (error) {
+          if (/already|exists|registered/i.test(error.message)) return { exists: true };
+          throw error;
+        }
+        return { userId: data.user.id };
+      },
+    },
     async getUser(token) {
       const { data, error } = await admin.auth.getUser(token);
       if (error || !data.user) return null;
