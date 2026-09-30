@@ -1270,6 +1270,7 @@ table {
 }
 .card-head .grow {
   display: grid;
+  min-width: 0;
 }
 .subtabs {
   display: flex;
@@ -2679,7 +2680,8 @@ h2 {
 .ex-note-input {
   min-height: 32px;
   padding: 4px 8px;
-  font-size: 14px;
+  /* 16px: iOS zooms into smaller fields */
+  font-size: 16px;
 }
 .ex-note-line {
   display: block;
@@ -2714,15 +2716,22 @@ h2 {
   gap: 4px;
 }
 .rename-form {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: grid;
+  gap: 8px;
 }
-.rename-form input {
+.rename-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.client-name {
   min-width: 0;
-  flex: 1;
-  min-height: 36px;
-  padding: 4px 8px;
+}
+.client-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* No network / records waiting to be sent */
 .offline-bar {

@@ -100,40 +100,46 @@ export function ClientCard({
         </button>
         <Avatar name={client.clientName} live={here} />
         <div className="grow">
-          {renaming !== null ? (
-            <form
-              className="rename-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void rename();
-              }}
-            >
-              <input id="client-rename" autoFocus maxLength={80} value={renaming} onChange={(e) => setRenaming(e.target.value)} aria-label="Имя клиента" />
-              <button className="btn btn-sm btn-primary" disabled={renameBusy || !renaming.trim()} type="submit">
-                {renameBusy ? '…' : 'OK'}
-              </button>
-              <button className="btn btn-sm btn-quiet" type="button" onClick={() => setRenaming(null)}>
-                Отмена
-              </button>
-            </form>
-          ) : (
-            <h2 className="client-name">
-              {client.clientName}
+          <h2 className="client-name">
+            <span className="client-name-text">{client.clientName}</span>
+            {renaming === null && (
               <button className="icon-btn sm" aria-label="Изменить имя" onClick={() => setRenaming(client.clientName)}>
                 <Pencil size={15} />
               </button>
-            </h2>
-          )}
+            )}
+          </h2>
           <span className="muted small">
             {here ? 'В зале · ' : ''}последний раз {ago(lastVisit(client))}
           </span>
         </div>
-        {!client.archived && (
+        {!client.archived && renaming === null && (
           <button className={'btn btn-sm presence' + (here ? ' on' : '')} onClick={() => void data.setPresence(client, !here)}>
             {here ? 'Ушёл' : 'Пришёл'}
           </button>
         )}
       </div>
+      {renaming !== null && (
+        <form
+          className="rename-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void rename();
+          }}
+        >
+          <label className="field">
+            <span>Имя клиента</span>
+            <input id="client-rename" autoFocus maxLength={80} value={renaming} onChange={(e) => setRenaming(e.target.value)} />
+          </label>
+          <div className="rename-actions">
+            <button className="btn" type="button" onClick={() => setRenaming(null)}>
+              Отмена
+            </button>
+            <button className="btn btn-primary" disabled={renameBusy || !renaming.trim()} type="submit">
+              {renameBusy ? 'Сохраняем…' : 'Сохранить'}
+            </button>
+          </div>
+        </form>
+      )}
       <nav className="subtabs" role="tablist">
         {(
           [
