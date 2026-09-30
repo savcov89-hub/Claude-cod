@@ -23,10 +23,12 @@ jobs:
       KEEP: 12
     steps:
       - name: Wake the server
-        run: curl -sS -o /dev/null -w "api: %{http_code}\n" "https://$PROJECT_ID.supabase.co/functions/v1/api/api/me" || true
+        run: |
+          curl -sS -o /dev/null -w "api: %{http_code}\n" "https://$PROJECT_ID.supabase.co/functions/v1/api/api/me" || true
 
       - name: Check access
-        run: if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then echo "::error::Нет секрета SUPABASE_ACCESS_TOKEN — копию не сделать."; exit 1; fi
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then echo "::error::Нет секрета SUPABASE_ACCESS_TOKEN — копию не сделать."; exit 1; fi
 
       - name: Export all rows
         run: |
