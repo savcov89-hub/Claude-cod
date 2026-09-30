@@ -77,6 +77,8 @@ export interface SessionExercise {
   replaces?: string;
   /** Left out of this workout only; done sets still count. */
   skipped?: boolean;
+  /** Added in the gym for this workout only, with its own targets (sets = sets.length). */
+  extra?: { repMin: number; repMax: number; targetRir: number };
   sets: SetEntry[];
 }
 export interface Session {

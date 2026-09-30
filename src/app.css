@@ -2618,3 +2618,11 @@ h2 {
   overflow-y: hidden;
   overscroll-behavior-x: contain;
 }
+
+/* Adding an exercise in the gym. */
+.add-ex {
+  border-style: dashed;
+}
+.menu-item:disabled {
+  opacity: 0.6;
+}

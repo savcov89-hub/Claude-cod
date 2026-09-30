@@ -99,6 +99,8 @@ interface ProgramRecord {
   createdAt: string;
   updatedAt?: string;
   archived?: boolean;
+  /** Hidden per-client program for workouts made up in the gym ("Свободная тренировка"). */
+  free?: boolean;
 }
 interface AssignmentRecord {
   trainerId: string;
@@ -127,7 +129,14 @@ interface SessionExercise {
   replaces?: string;
   /** Left out of this workout only; done sets still count. */
   skipped?: boolean;
+  /** Added in the gym for this workout only, with its own targets (sets = sets.length). */
+  extra?: ExtraPlan;
   sets: SetEntry[];
+}
+interface ExtraPlan {
+  repMin: number;
+  repMax: number;
+  targetRir: number;
 }
 interface SessionRecord {
   recordedByRole?: Role;
@@ -210,6 +219,14 @@ const cleanSet = (s: any): SetEntry => ({
   reps: Math.max(0, Math.round(cleanNumber(s.reps))),
   rir: s.rir === null || s.rir === undefined ? null : Math.max(0, Math.min(10, Math.round(cleanNumber(s.rir)))),
 });
+/** Targets of an exercise added in the gym; null when they make no sense. */
+const cleanExtra = (x: any): ExtraPlan | null => {
+  const repMin = Math.round(Number(x?.repMin));
+  const repMax = Math.round(Number(x?.repMax));
+  const targetRir = Math.round(Number(x?.targetRir));
+  if (!(repMin >= 1 && repMax >= repMin && repMax <= 100 && targetRir >= 0 && targetRir <= 6)) return null;
+  return { repMin, repMax, targetRir };
+};
 const randomId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -276,7 +293,8 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         !program.archived &&
         (await keysOf(userId)).some((k) => k.trainerId === trainerId && k.clientId === program.clientId);
     }
-    if (!permitted || !(await hasAssignment(program.clientId, trainerId, programId))) return null;
+    // The hidden program of free workouts is not assigned to the client; its trainer may use it.
+    if (!permitted || (!(program.free && profile.role === 'trainer') && !(await hasAssignment(program.clientId, trainerId, programId)))) return null;
     return { program, ownerId: program.clientId, role: profile.role, name: profile.name };
   }
   const withVisit = (visits: string[] | undefined, date: string) =>
@@ -307,31 +325,62 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
    * Returns null when the list does not fit the plan.
    */
   async function matchPlan(trainerId: string, day: ProgramDay, submitted: SessionExercise[]) {
-    if (submitted.length !== day.exercises.length) return null;
-    const slots = submitted.map((e) => String(e.replaces || e.exerciseId));
+    const fromPlan = submitted.filter((e) => !e.extra);
+    if (fromPlan.length !== day.exercises.length || submitted.length - fromPlan.length > 20) return null;
+    const slots = fromPlan.map((e) => String(e.replaces || e.exerciseId));
     if (new Set(slots).size !== slots.length || slots.some((id) => !day.exercises.some((p) => p.exerciseId === id))) return null;
-    let custom: Exercise[] | null = null;
+    const findKnown = knownExercises(trainerId);
     const out: SessionExercise[] = [];
     for (const e of submitted) {
-      const planned = day.exercises.find((p) => p.exerciseId === String(e.replaces || e.exerciseId))!;
       const id = String(e.exerciseId);
       const skipped = e.skipped === true ? { skipped: true } : {};
+      if (e.extra) {
+        const extra = cleanExtra(e.extra);
+        const known = await findKnown(id);
+        if (!extra || !known || day.exercises.some((p) => p.exerciseId === id)) return null;
+        out.push({ exerciseId: id, exerciseName: known.name, extra, sets: e.sets });
+        continue;
+      }
+      const planned = day.exercises.find((p) => p.exerciseId === String(e.replaces || e.exerciseId))!;
       if (id === planned.exerciseId) {
         out.push({ exerciseId: planned.exerciseId, exerciseName: planned.exerciseName, ...skipped, sets: e.sets });
         continue;
       }
       if (day.exercises.some((p) => p.exerciseId === id)) return null;
-      let known: { id: string; name: string } | undefined = catalog.find((c) => c.id === id);
-      if (!known && id.startsWith('custom:')) {
-        custom ||= await customExercises(trainerId);
-        known = custom.find((c) => c.id === id);
-      }
+      const known = await findKnown(id);
       if (!known) return null;
       out.push({ exerciseId: id, exerciseName: known.name, replaces: planned.exerciseId, ...skipped, sets: e.sets });
     }
     if (new Set(out.map((e) => e.exerciseId)).size !== out.length) return null;
     return out;
   }
+
+  /** Finds a catalog exercise or one of the trainer's own; own exercises are read once per call site. */
+  function knownExercises(trainerId: string) {
+    let custom: Promise<Exercise[]> | null = null;
+    return async (id: string): Promise<Exercise | undefined> => {
+      const known = catalog.find((c) => c.id === id);
+      if (known || !id.startsWith('custom:')) return known;
+      custom ||= customExercises(trainerId);
+      return (await custom).find((c) => c.id === id);
+    };
+  }
+  /** Program entry for `known` with the submitted targets; muscles from the rules, the trainer's choice or the group. */
+  const toProgramExercise = (e: any, known: Exercise): ProgramExercise => ({
+    exerciseId: known.id,
+    exerciseName: known.name,
+    muscles:
+      exerciseRules[known.id]?.primary ||
+      (Array.isArray(e.muscles) && e.muscles.length
+        ? e.muscles.map(String).slice(0, 6)
+        : known.muscles?.length
+          ? known.muscles
+          : groupMuscles(known.muscleGroup)),
+    sets: Math.round(cleanNumber(e.sets, 3)),
+    repMin: Math.round(cleanNumber(e.repMin, 8)),
+    repMax: Math.round(cleanNumber(e.repMax, 12)),
+    targetRir: Math.max(0, Math.min(6, Math.round(cleanNumber(e.targetRir, 2)))),
+  });
 
   /** Looks up equipment (plates or kilograms in the journal) for catalog and the trainer's own exercises. */
   function equipmentLookup(trainerId: string) {
@@ -385,21 +434,7 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         name: day.name.trim().slice(0, 80),
         exercises: day.exercises.map((e) => {
           const known = available.find((k) => k.id === e.exerciseId)!;
-          return {
-            exerciseId: String(e.exerciseId),
-            exerciseName: known.name,
-            muscles:
-              exerciseRules[e.exerciseId]?.primary ||
-              (Array.isArray(e.muscles) && e.muscles.length
-                ? e.muscles.map(String).slice(0, 6)
-                : known.muscles?.length
-                  ? known.muscles
-                  : groupMuscles(known.muscleGroup)),
-            sets: Math.round(cleanNumber(e.sets, 3)),
-            repMin: Math.round(cleanNumber(e.repMin, 8)),
-            repMax: Math.round(cleanNumber(e.repMax, 12)),
-            targetRir: Math.max(0, Math.min(6, Math.round(cleanNumber(e.targetRir, 2)))),
-          };
+          return toProgramExercise(e, known);
         }),
       };
     });
@@ -799,9 +834,12 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
       requireAuth(),
       async (ctx: Ctx) => {
         if (!(await trainerOnly(ctx))) return error('Доступ только для тренера.', 403);
-        const programs = (await listAll<ProgramRecord>(programsTable(ctx.user!.userId))).sort((a, b) =>
-          b.createdAt.localeCompare(a.createdAt),
-        );
+        // Newest first; for the same moment the one added later (rows come in the order they were added).
+        const programs = (await listAll<ProgramRecord>(programsTable(ctx.user!.userId)))
+          .map((p, i) => ({ p, i }))
+          .filter(({ p }) => !p.free)
+          .sort((a, b) => b.p.createdAt.localeCompare(a.p.createdAt) || b.i - a.i)
+          .map(({ p }) => p);
         return json({ programs });
       },
     ],
@@ -890,13 +928,24 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         if (!day) return error('Тренировка не найдена.', 404);
         const ids: string[] = Array.isArray(ctx.body?.exerciseIds) ? ctx.body.exerciseIds.map(String) : [];
         if (!ids.length) return error('В тренировке должно остаться хотя бы одно упражнение.', 400);
-        if (new Set(ids).size !== ids.length || ids.some((id) => !day.exercises.some((e) => e.exerciseId === id)))
+        // Exercises added in the gym can join the program here, with the targets they were done with.
+        const findKnown = knownExercises(trainerId);
+        const added = new Map<string, ProgramExercise>();
+        for (const x of Array.isArray(ctx.body?.added) ? ctx.body.added.slice(0, 20) : []) {
+          const known = await findKnown(String(x?.exerciseId));
+          const extra = cleanExtra(x);
+          const sets = Math.round(Number(x?.sets));
+          if (!known || !extra || !(sets >= 1 && sets <= 10)) return error('Проверьте подходы и повторы.', 400);
+          added.set(known.id, toProgramExercise({ ...x, ...extra, sets }, known));
+        }
+        if (new Set(ids).size !== ids.length || ids.some((id) => !day.exercises.some((e) => e.exerciseId === id) && !added.has(id)))
           return error('Упражнения не совпадают с программой. Обновите журнал.', 400);
+        if (ids.length > 30) return error('Не больше 30 упражнений в тренировке.', 400);
         const draftT = draftTable(program.clientId, programId, dayId);
         const draft = await first<DraftRecord>(draftT);
         if (draft && !draft.closed && (draft.revision || null) !== (ctx.body?.baseRevision || null))
           return error('Запись уже изменена на другом устройстве. Обновите журнал перед продолжением.', 409);
-        const exercises = ids.map((id) => day.exercises.find((e) => e.exerciseId === id)!);
+        const exercises = ids.map((id) => day.exercises.find((e) => e.exerciseId === id) || added.get(id)!);
         const days = program.days.map((d) => (d.id === dayId ? { ...d, exercises } : d));
         const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
         const [ok] = await db.update(programsTable(trainerId), [{ id: programId, record: { ...rest, days, updatedAt: nowIso() } }]);
@@ -905,11 +954,51 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         if (draft && !draft.closed) {
           const { id: draftId, ...record } = draft;
           const slot = (e: SessionExercise) => e.replaces || e.exerciseId;
-          const kept = ids.map((id) => draft.exercises.find((e) => slot(e) === id)).filter(Boolean) as SessionExercise[];
+          // Planned entries still in the program stay, added ones that joined it lose their "extra" mark,
+          // other added ones stay added; the journal's own order is kept when sent.
+          const kept = draft.exercises
+            .filter((e) => (e.extra ? true : ids.includes(slot(e))))
+            .map(({ extra, ...e }) => (extra && !added.has(e.exerciseId) ? { ...e, extra } : e));
+          const order: string[] = Array.isArray(ctx.body?.order) ? ctx.body.order.map(String) : [];
+          const rank = (e: SessionExercise) => {
+            const i = order.indexOf(e.exerciseId);
+            if (i >= 0) return i;
+            const j = ids.indexOf(slot(e));
+            return order.length + (j >= 0 ? j : ids.length);
+          };
+          kept.sort((a, b) => rank(a) - rank(b));
           revision = randomId();
           await db.update(draftT, [{ id: draftId, record: { ...record, exercises: kept, revision } }]);
         }
         return json({ saved: true, revision });
+      },
+    ],
+
+    /** The client's hidden program for a workout made up in the gym; created on first use. */
+    'POST /api/free/:clientId': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const profile = await trainerOnly(ctx);
+        if (!profile) return error('Доступ только для тренера.', 403);
+        const trainerId = ctx.user!.userId;
+        const client = await findClient(trainerId, ctx.params.clientId);
+        if (!client) return error('Клиент не найден.', 404);
+        const existing = (await listAll<ProgramRecord>(programsTable(trainerId))).find((p) => p.free && p.clientId === client.clientId);
+        if (existing) return json({ trainerId, programId: existing.id, dayId: 'free' });
+        const at = nowIso();
+        const record: ProgramRecord = {
+          trainerId,
+          trainerName: profile.name,
+          clientId: client.clientId,
+          clientName: client.clientName,
+          name: 'Без программы',
+          days: [{ id: 'free', name: 'Свободная тренировка', exercises: [] }],
+          createdAt: at,
+          updatedAt: at,
+          free: true,
+        };
+        const [programId] = await db.add(programsTable(trainerId), [record]);
+        return programId ? json({ trainerId, programId, dayId: 'free' }, 201) : error('Не удалось начать тренировку.', 500);
       },
     ],
 
@@ -942,7 +1031,7 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
           for (const a of assignments) {
             if (a.trainerId !== key.trainerId) continue;
             const [program] = await db.get<ProgramRecord>(programsTable(a.trainerId), [a.programId]);
-            if (program && program.clientId === key.clientId && !program.archived)
+            if (program && program.clientId === key.clientId && !program.archived && !program.free)
               programs.push({ ...program, id: a.programId });
           }
           const client = await findClient(key.trainerId, key.clientId);
@@ -1071,7 +1160,7 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         const matched = await matchPlan(trainerId, day, submitted);
         if (!matched) return error('Состав тренировки не совпадает с программой.', 400);
         const performed = matched
-          .map(({ skipped: _skipped, ...e }) => ({ ...e, sets: e.sets.filter((s) => s.reps > 0).map(cleanSet) }))
+          .map(({ skipped: _skipped, extra: _extra, ...e }) => ({ ...e, sets: e.sets.filter((s) => s.reps > 0).map(cleanSet) }))
           .filter((e) => e.sets.length > 0);
         if (!performed.length) return error('Нет выполненных подходов. Черновик сохранён — продолжите позже.', 400);
         // A workout left unfinished on an earlier day can be recorded with its own date (up to 14 days back).

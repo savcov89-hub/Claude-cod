@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, IdCard, LogOut, Plus, Search } from 'lucide-react';
 import type { ClientItem, Program } from '../types';
+import { api, readError } from '../transport';
 import { Journal, type JournalActivity } from './Journal';
 import { activeClients, lastVisit, presentClients, programsOf, type TrainerData } from './data';
 import { Avatar, Empty, Sheet, ago, clock, useNow } from './common';
@@ -8,9 +9,13 @@ import { Avatar, Empty, Sheet, ago, clock, useNow } from './common';
 interface Source {
   programId: string;
   dayId: string;
+  /** A workout made up in the gym (the client's hidden "Без программы" program). */
+  free?: boolean;
+  trainerId?: string;
 }
 type Finisher = (at?: string) => Promise<boolean>;
 const UNDO_MS = 5000;
+const FREE = '__free';
 /** A workout with no new set for this long is recorded by itself (dated to its last set) and the client leaves. */
 const IDLE_MS = 60 * 60000;
 /** Someone checked in who has not done a single set leaves the gym list after this long. */
@@ -51,7 +56,7 @@ export function Gym({
   const sourceOf = (clientId: string): Source | null => {
     const list = programsOf(data.programs, clientId);
     const chosen = sources[clientId];
-    if (chosen && list.some((p) => p.id === chosen.programId)) return chosen;
+    if (chosen && (chosen.free || list.some((p) => p.id === chosen.programId))) return chosen;
     const p = defaultProgram(list);
     return p ? { programId: p.id, dayId: p.nextDayId || p.days[0].id } : null;
   };
@@ -88,6 +93,19 @@ export function Gym({
     });
     return () => cancelAnimationFrame(t);
   }, [activeId]);
+
+  const [freeBusy, setFreeBusy] = useState<string | null>(null);
+  const startFree = async (clientId: string) => {
+    setFreeBusy(clientId);
+    try {
+      const r = await api.post('/api/free/' + encodeURIComponent(clientId), {});
+      setSources((s) => ({ ...s, [clientId]: { programId: r.data.programId, dayId: r.data.dayId, trainerId: r.data.trainerId, free: true } }));
+    } catch (err) {
+      data.setErrorText(readError(err));
+    } finally {
+      setFreeBusy(null);
+    }
+  };
 
   const checkIn = async (ids: string[]) => {
     setPicker(false);
@@ -331,12 +349,14 @@ export function Gym({
                   <span className="muted small ellipsis">{c.notes.goal}</span>
                 ) : null}
               </div>
-              {list.length > 1 && src && (
+              {list.length > 0 && src && (
                 <select
                   className="select-sm"
                   aria-label="Программа"
-                  value={src.programId}
+                  value={src.free ? FREE : src.programId}
+                  disabled={freeBusy === c.clientId}
                   onChange={(e) => {
+                    if (e.target.value === FREE) return void startFree(c.clientId);
                     const p = list.find((x) => x.id === e.target.value)!;
                     setSources((s) => ({ ...s, [c.clientId]: { programId: p.id, dayId: p.nextDayId || p.days[0].id } }));
                   }}
@@ -346,6 +366,7 @@ export function Gym({
                       {p.name}
                     </option>
                   ))}
+                  <option value={FREE}>Свободная тренировка</option>
                 </select>
               )}
               <button className="icon-btn sm" aria-label="Карточка клиента" title="Карточка клиента" onClick={() => openClient(c.clientId)}>
@@ -360,14 +381,19 @@ export function Gym({
                 <LogOut size={15} /> {leaving === c.clientId ? 'Сохраняем…' : 'Ушёл'}
               </button>
             </div>
-            {!src || !program ? (
+            {!src || (!program && !src.free) ? (
               <Empty
                 title="Нет программы"
-                text="Назначьте программу, и здесь откроется журнал тренировки."
+                text="Назначьте программу — или проведите тренировку без неё, набирая упражнения по ходу."
                 action={
-                  <button className="btn btn-primary" onClick={() => openBuilder(c.clientId)}>
-                    Назначить программу
-                  </button>
+                  <div className="row gap wrap center">
+                    <button className="btn btn-primary" onClick={() => openBuilder(c.clientId)}>
+                      Назначить программу
+                    </button>
+                    <button className="btn" disabled={freeBusy === c.clientId} onClick={() => void startFree(c.clientId)}>
+                      Свободная тренировка
+                    </button>
+                  </div>
                 }
               />
             ) : finished[c.clientId] !== undefined ? (
@@ -389,7 +415,7 @@ export function Gym({
             ) : (
               <GymJournal
                 clientId={c.clientId}
-                trainerId={program.trainerId}
+                trainerId={src.trainerId || program!.trainerId}
                 programId={src.programId}
                 dayId={src.dayId}
                 onActivity={handlers[c.clientId]?.activity}

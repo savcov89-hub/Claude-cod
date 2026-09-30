@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, Check, ChevronDown, ListOrdered, Minus, MoreHorizontal, Plus, SkipForward, Trash2, Undo2 } from 'lucide-react';
 import { api, isLocal, readError, safeStorage } from '../transport';
-import { equipmentOf, fmtKg, suggestNext, weightUnit, type Suggestion } from '../analytics';
+import { equipmentOf, fmtKg, isStack, suggestNext, weightUnit, type Suggestion } from '../analytics';
 import { localDate } from '../clock';
 import type { Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
 import { Confirm, Sheet, clock, fmtDate, fmtSets, useNow } from './common';
@@ -151,11 +151,16 @@ function JournalBody({
   );
   const initialCache = useMemo(() => readCache(workout), [workout]);
   // Saved entries are reused only when they cover the current plan exercise-for-exercise (in any order).
-  const matchesPlan = (list?: SessionExercise[]) =>
-    !!list &&
-    list.length === workout.day.exercises.length &&
-    new Set(list.map(slotOf)).size === list.length &&
-    list.every((e) => workout.day.exercises.some((p) => p.exerciseId === slotOf(e)));
+  // Exercises added in the gym come on top of the plan.
+  const matchesPlan = (list?: SessionExercise[]) => {
+    if (!list) return false;
+    const fromPlan = list.filter((e) => !e.extra);
+    return (
+      fromPlan.length === workout.day.exercises.length &&
+      new Set(fromPlan.map(slotOf)).size === fromPlan.length &&
+      fromPlan.every((e) => workout.day.exercises.some((p) => p.exerciseId === slotOf(e)))
+    );
+  };
   const cacheUsable =
     !!initialCache?.pending &&
     (initialCache.baseRevision || null) === (workout.revision || null) &&
@@ -222,8 +227,11 @@ function JournalBody({
   const [menu, setMenu] = useState<number | null>(null);
   const [ordering, setOrdering] = useState<SessionExercise[] | null>(null);
   const [programBusy, setProgramBusy] = useState(false);
+  // Adding an exercise for today: pick it, then its sets and reps.
+  const [adding, setAdding] = useState<{ list: Exercise[]; picked?: Exercise } | null>(null);
+  const isFree = !!workout.day.id && workout.day.id === 'free';
   // Exercise menu confirmations: replacing or restoring drops ticked sets; removal changes the program.
-  const [menuConfirm, setMenuConfirm] = useState<'swap' | 'revert' | 'remove' | null>(null);
+  const [menuConfirm, setMenuConfirm] = useState<MenuConfirm | null>(null);
   const closeMenu = () => {
     setMenu(null);
     setMenuConfirm(null);
@@ -240,9 +248,19 @@ function JournalBody({
   const plan = useMemo<WorkoutExercise[]>(
     () =>
       results.map((r) => {
+        const info = swapInfo[r.exerciseId];
+        if (r.extra)
+          return {
+            exerciseId: r.exerciseId,
+            exerciseName: r.exerciseName,
+            sets: r.sets.length,
+            ...r.extra,
+            equipment: info?.equipment,
+            previousSets: info?.previousSets || [],
+            previousAt: info?.previousAt || null,
+          };
         const p = plannedOf(r);
         if (!r.replaces || r.exerciseId === p.exerciseId) return p;
-        const info = swapInfo[r.exerciseId];
         return {
           ...p,
           exerciseId: r.exerciseId,
@@ -262,7 +280,7 @@ function JournalBody({
   // A restored draft may contain swaps whose previous results are not loaded yet.
   useEffect(() => {
     for (const r of results)
-      if (r.replaces && !swapInfo[r.exerciseId])
+      if ((r.replaces || r.extra) && !swapInfo[r.exerciseId])
         fetchPrevious(r.exerciseId)
           .then((info) => setSwapInfo((cur) => ({ ...cur, [r.exerciseId]: info })))
           .catch(() => setSwapInfo((cur) => ({ ...cur, [r.exerciseId]: { previousSets: [], previousAt: null } })));
@@ -430,7 +448,13 @@ function JournalBody({
   const swapExercise = async (ei: number, next: Exercise | null) => {
     setSwapping(null);
     closeMenu();
-    const planned = plannedOf(latest.current[ei]);
+    const cur = latest.current[ei];
+    if (cur.extra) {
+      if (next) update(latest.current.map((x, i) => (i === ei ? null : x)).flatMap((x) => (x ? [x] : [])));
+      if (next) await addExercise(next, { sets: cur.sets.length, ...cur.extra }, ei);
+      return;
+    }
+    const planned = plannedOf(cur);
     const id = next ? next.id : planned.exerciseId;
     let info: Previous = { previousSets: planned.previousSets, previousAt: planned.previousAt || null };
     if (next) {
@@ -466,6 +490,44 @@ function JournalBody({
       setErrorText(readError(err));
     }
   };
+  /** Adds `ex` for this workout only (at `at`, or at the end), with weights from its last result. */
+  const addExercise = async (ex: Exercise, target: { sets: number; repMin: number; repMax: number; targetRir: number }, at?: number) => {
+    setAdding(null);
+    let info: Previous;
+    try {
+      info = swapInfo[ex.id] || (await fetchPrevious(ex.id));
+    } catch {
+      info = { previousSets: [], previousAt: null };
+    }
+    info = { ...info, equipment: ex.equipment };
+    setSwapInfo((cur) => ({ ...cur, [ex.id]: info }));
+    const { sets, ...extra } = target;
+    const sug = suggestNext({ exerciseId: ex.id, exerciseName: ex.name, equipment: ex.equipment, sets, ...extra }, info.previousSets);
+    const entry: SessionExercise = {
+      exerciseId: ex.id,
+      exerciseName: ex.name,
+      extra,
+      sets: Array.from({ length: sets }, (_, si) => ({
+        weight: sug.weight || info.previousSets[si]?.weight || info.previousSets.at(-1)?.weight || 0,
+        reps: 0,
+        rir: null,
+      })),
+    };
+    const list = [...latest.current];
+    list.splice(at ?? list.length, 0, entry);
+    update(list);
+  };
+  const removeExtra = (ei: number) => {
+    closeMenu();
+    update(latest.current.filter((_, i) => i !== ei));
+  };
+  const openAdd = async () => {
+    try {
+      setAdding({ list: await loadExercises() });
+    } catch (err) {
+      setErrorText(readError(err));
+    }
+  };
   const setSkipped = (ei: number, skipped: boolean) => {
     closeMenu();
     update(latest.current.map((x, i) => (i === ei ? { ...x, skipped } : x)));
@@ -478,13 +540,16 @@ function JournalBody({
     return next;
   };
   /** Trainer only: saves the day's exercises (order, or without removed ones) into the program, then reloads the journal. */
-  const saveDayToProgram = async (entries: SessionExercise[]) => {
+  const saveDayToProgram = async (entries: SessionExercise[], join?: SessionExercise) => {
     setProgramBusy(true);
     try {
       if (timer.current) clearTimeout(timer.current);
       await persist();
+      // Program exercises in the journal's order; an added one listed in `join` becomes part of the program.
       await api.post(`/api/programs/${workout.programId}/days/${workout.day.id}/exercises`, {
-        exerciseIds: entries.map(slotOf),
+        exerciseIds: entries.filter((e) => !e.extra || e === join).map(slotOf),
+        added: join?.extra ? [{ exerciseId: join.exerciseId, sets: join.sets.length, ...join.extra }] : [],
+        order: entries.map((e) => e.exerciseId),
         baseRevision: baseRevision.current,
       });
       completed.current = true;
@@ -713,6 +778,7 @@ function JournalBody({
                   <span className="ex-plan">
                     {e.sets}×{e.repMin}–{e.repMax} · RIR {e.targetRir}
                     {e.previousAt ? ' · прошл. ' + fmtDate(e.previousAt) : ''}
+                    {r.extra && !isFree ? ' · добавлено сегодня' : ''}
                   </span>
                   {original && (
                     <span className="ex-swapped">
@@ -810,6 +876,13 @@ function JournalBody({
           );
         })}
 
+        {isFree && !results.length && (
+          <p className="muted small center-text">Тренировка без программы: набирайте упражнения по ходу — они попадут в историю, прогрессия у каждого своя.</p>
+        )}
+        <button className={'btn btn-block add-ex' + (isFree && !results.length ? ' btn-primary' : '')} onClick={() => void openAdd()}>
+          <Plus size={16} /> Упражнение
+        </button>
+
         {showNote ? (
           <label className="field">
             <span>Комментарий к тренировке</span>
@@ -866,14 +939,22 @@ function JournalBody({
         <ExerciseMenu
           entry={results[menu]}
           name={plan[menu].exerciseName}
-          planned={plannedOf(results[menu])}
+          planned={results[menu].extra ? plan[menu] : plannedOf(results[menu])}
           confirm={menuConfirm}
-          canRemove={workout.actorRole === 'trainer' && workout.day.exercises.length > 1}
+          canRemove={workout.actorRole === 'trainer' && !isFree && workout.day.exercises.length > 1}
+          canJoin={workout.actorRole === 'trainer' && !isFree}
+          canSaveOrder={workout.actorRole === 'trainer' && !isFree}
           busy={programBusy}
           onConfirm={setMenuConfirm}
           onSwap={() => void openSwap(menu)}
           onRevert={() => void swapExercise(menu, null)}
           onSkip={() => setSkipped(menu, true)}
+          onDrop={() => removeExtra(menu)}
+          onJoin={async () => {
+            const entry = latest.current[menu];
+            await saveDayToProgram(latest.current, entry);
+            closeMenu();
+          }}
           onOrder={() => {
             closeMenu();
             setOrdering(latest.current);
@@ -885,6 +966,24 @@ function JournalBody({
           }}
           onClose={closeMenu}
         />
+      )}
+
+      {adding && !adding.picked && (
+        <ExercisePicker
+          title="Добавить упражнение"
+          exercises={adding.list}
+          exclude={[...workout.day.exercises.map((x) => x.exerciseId), ...results.map((x) => x.exerciseId)]}
+          autoFocusSearch={false}
+          allowCreate={workout.actorRole === 'trainer'}
+          onCreated={() => {
+            exerciseList = null;
+          }}
+          onPick={(x) => setAdding({ ...adding, picked: x })}
+          onClose={() => setAdding(null)}
+        />
+      )}
+      {adding?.picked && (
+        <AddTargets exercise={adding.picked} onBack={() => setAdding({ list: adding.list })} onAdd={(t) => void addExercise(adding.picked!, t)} />
       )}
 
       {ordering && (
@@ -919,7 +1018,7 @@ function JournalBody({
             >
               Только в этой тренировке
             </button>
-            {workout.actorRole === 'trainer' && (
+            {workout.actorRole === 'trainer' && !isFree && (
               <button
                 className="btn btn-primary btn-block"
                 disabled={programBusy}
@@ -940,7 +1039,7 @@ function JournalBody({
           <Confirm
             text={
               done < total
-                ? `Выполнено ${done} из ${total} подходов. Пустые подходы не попадут в историю, дальше откроется следующая тренировка программы.`
+                ? `Выполнено ${done} из ${total} подходов. Пустые подходы не попадут в историю${isFree ? '.' : ', дальше откроется следующая тренировка программы.'}`
                 : `Все ${total} подходов выполнены. Записать тренировку в историю?`
             }
             confirmLabel="Завершить"
@@ -968,17 +1067,23 @@ function JournalBody({
 }
 
 /** Actions for one exercise of the workout: replace, skip, order, remove from the program. */
+type MenuConfirm = 'swap' | 'revert' | 'remove' | 'drop';
+/** Actions for one exercise of the workout: replace, skip, order, remove; for one added today — drop or add to the program. */
 function ExerciseMenu({
   entry,
   name,
   planned,
   confirm,
   canRemove,
+  canJoin,
+  canSaveOrder,
   busy,
   onConfirm,
   onSwap,
   onRevert,
   onSkip,
+  onDrop,
+  onJoin,
   onOrder,
   onRemove,
   onClose,
@@ -986,19 +1091,24 @@ function ExerciseMenu({
   entry: SessionExercise;
   name: string;
   planned: WorkoutExercise;
-  confirm: 'swap' | 'revert' | 'remove' | null;
+  confirm: MenuConfirm | null;
   canRemove: boolean;
+  canJoin: boolean;
+  canSaveOrder: boolean;
   busy: boolean;
-  onConfirm: (c: 'swap' | 'revert' | 'remove' | null) => void;
+  onConfirm: (c: MenuConfirm | null) => void;
   onSwap: () => void;
   onRevert: () => void;
   onSkip: () => void;
+  onDrop: () => void;
+  onJoin: () => void;
   onOrder: () => void;
   onRemove: () => void;
   onClose: () => void;
 }) {
   const ticked = entry.sets.filter((x) => x.reps > 0).length;
   const lost = ticked ? ` Отмеченные подходы (${ticked}) не сохранятся.` : '';
+  const extra = entry.extra;
   return (
     <Sheet title={name} onClose={onClose}>
       {confirm === 'swap' ? (
@@ -1010,6 +1120,8 @@ function ExerciseMenu({
           onConfirm={onRevert}
           onCancel={() => onConfirm(null)}
         />
+      ) : confirm === 'drop' ? (
+        <Confirm text={`Убрать «${name}» из этой тренировки?` + lost} confirmLabel="Убрать" onConfirm={onDrop} onCancel={() => onConfirm(null)} />
       ) : confirm === 'remove' ? (
         <Confirm
           text={`Убрать «${planned.exerciseName}» из программы? В следующих тренировках его не будет.` + lost}
@@ -1023,8 +1135,8 @@ function ExerciseMenu({
           <button className="menu-item" onClick={() => (ticked ? onConfirm('swap') : onSwap())}>
             <ArrowLeftRight size={18} />
             <span className="grow">
-              Заменить на сегодня
-              <small>в программе останется «{planned.exerciseName}»</small>
+              {extra ? 'Заменить другим' : 'Заменить на сегодня'}
+              <small>{extra ? 'с теми же подходами и повторами' : `в программе останется «${planned.exerciseName}»`}</small>
             </span>
           </button>
           {entry.replaces && (
@@ -1036,21 +1148,42 @@ function ExerciseMenu({
               </span>
             </button>
           )}
-          <button className="menu-item" onClick={onSkip}>
-            <SkipForward size={18} />
-            <span className="grow">
-              Пропустить сегодня
-              <small>{ticked ? 'отмеченные подходы сохранятся' : 'в следующий раз будет по плану'}</small>
-            </span>
-          </button>
+          {extra ? (
+            <button className="menu-item" onClick={() => (ticked ? onConfirm('drop') : onDrop())}>
+              <Minus size={18} />
+              <span className="grow">
+                Убрать из тренировки
+                <small>добавлено сегодня</small>
+              </span>
+            </button>
+          ) : (
+            <button className="menu-item" onClick={onSkip}>
+              <SkipForward size={18} />
+              <span className="grow">
+                Пропустить сегодня
+                <small>{ticked ? 'отмеченные подходы сохранятся' : 'в следующий раз будет по плану'}</small>
+              </span>
+            </button>
+          )}
+          {extra && canJoin && (
+            <button className="menu-item" onClick={onJoin} disabled={busy}>
+              <Plus size={18} />
+              <span className="grow">
+                {busy ? 'Сохраняем…' : 'Добавить в программу'}
+                <small>
+                  {entry.sets.length}×{extra.repMin}–{extra.repMax}, RIR {extra.targetRir} — в следующий раз будет по плану
+                </small>
+              </span>
+            </button>
+          )}
           <button className="menu-item" onClick={onOrder}>
             <ListOrdered size={18} />
             <span className="grow">
               Изменить порядок
-              <small>сегодня или в программе</small>
+              <small>{canSaveOrder ? 'сегодня или в программе' : 'в этой тренировке'}</small>
             </span>
           </button>
-          {canRemove && (
+          {canRemove && !extra && (
             <button className="menu-item danger" onClick={() => onConfirm('remove')}>
               <Trash2 size={18} />
               <span className="grow">
@@ -1061,6 +1194,67 @@ function ExerciseMenu({
           )}
         </div>
       )}
+    </Sheet>
+  );
+}
+
+/** Sets, rep range and reserve for an exercise added in the gym. */
+function AddTargets({
+  exercise,
+  onAdd,
+  onBack,
+}: {
+  exercise: Exercise;
+  onAdd: (t: { sets: number; repMin: number; repMax: number; targetRir: number }) => void;
+  onBack: () => void;
+}) {
+  // Isolation and cable work: more reps, closer to failure; big lifts: fewer reps, more in reserve.
+  const light = isStack({ exerciseId: exercise.id, equipment: exercise.equipment }) || /Бицепс|Трицепс|Плечи|Икры|Пресс/.test(exercise.muscleGroup);
+  const [sets, setSets] = useState(3);
+  const [range, setRange] = useState<[number, number]>(light ? [10, 15] : [8, 12]);
+  const [rir, setRir] = useState(light ? 1 : 2);
+  const RANGES: Array<[number, number]> = [
+    [5, 8],
+    [6, 10],
+    [8, 12],
+    [10, 15],
+    [12, 20],
+  ];
+  return (
+    <Sheet title={exercise.name} onClose={onBack}>
+      <div className="field">
+        <span>Подходы</span>
+        <div className="chips">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button key={n} className={'filter' + (sets === n ? ' on' : '')} onClick={() => setSets(n)}>
+              {n}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="field">
+        <span>Повторы</span>
+        <div className="chips">
+          {RANGES.map(([a, b]) => (
+            <button key={a + '-' + b} className={'filter' + (range[0] === a && range[1] === b ? ' on' : '')} onClick={() => setRange([a, b])}>
+              {a}–{b}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="field">
+        <span>Запас повторов (RIR)</span>
+        <div className="chips">
+          {[0, 1, 2, 3].map((n) => (
+            <button key={n} className={'filter' + (rir === n ? ' on' : '')} onClick={() => setRir(n)}>
+              {n}
+            </button>
+          ))}
+        </div>
+      </div>
+      <button className="btn btn-primary btn-block" onClick={() => onAdd({ sets, repMin: range[0], repMax: range[1], targetRir: rir })}>
+        <Plus size={16} /> Добавить в тренировку
+      </button>
     </Sheet>
   );
 }
