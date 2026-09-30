@@ -164,7 +164,15 @@ function RealApp() {
       await auth.sendLink(address);
       setSentTo(address);
     } catch (e) {
-      setErr(readError(e));
+      const msg = readError(e);
+      // Supabase's own mail sends only a few emails an hour for the whole project.
+      setErr(
+        /rate limit/i.test(msg)
+          ? 'Сейчас отправлено слишком много писем для входа. Попробуйте через час или войдите через Google.'
+          : /invalid/i.test(msg)
+            ? 'Проверьте адрес почты.'
+            : msg,
+      );
     } finally {
       setBusy(false);
     }
