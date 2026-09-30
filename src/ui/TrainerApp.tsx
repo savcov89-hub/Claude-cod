@@ -12,7 +12,8 @@ import { ProgramBuilder, type BuilderOptions } from './ProgramBuilder';
 
 type Tab = 'gym' | 'dash' | 'clients' | 'programs' | 'library';
 
-export function TrainerApp({ header }: { profile: Profile; header: ReactNode }) {
+/** `onSwitchRole` offers «Я клиент» while the account is still empty (a role picked by mistake). */
+export function TrainerApp({ header, onSwitchRole }: { profile: Profile; header: ReactNode; onSwitchRole?: () => void }) {
   const data = useTrainerData();
   const [tab, setTab] = useState<Tab>('gym');
   const [card, setCard] = useState<{ id: string; tab?: string } | null>(null);
@@ -67,7 +68,7 @@ export function TrainerApp({ header }: { profile: Profile; header: ReactNode }) 
         ) : (
           <>
             <div hidden={tab !== 'gym' || !!overlay}>
-              <Gym data={data} openClient={openClient} openBuilder={(clientId) => openBuilder({ clientId })} />
+              <Gym data={data} openClient={openClient} openBuilder={(clientId) => openBuilder({ clientId })} onSwitchRole={onSwitchRole} />
             </div>
             {overlay === 'builder' && (
               <ProgramBuilder

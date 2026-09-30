@@ -12,7 +12,7 @@ import { Empty, VisitGrid, fmtDate } from './common';
 
 type Tab = 'workout' | 'progress' | 'history' | 'body';
 
-export function ClientApp({ profile, header }: { profile: Profile; header: React.ReactNode }) {
+export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile; header: React.ReactNode; onSwitchRole?: () => void }) {
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [programs, setPrograms] = useState<Program[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -124,6 +124,14 @@ export function ClientApp({ profile, header }: { profile: Profile; header: React
             <button className="btn btn-primary btn-block" disabled={busy} onClick={connect}>
               Подключиться
             </button>
+            {onSwitchRole && sessions.length === 0 && (
+              <p className="muted small center-text">
+                Вы тренер?{' '}
+                <button className="link-btn" onClick={onSwitchRole}>
+                  Сменить роль на тренера
+                </button>
+              </p>
+            )}
           </section>
         ) : (
           <>

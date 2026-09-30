@@ -2626,3 +2626,23 @@ h2 {
 .menu-item:disabled {
   opacity: 0.6;
 }
+
+/* Sign-in: role picked, then confirmed; code from the email; notes after connecting. */
+.role.on {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.role.on strong {
+  color: var(--accent);
+}
+.code-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+.note-bar {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border-radius: 0;
+}

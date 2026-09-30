@@ -28,10 +28,12 @@ export function Gym({
   data,
   openClient,
   openBuilder,
+  onSwitchRole,
 }: {
   data: TrainerData;
   openClient: (clientId: string) => void;
   openBuilder: (clientId: string) => void;
+  onSwitchRole?: () => void;
 }) {
   const present = presentClients(data.clients);
   const [active, setActive] = useState<string | null>(null);
@@ -296,7 +298,17 @@ export function Gym({
         {activeClients(data.clients).length ? (
           <ArrivalPicker clients={activeClients(data.clients)} onDone={checkIn} />
         ) : (
-          <Empty title="Клиентов пока нет" text="Добавьте их в разделе «Клиенты» — они появятся здесь." />
+          <>
+            <Empty title="Клиентов пока нет" text="Добавьте их в разделе «Клиенты» — они появятся здесь." />
+            {onSwitchRole && !data.clients.length && !data.programs.length && (
+              <p className="muted small center-text">
+                Вы клиент, а не тренер?{' '}
+                <button className="link-btn" onClick={onSwitchRole}>
+                  Сменить роль на клиента
+                </button>
+              </p>
+            )}
+          </>
         )}
         {notices}
       </div>

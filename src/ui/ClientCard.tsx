@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Copy, Pencil, Plus, Smartphone, Archive, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Copy, Pencil, Plus, Smartphone, Archive, RotateCcw, Share2 } from 'lucide-react';
 import { api, inGym, readError } from '../transport';
+import { inviteLink } from '../invite';
 import type { Program, Session } from '../types';
 import { lastVisit, programsOf, visits30, type TrainerData } from './data';
 import { Avatar, Confirm, Empty, VisitGrid, ago, fmtDate } from './common';
@@ -144,6 +145,20 @@ function Overview({ data, clientId, sessionsCount }: { data: TrainerData; client
   const [saved, setSaved] = useState(true);
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState('');
+  const [shared, setShared] = useState('');
+  const shareInvite = async (c: string, clientName: string) => {
+    const url = inviteLink(c);
+    const text = `${clientName}, ваш дневник тренировок: откройте ссылку и войдите по почте — подключение произойдёт само.`;
+    try {
+      if (navigator.share) await navigator.share({ title: 'Приглашение в дневник тренировок', text, url });
+      else {
+        await navigator.clipboard.writeText(text + ' ' + url);
+        setShared('Ссылка скопирована');
+      }
+    } catch {
+      /* closed the share sheet */
+    }
+  };
   const [err, setErr] = useState('');
   const [confirmArchive, setConfirmArchive] = useState(false);
   const save = async () => {
@@ -233,9 +248,12 @@ function Overview({ data, clientId, sessionsCount }: { data: TrainerData; client
           </p>
         ) : code ? (
           <div className="invite">
-            <span className="muted small">Код для входа в приложение:</span>
+            <span className="muted small">Отправьте клиенту ссылку-приглашение: он откроет её, войдёт по почте — и сразу подключится как клиент. Вся история останется.</span>
+            <button className="btn btn-primary btn-block" onClick={() => void shareInvite(code, client.clientName)}>
+              <Share2 size={16} /> {shared || 'Отправить приглашение'}
+            </button>
+            <span className="muted small">Или код вручную (клиент выбирает «Я клиент» и вводит его):</span>
             <strong className="code num">{code}</strong>
-            <span className="muted small">Клиент входит в приложение, выбирает «Я клиент» и вводит код. Вся история останется.</span>
           </div>
         ) : (
           <>

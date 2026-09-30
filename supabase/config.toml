@@ -242,6 +242,16 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
+# Sign-in emails in Russian with the code (the app signs in with it, see src/supabase.ts verifyCode).
+# The same templates are set in the production project (Authentication → Email Templates).
+[auth.email.template.magic_link]
+subject = "Код для входа: {{ .Token }} — Training Log"
+content_path = "./supabase/templates/sign-in.html"
+
+[auth.email.template.confirmation]
+subject = "Код для входа: {{ .Token }} — Training Log"
+content_path = "./supabase/templates/sign-in.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"

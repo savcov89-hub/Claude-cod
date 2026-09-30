@@ -50,6 +50,12 @@ export const auth = {
     });
     if (error) throw error;
   },
+  /** The code from the sign-in email: signs in right here, even if the email opened in another app. */
+  async verifyCode(email: string, code: string) {
+    const { data, error } = await sb().auth.verifyOtp({ email, token: code, type: 'email' });
+    if (error) throw error;
+    return data.user ? toUser(data.user) : null;
+  },
   async signOut() {
     await sb().auth.signOut();
   },

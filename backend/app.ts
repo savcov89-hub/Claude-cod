@@ -513,6 +513,30 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
       },
     ],
 
+    /**
+     * A role picked by mistake can be changed while the account is still empty:
+     * a trainer without clients or programs, a client without trainers or workouts.
+     */
+    'POST /api/profile/role': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const userId = ctx.user!.userId;
+        if (!validRole(ctx.body?.role)) return error('Выберите роль тренера или клиента.', 400);
+        const current = await first<Profile>(profileTable(userId));
+        if (!current) return error('Сначала создайте профиль.', 400);
+        if (current.role === ctx.body.role) return json({ profile: { role: current.role, name: current.name, email: current.email } });
+        const busy =
+          current.role === 'trainer'
+            ? (await db.list(clientsTable(userId), { limit: 1 })).items.length > 0 || (await db.list(programsTable(userId), { limit: 1 })).items.length > 0
+            : (await keysOf(userId)).length > 0 || (await db.list(sessionsTable(userId), { limit: 1 })).items.length > 0;
+        if (busy) return error('В аккаунте уже есть данные — роль сменить нельзя. Войдите с другой почтой.', 409);
+        const { id, ...record } = current;
+        const profile: Profile = { ...record, role: ctx.body.role };
+        const [ok] = await db.update(profileTable(userId), [{ id, record: profile }]);
+        return ok ? json({ profile }) : error('Не удалось сменить роль.', 500);
+      },
+    ],
+
     'GET /api/clients': [
       requireAuth(),
       async (ctx: Ctx) => {
