@@ -203,7 +203,7 @@ const draftTable = (clientId: string, programId: string, dayId: string) =>
 /** Body measurements of one client key, one row per date. */
 const bodyTable = (clientId: string) => 'body:' + tableKey(clientId);
 const bodyProfileTable = (clientId: string) => 'body_profile:' + tableKey(clientId);
-const BODY_FIELDS = { weight: [20, 400], waist: [40, 250], neck: [20, 70], hips: [50, 250], steps: [0, 100000] } as const;
+const BODY_FIELDS = { weight: [20, 400], waist: [40, 250], neck: [20, 70], hips: [50, 250], steps: [0, 100000], kcal: [0, 15000] } as const;
 type BodyField = keyof typeof BODY_FIELDS;
 interface BodyEntry {
   date: string;
@@ -213,6 +213,8 @@ interface BodyEntry {
   hips?: number | null;
   /** Steps walked on that date (usually entered the next morning). */
   steps?: number | null;
+  /** Calories eaten on that date. */
+  kcal?: number | null;
   updatedAt: string;
   recordedByRole?: Role;
 }
@@ -879,8 +881,8 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           if (b[f] === undefined) continue;
           const v = bodyNumber(b[f], BODY_FIELDS[f]);
           if (v === undefined)
-            return error('Проверьте значения: вес 20–400 кг, талия 40–250, шея 20–70, бёдра 50–250 см, шаги до 100 000.', 400);
-          patch[f] = f === 'steps' && v !== null ? Math.round(v) : v;
+            return error('Проверьте значения: вес 20–400 кг, талия 40–250, шея 20–70, бёдра 50–250 см, шаги до 100 000, калории до 15 000.', 400);
+          patch[f] = (f === 'steps' || f === 'kcal') && v !== null ? Math.round(v) : v;
         }
         const updatedAt = nowIso();
         let entry: BodyEntry | null = null;

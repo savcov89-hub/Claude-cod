@@ -2534,12 +2534,12 @@ h2 {
 }
 .morning-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 .morning-grid input {
   min-width: 0;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 600;
 }
 .weigh-row {

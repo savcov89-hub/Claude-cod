@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Ruler, Trash2 } from 'lucide-react';
-import { ACTIVITY, calories, latest, navyBodyFat, weeklyAverage, type BodyEntry, type BodyProfile } from '../body';
+import { ACTIVITY, actualExpenditure, calories, ffmi, latest, navyBodyFat, weeklyAverage, type BodyEntry, type BodyProfile } from '../body';
 import { fmtKg } from '../analytics';
 import { localDate } from '../clock';
 import { api, readError } from '../transport';
@@ -66,6 +66,10 @@ export function BodyView({ clientId }: { clientId?: string }) {
   const energy = profile && weight ? calories(profile, weight, bodyFat, stepsWeek.current) : null;
   const weights = entries.filter((e) => typeof e.weight === 'number').slice(-60);
   const steps = entries.filter((e) => typeof e.steps === 'number').slice(-60);
+  const eaten = entries.filter((e) => typeof e.kcal === 'number').slice(-60);
+  const kcalWeek = weeklyAverage(entries, today, 'kcal');
+  const actual = actualExpenditure(entries, today);
+  const index = profile && weight && bodyFat !== null ? ffmi(profile, weight, bodyFat) : null;
 
   return (
     <div className="body-view">
@@ -74,9 +78,9 @@ export function BodyView({ clientId }: { clientId?: string }) {
       <MorningCard
         entries={entries}
         today={today}
-        onSave={async (date, w, st) => {
+        onSave={async (date, w, yesterday) => {
           if (w !== null) await api.post('/api/body', { ...(clientId ? { clientId } : {}), date, weight: w });
-          if (st !== null) await api.post('/api/body', { ...(clientId ? { clientId } : {}), date: dayBefore(date), steps: st });
+          if (Object.keys(yesterday).length) await api.post('/api/body', { ...(clientId ? { clientId } : {}), date: dayBefore(date), ...yesterday });
           await load();
         }}
       />
@@ -134,6 +138,50 @@ export function BodyView({ clientId }: { clientId?: string }) {
 
       <section className="block">
         <div className="block-head">
+          <h4>Питание</h4>
+          {kcalWeek.current !== null && (
+            <span className="muted small">
+              в среднем за 7 дней <b className="num">{fmtSteps(kcalWeek.current)} ккал</b>
+              {kcalWeek.previous !== null && <span className="num"> (неделей раньше {fmtSteps(kcalWeek.previous)})</span>}
+            </span>
+          )}
+        </div>
+        {eaten.length > 1 && (
+          <div className="body-spark">
+            <Sparkline points={eaten.map((e) => ({ date: e.date, e1rm: e.kcal as number }))} width={320} height={64} fromZero />
+            <div className="muted small row between">
+              <span>{fmtDate(eaten[0].date)}</span>
+              <span>{fmtDate(eaten[eaten.length - 1].date)}</span>
+            </div>
+          </div>
+        )}
+        {actual ? (
+          <div className="stat-row">
+            <div>
+              <strong className="big num">{fmtSteps(actual.expenditure)}</strong>
+              <span className="muted small">ккал в день — расход по факту</span>
+            </div>
+            <div>
+              <strong className="num">{fmtSteps(actual.intake)} ккал</strong>
+              <span className="muted small">съедено в среднем</span>
+              <strong className="num">{signed(actual.change)} кг</strong>
+              <span className="muted small">вес за неделю</span>
+            </div>
+          </div>
+        ) : null}
+        <p className="muted small">
+          {actual
+            ? 'Расход по факту = средние калории за 2 недели минус изменение веса (≈7700 ккал на кг). Он точнее расчётного' +
+              (energy ? ' (' + fmtSteps(energy.maintain) + ')' : '') +
+              ', если калории записаны честно.'
+            : eaten.length
+              ? 'Нужны 2 недели: хотя бы 4 дня с калориями и 3 взвешивания в каждой — тогда появится расход по факту.'
+              : 'Утром вместе с весом запишите калории за вчера (из приложения для подсчёта). Через 2 недели появится расход по факту — по съеденному и динамике веса.'}
+        </p>
+      </section>
+
+      <section className="block">
+        <div className="block-head">
           <h4>Процент жира</h4>
           <button className="btn btn-sm" onClick={() => setMeasuring(!measuring)}>
             <Ruler size={15} /> Замеры
@@ -156,7 +204,22 @@ export function BodyView({ clientId }: { clientId?: string }) {
               </div>
             )}
           </div>
-        ) : (
+        ) : null}
+        {index && (
+          <div className="stat-row">
+            <div>
+              <strong className="big num">{fmtKg(index.normalized)}</strong>
+              <span className="muted small">индекс безжировой массы (FFMI) — {index.level}</span>
+            </div>
+            {index.value !== index.normalized && (
+              <div>
+                <strong className="num">{fmtKg(index.value)}</strong>
+                <span className="muted small">без поправки на рост</span>
+              </div>
+            )}
+          </div>
+        )}
+        {profile && bodyFat === null && (
           <p className="muted small">
             Нужны обхваты шеи и талии{profile.sex === 'f' ? ' и бёдер' : ''}. Нажмите «Замеры».
           </p>
@@ -239,12 +302,12 @@ export function BodyView({ clientId }: { clientId?: string }) {
         )}
       </section>
 
-      {entries.length > 0 && <EntryList entries={entries} profile={profile} onDelete={(date) => save({ date, weight: null, waist: null, neck: null, hips: null, steps: null })} />}
+      {entries.length > 0 && <EntryList entries={entries} profile={profile} onDelete={(date) => save({ date, weight: null, waist: null, neck: null, hips: null, steps: null, kcal: null })} />}
     </div>
   );
 }
 
-/** Morning entry: today's weight and yesterday's steps together. */
+/** Morning entry: today's weight, yesterday's steps and calories together. */
 function MorningCard({
   entries,
   today,
@@ -252,14 +315,16 @@ function MorningCard({
 }: {
   entries: BodyEntry[];
   today: string;
-  onSave: (date: string, weight: number | null, steps: number | null) => Promise<void>;
+  onSave: (date: string, weight: number | null, yesterday: { steps?: number; kcal?: number }) => Promise<void>;
 }) {
   const [date, setDate] = useState(today);
   const stepsDate = dayBefore(date);
   const hadWeight = entries.find((e) => e.date === date)?.weight;
   const hadSteps = entries.find((e) => e.date === stepsDate)?.steps;
+  const hadKcal = entries.find((e) => e.date === stepsDate)?.kcal;
   const [weight, setWeight] = useState(str(hadWeight));
   const [steps, setSteps] = useState(typeof hadSteps === 'number' ? String(hadSteps) : '');
+  const [kcal, setKcal] = useState(typeof hadKcal === 'number' ? String(hadKcal) : '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [saved, setSaved] = useState(false);
@@ -267,16 +332,20 @@ function MorningCard({
     setWeight(str(entries.find((e) => e.date === date)?.weight));
     const st = entries.find((e) => e.date === dayBefore(date))?.steps;
     setSteps(typeof st === 'number' ? String(st) : '');
+    const kc = entries.find((e) => e.date === dayBefore(date))?.kcal;
+    setKcal(typeof kc === 'number' ? String(kc) : '');
   }, [date, entries]);
   const submit = async () => {
     const w = num(weight);
     const st = steps.trim() ? Number(steps.replace(/[\s\u00a0]/g, '')) : null;
+    const kc = kcal.trim() ? Number(kcal.replace(/[\s\u00a0]/g, '')) : null;
     if (weight.trim() && (w === null || w < 20 || w > 400)) return setErr('Введите вес в кг, например 82,4.');
     if (st !== null && (!Number.isFinite(st) || st < 0 || st > 100000)) return setErr('Шаги — число до 100 000.');
-    if (w === null && st === null) return setErr('Введите вес или шаги.');
+    if (kc !== null && (!Number.isFinite(kc) || kc < 0 || kc > 15000)) return setErr('Калории — число до 15 000.');
+    if (w === null && st === null && kc === null) return setErr('Введите вес, шаги или калории.');
     setBusy(true);
     try {
-      await onSave(date, w, st === null ? null : Math.round(st));
+      await onSave(date, w, { ...(st !== null ? { steps: Math.round(st) } : {}), ...(kc !== null ? { kcal: Math.round(kc) } : {}) });
       setErr('');
       setSaved(true);
       (document.activeElement as HTMLElement | null)?.blur();
@@ -314,6 +383,19 @@ function MorningCard({
               setSteps(e.target.value);
               edit();
             }}
+          />
+        </label>
+        <label className="field">
+          <span>Калории {date === today ? 'вчера' : fmtDate(stepsDate)}</span>
+          <input
+            id="body-kcal"
+            inputMode="numeric"
+            placeholder="2 100"
+            value={kcal}
+            onChange={(e) => {
+              setKcal(e.target.value);
+              edit();
+            }}
             onKeyDown={(e) => e.key === 'Enter' && void submit()}
           />
         </label>
@@ -324,7 +406,7 @@ function MorningCard({
           <input type="date" value={date} max={today} onChange={(e) => e.target.value && setDate(e.target.value)} />
         </label>
         <button className="btn btn-primary" disabled={busy} onClick={submit}>
-          {busy ? 'Сохраняем…' : typeof hadWeight === 'number' || typeof hadSteps === 'number' ? 'Обновить' : 'Записать'}
+          {busy ? 'Сохраняем…' : typeof hadWeight === 'number' || typeof hadSteps === 'number' || typeof hadKcal === 'number' ? 'Обновить' : 'Записать'}
         </button>
       </div>
       {err && <div className="alert">{err}</div>}
@@ -517,6 +599,7 @@ function EntryList({ entries, profile, onDelete }: { entries: BodyEntry[]; profi
                 <td>
                   {typeof e.weight === 'number' && <b className="num">{fmtKg(e.weight)} кг</b>}
                   {typeof e.steps === 'number' && <span className="small"> {fmtSteps(e.steps)} шаг.</span>}
+                  {typeof e.kcal === 'number' && <span className="small"> {fmtSteps(e.kcal)} ккал</span>}
                   {tape && <span className="muted small"> {tape}</span>}
                   {bf !== null && <span className="small"> · {fmtKg(bf)} %</span>}
                 </td>

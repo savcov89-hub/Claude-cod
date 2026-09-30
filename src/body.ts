@@ -8,6 +8,8 @@ export interface BodyEntry {
   hips?: number | null;
   /** Steps walked on that date. */
   steps?: number | null;
+  /** Calories eaten on that date (entered the next morning). */
+  kcal?: number | null;
   updatedAt?: string;
   recordedByRole?: 'trainer' | 'client';
 }
@@ -59,7 +61,7 @@ export function latest(entries: BodyEntry[]) {
 }
 
 /** Average of `field` over the 7 days ending at `end` (yyyy-mm-dd), and over the 7 days before that. */
-export function weeklyAverage(entries: BodyEntry[], end: string, field: 'weight' | 'steps' = 'weight') {
+export function weeklyAverage(entries: BodyEntry[], end: string, field: 'weight' | 'steps' | 'kcal' = 'weight') {
   const day = 86400000;
   const endMs = Date.parse(end + 'T12:00:00');
   const avg = (from: number, to: number) => {
@@ -73,6 +75,57 @@ export function weeklyAverage(entries: BodyEntry[], end: string, field: 'weight'
     return list.length ? Math.round((list.reduce((a, b) => a + b, 0) / list.length) * 10) / 10 : null;
   };
   return { current: avg(endMs - 7 * day, endMs), previous: avg(endMs - 14 * day, endMs - 7 * day) };
+}
+
+/**
+ * Fat-free mass index: lean mass / height². `normalized` is adjusted to a height of 1,8 m (+6,1 per metre shorter),
+ * so short and tall people compare fairly. Levels follow Kouri et al. (1995) for men; for women about 4 points lower.
+ */
+export function ffmi(profile: BodyProfile, weight: number, bodyFat: number) {
+  const h = profile.heightCm / 100;
+  const lean = weight * (1 - bodyFat / 100);
+  const value = lean / (h * h);
+  const normalized = value + 6.1 * (1.8 - h);
+  const shift = profile.sex === 'm' ? 0 : 4;
+  const levels: Array<[number, string]> = [
+    [18, 'ниже среднего'],
+    [20, 'средний'],
+    [22, 'выше среднего'],
+    [23, 'отличный'],
+    [25, 'очень высокий — близко к природному пределу'],
+    [Infinity, 'выше природного предела'],
+  ];
+  const level = levels.find(([top]) => normalized < top - shift)![1];
+  return { value: Math.round(value * 10) / 10, normalized: Math.round(normalized * 10) / 10, level };
+}
+
+/**
+ * Actual daily expenditure from what was eaten and how the weight moved: average intake over two weeks minus
+ * the energy of the weight change (≈7700 kcal per kg). Null until both weeks have enough weighings and food entries.
+ */
+export function actualExpenditure(entries: BodyEntry[], end: string) {
+  const day = 86400000;
+  const endMs = Date.parse(end + 'T12:00:00');
+  const inWeek = (e: BodyEntry, back: number) => {
+    const t = Date.parse(e.date + 'T12:00:00');
+    return t > endMs - (back + 1) * 7 * day && t <= endMs - back * 7 * day;
+  };
+  const avg = (list: number[]) => list.reduce((a, b) => a + b, 0) / list.length;
+  const weeks = [1, 0].map((back) => {
+    const week = entries.filter((e) => inWeek(e, back));
+    return {
+      weights: week.filter((e) => typeof e.weight === 'number').map((e) => e.weight as number),
+      kcal: week.filter((e) => typeof e.kcal === 'number' && (e.kcal as number) > 0).map((e) => e.kcal as number),
+    };
+  });
+  if (weeks.some((w) => w.weights.length < 3 || w.kcal.length < 4)) return null;
+  const change = avg(weeks[1].weights) - avg(weeks[0].weights);
+  const intake = avg([...weeks[0].kcal, ...weeks[1].kcal]);
+  return {
+    intake: Math.round(intake / 10) * 10,
+    change: Math.round(change * 10) / 10,
+    expenditure: Math.round((intake - (change * 7700) / 7) / 10) * 10,
+  };
 }
 
 /** Steps already covered by the sedentary multiplier (home, office). */
