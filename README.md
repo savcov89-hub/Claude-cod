@@ -110,6 +110,19 @@
 Встроенная почта Supabase доставляет только участникам проекта и с жёстким лимитом. Клиентам проще входить
 через Google. Если нужен вход по почте для всех — подключите свой SMTP (Authentication → SMTP Settings), например Resend.
 
+## Резервные копии
+Раз в неделю (воскресенье, ~04:17 МСК) Actions → **Backup data** выгружает всю таблицу `kv_rows`, шифрует её паролем
+из секрета `BACKUP_PASSWORD` и кладёт в ветку `backups` (последние 12 копий). Тот же запуск обращается к серверу,
+чтобы бесплатный проект Supabase не уснул после недели без использования. Запустить вручную: Actions → Backup data →
+Run workflow. Нужны секреты `SUPABASE_ACCESS_TOKEN` (уже есть) и `BACKUP_PASSWORD` (пароль хранить отдельно — без него
+копию не открыть).
+
+Восстановление:
+1. Скачать файл из ветки `backups` и расшифровать:
+   `openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in 2026-10-04.json.gz.enc -out rows.json.gz && gunzip rows.json.gz`
+2. `npx tsx scripts/restore-backup.ts rows.json > restore.sql` и выполнить `restore.sql` в Supabase → SQL Editor.
+   Строки из копии возвращаются как были (те же id, данные и порядок), добавленные позже не трогаются.
+
 ## Локальная проверка сервера
 `npx supabase start` (нужен Docker) поднимает базу, вход, почту (http://127.0.0.1:54324) и функцию.
 `SRK=<service_role key из npx supabase status> npx tsx scripts/supabase-parity.ts` прогоняет пример данных

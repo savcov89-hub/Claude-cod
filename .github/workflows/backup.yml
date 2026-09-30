@@ -1,0 +1,70 @@
+name: Backup data
+
+# Weekly copy of all app data (table kv_rows) into the "backups" branch, encrypted with the
+# BACKUP_PASSWORD secret (the repository is public). The same run calls the server, so the free
+# Supabase project is not paused for a week without use. Restore: see README ("Резервные копии").
+on:
+  schedule:
+    - cron: '17 1 * * 0' # Sundays 01:17 UTC (04:17 Moscow)
+  workflow_dispatch:
+
+concurrency: backup
+
+permissions:
+  contents: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+      PROJECT_ID: mtheahciwliosrzadhbd
+      KEEP: 12
+    steps:
+      - name: Wake the server
+        run: curl -sS -o /dev/null -w "api: %{http_code}\n" "https://$PROJECT_ID.supabase.co/functions/v1/api/api/me" || true
+
+      - name: Check access
+        run: if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then echo "::error::Нет секрета SUPABASE_ACCESS_TOKEN — копию не сделать."; exit 1; fi
+
+      - name: Export all rows
+        run: |
+          # data::text keeps the stored JSON exactly (key order matters for the app).
+          body='{"query":"select tbl, id, data::text as data, seq from public.kv_rows order by seq"}'
+          code=$(curl -sS -o rows.json -w "%{http_code}" -X POST \
+            "https://api.supabase.com/v1/projects/$PROJECT_ID/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" -d "$body")
+          if [ "$code" != "200" ] && [ "$code" != "201" ]; then echo "::error::Supabase ответил $code"; head -c 500 rows.json; exit 1; fi
+          rows=$(jq 'length' rows.json)
+          echo "rows: $rows, $(wc -c < rows.json) bytes"
+          if [ "$rows" -lt 1 ]; then echo "::error::Пустая выгрузка — копия не сохранена."; exit 1; fi
+          echo "ROWS=$rows" >> "$GITHUB_ENV"
+
+      - name: Encrypt
+        run: |
+          # Without a password nothing is stored: the repository is public.
+          if [ -z "$BACKUP_PASSWORD" ]; then echo "::error::Нет секрета BACKUP_PASSWORD — выгрузка прошла ($ROWS строк), но копия не сохранена."; exit 1; fi
+          gzip -9 rows.json
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BACKUP_PASSWORD -in rows.json.gz -out backup.json.gz.enc
+          rm rows.json.gz
+
+      - name: Save to the backups branch
+        run: |
+          name="$(date -u +%Y-%m-%d).json.gz.enc"
+          git init -q store && cd store
+          git config user.name "backup-bot"
+          git config user.email "backup-bot@users.noreply.github.com"
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          # Earlier copies are taken from the branch; the branch is rewritten as one commit,
+          # so old copies do not pile up in its history.
+          if git fetch -q --depth 1 origin backups; then git checkout -q FETCH_HEAD -- . ; fi
+          git checkout -q --orphan snapshot
+          mv ../backup.json.gz.enc "$name"
+          # Only the latest $KEEP copies stay.
+          ls -1 *.json.gz.enc | sort | head -n -"$KEEP" | xargs -r rm -f --
+          printf '# Резервные копии\n\nЗашифрованы паролем из секрета BACKUP_PASSWORD. Как восстановить — README основной ветки, раздел «Резервные копии».\n' > README.md
+          git add -A
+          git commit -q -m "Backup $name ($ROWS rows)"
+          git push -q -f origin snapshot:backups
+          echo "saved $name; copies: $(ls -1 *.json.gz.enc | tr '\n' ' ')"
