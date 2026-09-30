@@ -1,11 +1,11 @@
 name: Backup data
 
-# Weekly copy of all app data (table kv_rows) into the "backups" branch, encrypted with the
+# Copy of all app data (Tue, Thu, Sat) (table kv_rows) into the "backups" branch, encrypted with the
 # BACKUP_PASSWORD secret (the repository is public). The same run calls the server, so the free
 # Supabase project is not paused for a week without use. Restore: see README ("Резервные копии").
 on:
   schedule:
-    - cron: '17 1 * * 0' # Sundays 01:17 UTC (04:17 Moscow)
+    - cron: '17 1 * * 2,4,6' # Tue, Thu, Sat 01:17 UTC (04:17 Moscow)
   workflow_dispatch:
 
 concurrency: backup
@@ -20,7 +20,7 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
       PROJECT_ID: mtheahciwliosrzadhbd
-      KEEP: 12
+      KEEP: 36 # three copies a week: about three months
     steps:
       - name: Wake the server
         run: |
