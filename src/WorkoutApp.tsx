@@ -127,6 +127,8 @@ function RealApp() {
     return pendingInvite();
   });
   const [connecting, setConnecting] = useState(false);
+  // By an invite link the client makes an account right away; «Уже есть аккаунт» shows the usual sign-in.
+  const [inviteLogin, setInviteLogin] = useState(false);
   const [note, setNote] = useState('');
 
   useEffect(() => {
@@ -177,6 +179,25 @@ function RealApp() {
             ? 'Проверьте адрес почты.'
             : msg,
       );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const registerByInvite = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || password.length < 6) return setErr('Пароль — не короче 6 символов.');
+    setBusy(true);
+    setErr('');
+    try {
+      const r = await api.post('/api/invite/' + encodeURIComponent(invite) + '/register', { email: email.trim(), password, name: name.trim() });
+      clearInvite();
+      setInvite('');
+      const signed = await auth.signInWithPassword(email.trim(), password);
+      setUser(signed);
+      setNote('Вы подключены к тренеру: ' + r.data.trainerName + '. Войти снова: эта почта и пароль.');
+      if (signed) setProfile((await api.get('/api/me')).data.profile || null);
+    } catch (e) {
+      setErr(readError(e));
     } finally {
       setBusy(false);
     }
@@ -275,6 +296,36 @@ function RealApp() {
       <div className="center-screen">
         <span className="loader" />
         <p className="muted">Загружаем журнал…</p>
+      </div>
+    );
+  if (!user && invite && !inviteLogin)
+    return (
+      <div className="auth">
+        <span className="brand-mark"><Dumbbell size={28} /></span>
+        <span className="eyebrow">Приглашение от тренера</span>
+        <h1>Создайте вход в дневник</h1>
+        <p className="muted">Придумайте пароль — писем ждать не нужно. После этого вы сразу подключитесь к тренеру и увидите свою программу.</p>
+        {err && <div className="alert">{err}</div>}
+        <form className="auth-form" onSubmit={registerByInvite}>
+          <label className="field">
+            <span>Как вас зовут?</span>
+            <input autoComplete="name" maxLength={60} value={name} onChange={(e) => setName(e.target.value)} placeholder="Имя" />
+          </label>
+          <label className="field">
+            <span>Электронная почта — это ваш логин</span>
+            <input id="invite-email" type="email" autoComplete="username" inputMode="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          </label>
+          <label className="field">
+            <span>Придумайте пароль (от 6 символов)</span>
+            <input id="invite-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          </label>
+          <button className="btn btn-primary btn-lg btn-block" disabled={busy || !email.trim() || password.length < 6} type="submit">
+            {busy ? 'Создаём…' : 'Создать и войти'}
+          </button>
+        </form>
+        <button className="btn btn-quiet" onClick={() => { setInviteLogin(true); setErr(''); }}>
+          Уже есть аккаунт? Войти
+        </button>
       </div>
     );
   if (!user)

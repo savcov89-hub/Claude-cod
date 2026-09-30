@@ -468,6 +468,32 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     });
   }
 
+  /** Connects a client account to the trainer of an unused invite; returns an error text on failure. */
+  async function connectByInvite(userId: string, profile: Profile, code: string, invite: InviteRecord & { id: string }) {
+    if ((await keysOf(userId)).some((k) => k.trainerId === invite.trainerId)) return 'Вы уже подключены к этому тренеру.';
+    const connectedAt = nowIso();
+    let clientKey = userId;
+    if (invite.clientId) {
+      const client = await findClient(invite.trainerId, invite.clientId);
+      if (!client) return 'Тренер удалил этого клиента.';
+      if (client.userId) return 'Этот клиент уже подключён.';
+      clientKey = client.clientId;
+      await saveClient(invite.trainerId, client, { userId, clientEmail: profile.email, connectedAt });
+    } else {
+      const [link] = await db.add(clientsTable(invite.trainerId), [
+        { clientId: userId, userId, clientName: invite.clientName || profile.name, clientEmail: profile.email, connectedAt } satisfies ClientRecord,
+      ]);
+      if (!link) return 'Не удалось подключить клиента.';
+    }
+    const [coachLink] = await db.add(coachesTable(userId), [
+      { trainerId: invite.trainerId, trainerName: invite.trainerName, connectedAt, clientId: clientKey } satisfies CoachRecord,
+    ]);
+    if (!coachLink) return 'Не удалось подключить тренера.';
+    const { id, ...record } = invite;
+    await db.update(inviteTable(code), [{ id, record: { ...record, usedBy: userId } }]);
+    return null;
+  }
+
   const trainerOnly = async (ctx: Ctx) => {
     const profile = await getProfile(ctx.user!.userId);
     return profile?.role === 'trainer' ? profile : null;
@@ -672,6 +698,32 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
       },
     ],
 
+    /**
+     * Sign-up by an invite link, no email: the client picks an email and a password, the account is created
+     * confirmed, becomes a client and is connected to the trainer who sent the invite. The code works once.
+     */
+    'POST /api/invite/:code/register': [
+      async (ctx: Ctx) => {
+        if (!accounts) return error('Регистрация недоступна.', 501);
+        const code = text(ctx.params.code, 10).toUpperCase();
+        const invite = await first<InviteRecord>(inviteTable(code));
+        if (!invite) return error('Приглашение не найдено. Попросите тренера отправить новое.', 404);
+        if (invite.usedBy) return error('Это приглашение уже использовано. Войдите по почте и паролю.', 409);
+        const email = text(ctx.body?.email, 200).toLowerCase();
+        const password = text(ctx.body?.password, 72);
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return error('Проверьте адрес почты.', 400);
+        if (password.length < 6) return error('Пароль — не короче 6 символов.', 400);
+        const made = await accounts.createUser(email, password);
+        if (made.exists || !made.userId)
+          return error('Эта почта уже зарегистрирована. Укажите другую — или войдите с ней, если знаете пароль.', 409);
+        const userId = made.userId;
+        const profile: Profile = { role: 'client', name: text(ctx.body?.name, 60) || invite.clientName || email.split('@')[0], email };
+        await db.add(profileTable(userId), [profile]);
+        const res = await connectByInvite(userId, profile, code, invite);
+        return typeof res === 'string' ? error(res, 409) : json({ registered: true, trainerName: invite.trainerName }, 201);
+      },
+    ],
+
     'POST /api/connect': [
       requireAuth(),
       async (ctx: Ctx) => {
@@ -683,29 +735,8 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const invite = await first<InviteRecord>(inviteTable(code));
         if (!invite) return error('Код не найден.', 404);
         if (invite.usedBy) return error('Этот код уже использован.', 409);
-        if ((await keysOf(userId)).some((k) => k.trainerId === invite.trainerId))
-          return error('Вы уже подключены к этому тренеру.', 409);
-        const connectedAt = nowIso();
-        let clientKey = userId;
-        if (invite.clientId) {
-          const client = await findClient(invite.trainerId, invite.clientId);
-          if (!client) return error('Тренер удалил этого клиента.', 404);
-          if (client.userId) return error('Этот клиент уже подключён.', 409);
-          clientKey = client.clientId;
-          await saveClient(invite.trainerId, client, { userId, clientEmail: profile.email, connectedAt });
-        } else {
-          const [link] = await db.add(clientsTable(invite.trainerId), [
-            { clientId: userId, userId, clientName: invite.clientName || profile.name, clientEmail: profile.email, connectedAt } satisfies ClientRecord,
-          ]);
-          if (!link) return error('Не удалось подключить клиента.', 500);
-        }
-        const [coachLink] = await db.add(coachesTable(userId), [
-          { trainerId: invite.trainerId, trainerName: invite.trainerName, connectedAt, clientId: clientKey } satisfies CoachRecord,
-        ]);
-        if (!coachLink) return error('Не удалось подключить тренера.', 500);
-        const { id, ...record } = invite;
-        await db.update(inviteTable(code), [{ id, record: { ...record, usedBy: userId } }]);
-        return json({ connected: true, trainerName: invite.trainerName });
+        const res = await connectByInvite(userId, profile, code, invite);
+        return typeof res === 'string' ? error(res, 409) : json({ connected: true, trainerName: invite.trainerName });
       },
     ],
 
