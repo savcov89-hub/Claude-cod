@@ -110,6 +110,20 @@ export function createSupabaseServer(supabaseUrl: string, serviceRoleKey: string
         }
         return { userId: data.user.id };
       },
+      async findUser(email) {
+        for (let page = 1; page <= 50; page++) {
+          const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+          if (error) throw error;
+          const found = data.users.find((u) => (u.email || '').toLowerCase() === email);
+          if (found) return found.id;
+          if (data.users.length < 200) return null;
+        }
+        return null;
+      },
+      async setPassword(userId, password) {
+        const { error } = await admin.auth.admin.updateUserById(userId, { password, email_confirm: true });
+        if (error) throw error;
+      },
     },
     async getUser(token) {
       const { data, error } = await admin.auth.getUser(token);

@@ -72,6 +72,10 @@ const accounts = {
     demoAccounts.set(email, userId);
     return { userId };
   },
+  async findUser(email: string) {
+    return demoAccounts.get(email) || null;
+  },
+  async setPassword() {},
 };
 export const sdk = { db, accounts, error, json, requireAuth, router } as unknown as Sdk;
 export type LocalHandler = Handler;

@@ -104,6 +104,9 @@ function LocalApp() {
   );
 }
 
+/** Opened from a «сменить пароль» email: read before the sign-in library clears the address. */
+const recovering = typeof location !== 'undefined' && /type=recovery/.test(location.hash + location.search);
+
 /** Production: Supabase sign-in (Google or emailed link), then roles. */
 function RealApp() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -119,7 +122,7 @@ function RealApp() {
   const [password, setPassword] = useState('');
   // Password first; the emailed code stays as a fallback (the project's own mail is limited).
   const [byEmail, setByEmail] = useState(false);
-  const [newPassword, setNewPassword] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState<string | null>(recovering ? '' : null);
   const [picked, setPicked] = useState<Role | null>(null);
   // An invite link (?invite=CODE) waits here until the client has signed in.
   const [invite, setInvite] = useState(() => {
@@ -129,7 +132,8 @@ function RealApp() {
   const [connecting, setConnecting] = useState(false);
   // By an invite link the client makes an account right away; «Уже есть аккаунт» shows the usual sign-in.
   const [inviteLogin, setInviteLogin] = useState(false);
-  const [note, setNote] = useState('');
+  const [sentReset, setSentReset] = useState('');
+  const [note, setNote] = useState(recovering ? 'Задайте новый пароль — поле вверху — и нажмите «Сохранить».' : '');
 
   useEffect(() => {
     void auth.googleEnabled().then(setGoogleOn);
@@ -227,6 +231,23 @@ function RealApp() {
       setNote('Пароль сохранён. Теперь можно входить по почте и паролю.');
     } catch (e) {
       setNote(readError(e));
+    }
+  };
+  const forgot = async () => {
+    const address = email.trim();
+    if (!address) return setErr('Впишите почту — пришлём ссылку для смены пароля.');
+    setBusy(true);
+    setErr('');
+    try {
+      await auth.resetPassword(address);
+      setErr('');
+      setNote('');
+      setSentReset(address);
+    } catch (e) {
+      const msg = readError(e);
+      setErr(/rate limit/i.test(msg) ? 'Сейчас отправлено слишком много писем. Попробуйте через час.' : msg);
+    } finally {
+      setBusy(false);
     }
   };
   const verify = async (e: FormEvent) => {
@@ -360,6 +381,12 @@ function RealApp() {
                 {busy ? 'Входим…' : 'Войти'}
               </button>
             </form>
+            {sentReset && (
+              <div className="success">Ссылка для смены пароля отправлена на {sentReset}. Откройте письмо, задайте новый пароль — и входите им здесь.</div>
+            )}
+            <button className="btn btn-quiet" disabled={busy} onClick={() => void forgot()}>
+              Забыли пароль?
+            </button>
             <button className="btn btn-quiet" onClick={() => setByEmail(true)}>
               Нет пароля? Войти по коду из письма
             </button>

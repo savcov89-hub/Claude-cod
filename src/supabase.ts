@@ -56,6 +56,11 @@ export const auth = {
     if (error) throw error;
     return data.user ? toUser(data.user) : null;
   },
+  /** Email with a link that signs in and asks for a new password (the app sees `type=recovery`). */
+  async resetPassword(email: string) {
+    const { error } = await sb().auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    if (error) throw error;
+  },
   async setPassword(password: string) {
     const { error } = await sb().auth.updateUser({ password });
     if (error) throw error;

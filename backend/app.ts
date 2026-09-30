@@ -24,6 +24,20 @@ export interface Ctx {
 export interface Accounts {
   /** A confirmed email + password account, so nobody waits for an email. */
   createUser(email: string, password: string): Promise<{ userId?: string; exists?: boolean }>;
+  /** Owner only, for empty accounts: find an account by email and set its password (confirmed). */
+  findUser(email: string): Promise<string | null>;
+  setPassword(userId: string, password: string): Promise<void>;
+}
+/**
+ * SHA-256 of the app owner's email (the address itself stays out of the code). The owner may give a password
+ * to an existing but empty account, e.g. one made by mistake, since the built-in mail can't be relied on.
+ */
+const OWNER_EMAIL_HASHES = ['f459ed264a6d68118d4c01417c7fbb8c65c8671eb9765143cd341127c31100b0'];
+async function isOwner(email?: string) {
+  if (!email || typeof crypto === 'undefined' || !crypto.subtle) return false;
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(email.trim().toLowerCase()));
+  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+  return OWNER_EMAIL_HASHES.includes(hex);
 }
 export interface Sdk {
   db: Db;
@@ -468,6 +482,15 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     });
   }
 
+  /** True when an account holds nothing: no profile, a trainer without clients or programs, a client without trainers or workouts. */
+  async function accountIsEmpty(userId: string) {
+    const p = await getProfile(userId);
+    if (!p) return true;
+    if (p.role === 'trainer')
+      return !(await db.list(clientsTable(userId), { limit: 1 })).items.length && !(await db.list(programsTable(userId), { limit: 1 })).items.length;
+    return !(await keysOf(userId)).length && !(await db.list(sessionsTable(userId), { limit: 1 })).items.length;
+  }
+
   /** Connects a client account to the trainer of an unused invite; returns an error text on failure. */
   async function connectByInvite(userId: string, profile: Profile, code: string, invite: InviteRecord & { id: string }) {
     if ((await keysOf(userId)).some((k) => k.trainerId === invite.trainerId)) return 'Вы уже подключены к этому тренеру.';
@@ -557,11 +580,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const current = await first<Profile>(profileTable(userId));
         if (!current) return error('Сначала создайте профиль.', 400);
         if (current.role === ctx.body.role) return json({ profile: { role: current.role, name: current.name, email: current.email } });
-        const busy =
-          current.role === 'trainer'
-            ? (await db.list(clientsTable(userId), { limit: 1 })).items.length > 0 || (await db.list(programsTable(userId), { limit: 1 })).items.length > 0
-            : (await keysOf(userId)).length > 0 || (await db.list(sessionsTable(userId), { limit: 1 })).items.length > 0;
-        if (busy) return error('В аккаунте уже есть данные — роль сменить нельзя. Войдите с другой почтой.', 409);
+        if (!(await accountIsEmpty(userId))) return error('В аккаунте уже есть данные — роль сменить нельзя. Войдите с другой почтой.', 409);
         const { id, ...record } = current;
         const profile: Profile = { ...record, role: ctx.body.role };
         const [ok] = await db.update(profileTable(userId), [{ id, record: profile }]);
@@ -685,11 +704,23 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return error('Проверьте адрес почты.', 400);
         if (password.length < 6) return error('Пароль — не короче 6 символов.', 400);
         const made = await accounts.createUser(email, password);
-        if (made.exists || !made.userId)
-          return error('Эта почта уже зарегистрирована. Укажите другую — или клиент входит сам и подключается по приглашению.', 409);
-        const userId = made.userId;
+        let userId = made.userId;
+        if (made.exists || !userId) {
+          // The owner may take over an existing account only while it holds nothing (e.g. a role picked by mistake).
+          const existing = (await isOwner(ctx.user!.email)) ? await accounts.findUser(email) : null;
+          if (existing && !(await accountIsEmpty(existing)))
+            return error('На этой почте уже есть аккаунт с данными — его пароль знает только владелец. Укажите другую почту.', 409);
+          if (!existing)
+            return error('Эта почта уже зарегистрирована. Укажите другую — или клиент входит сам и подключается по приглашению.', 409);
+          await accounts.setPassword(existing, password);
+          userId = existing;
+        }
         const connectedAt = nowIso();
-        await db.add(profileTable(userId), [{ role: 'client', name: client.clientName, email } satisfies Profile]);
+        const old = await first<Profile>(profileTable(userId));
+        if (old) {
+          const { id, ...record } = old;
+          await db.update(profileTable(userId), [{ id, record: { ...record, role: 'client', name: client.clientName, email } }]);
+        } else await db.add(profileTable(userId), [{ role: 'client', name: client.clientName, email } satisfies Profile]);
         await saveClient(trainerId, client, { userId, clientEmail: email, connectedAt });
         await db.add(coachesTable(userId), [
           { trainerId, trainerName: profile.name, connectedAt, clientId: client.clientId } satisfies CoachRecord,
