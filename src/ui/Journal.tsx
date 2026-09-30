@@ -230,6 +230,9 @@ function JournalBody({
   // Adding an exercise for today: pick it, then its sets and reps.
   const [adding, setAdding] = useState<{ list: Exercise[]; picked?: Exercise } | null>(null);
   const isFree = !!workout.day.id && workout.day.id === 'free';
+  const [repeating, setRepeating] = useState(false);
+  const [savingDay, setSavingDay] = useState(false);
+  const [savedDay, setSavedDay] = useState('');
   // Exercise menu confirmations: replacing or restoring drops ticked sets; removal changes the program.
   const [menuConfirm, setMenuConfirm] = useState<MenuConfirm | null>(null);
   const closeMenu = () => {
@@ -516,6 +519,35 @@ function JournalBody({
     const list = [...latest.current];
     list.splice(at ?? list.length, 0, entry);
     update(list);
+  };
+  /** Free workout: the same exercises and targets as last time, weights from their last results. */
+  const repeatLast = async () => {
+    const list = (workout.lastFree || []).filter((x) => !latest.current.some((e) => e.exerciseId === x.exerciseId));
+    setRepeating(true);
+    try {
+      const infos = await Promise.all(
+        list.map((x) => (swapInfo[x.exerciseId] ? Promise.resolve(swapInfo[x.exerciseId]) : fetchPrevious(x.exerciseId).catch(() => ({ previousSets: [], previousAt: null }) as Previous))),
+      );
+      setSwapInfo((cur) => ({ ...cur, ...Object.fromEntries(list.map((x, i) => [x.exerciseId, infos[i]])) }));
+      const entries = list.map((x, i): SessionExercise => {
+        const info = infos[i];
+        const { exerciseId, exerciseName, sets, ...extra } = x;
+        const sug = suggestNext({ exerciseId, exerciseName, equipment: info.equipment, sets, ...extra }, info.previousSets);
+        return {
+          exerciseId,
+          exerciseName,
+          extra,
+          sets: Array.from({ length: sets }, (_, si) => ({
+            weight: sug.weight || info.previousSets[si]?.weight || info.previousSets.at(-1)?.weight || 0,
+            reps: 0,
+            rir: null,
+          })),
+        };
+      });
+      update([...latest.current, ...entries]);
+    } finally {
+      setRepeating(false);
+    }
   };
   const removeExtra = (ei: number) => {
     closeMenu();
@@ -879,6 +911,11 @@ function JournalBody({
         {isFree && !results.length && (
           <p className="muted small center-text">Тренировка без программы: набирайте упражнения по ходу — они попадут в историю, прогрессия у каждого своя.</p>
         )}
+        {isFree && !results.length && !!workout.lastFree?.length && (
+          <button className="btn btn-primary btn-block" disabled={repeating} onClick={() => void repeatLast()}>
+            <Undo2 size={16} /> {repeating ? 'Загружаем…' : `Как в прошлый раз · ${workout.lastFree.length} упр.`}
+          </button>
+        )}
         <button className={'btn btn-block add-ex' + (isFree && !results.length ? ' btn-primary' : '')} onClick={() => void openAdd()}>
           <Plus size={16} /> Упражнение
         </button>
@@ -982,6 +1019,18 @@ function JournalBody({
           onClose={() => setAdding(null)}
         />
       )}
+      {savingDay && (
+        <SaveAsDay
+          clientId={workout.ownerId}
+          entries={latest.current}
+          onClose={() => setSavingDay(false)}
+          onSaved={(text) => {
+            setSavingDay(false);
+            setSavedDay(text);
+            onProgramChanged?.();
+          }}
+        />
+      )}
       {adding?.picked && (
         <AddTargets exercise={adding.picked} onBack={() => setAdding({ list: adding.list })} onAdd={(t) => void addExercise(adding.picked!, t)} />
       )}
@@ -1056,6 +1105,12 @@ function JournalBody({
             >
               <Check size={16} /> {finishing ? 'Сохраняем…' : 'Завершить тренировку'}
             </button>
+            {isFree && workout.actorRole === 'trainer' && results.length > 0 && (
+              <button className="btn btn-block" onClick={() => setSavingDay(true)}>
+                <ListOrdered size={16} /> Сохранить как тренировку программы
+              </button>
+            )}
+            {savedDay && <p className="tone-good small center-text">{savedDay}</p>}
             <p className="muted small center-text">
               Каждый подход сохраняется сразу — переключайтесь между клиентами свободно. «Ушёл» тоже записывает тренировку в историю.
             </p>
@@ -1193,6 +1248,100 @@ function ExerciseMenu({
             </button>
           )}
         </div>
+      )}
+    </Sheet>
+  );
+}
+
+/** Free workout → a day of one of the client's programs, or the first day of a new program. */
+function SaveAsDay({
+  clientId,
+  entries,
+  onClose,
+  onSaved,
+}: {
+  clientId: string;
+  entries: SessionExercise[];
+  onClose: () => void;
+  onSaved: (text: string) => void;
+}) {
+  const [programs, setPrograms] = useState<Array<{ id: string; name: string; days: Array<{ id: string }> }> | null>(null);
+  const [target, setTarget] = useState('');
+  const [programName, setProgramName] = useState('Программа');
+  const [dayName, setDayName] = useState('Тренировка 1');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    api
+      .get('/api/programs')
+      .then((r) => {
+        const list = (r.data.programs as any[]).filter((p) => p.clientId === clientId && !p.archived);
+        setPrograms(list);
+        if (list[0]) {
+          setTarget(list[0].id);
+          setDayName('Тренировка ' + (list[0].days.length + 1));
+        }
+      })
+      .catch((e) => setErr(readError(e)));
+  }, [clientId]);
+  const pickTarget = (id: string) => {
+    setTarget(id);
+    const p = programs?.find((x) => x.id === id);
+    setDayName('Тренировка ' + ((p?.days.length || 0) + 1));
+  };
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post('/api/free/' + encodeURIComponent(clientId) + '/save', {
+        programId: target || null,
+        programName,
+        dayName,
+        exercises: entries.filter((e) => e.extra).map((e) => ({ exerciseId: e.exerciseId, sets: e.sets.length, ...e.extra })),
+      });
+      onSaved(`Сохранено: «${dayName}» в программе «${r.data.programName}».`);
+    } catch (e) {
+      setErr(readError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Sheet title="Сохранить в программу" onClose={onClose}>
+      {err && <div className="alert">{err}</div>}
+      {!programs ? (
+        <div className="loader-block">
+          <span className="loader" />
+        </div>
+      ) : (
+        <>
+          <label className="field">
+            <span>Программа</span>
+            <select value={target} onChange={(e) => pickTarget(e.target.value)}>
+              {programs.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} · {p.days.length} трен.
+                </option>
+              ))}
+              <option value="">Новая программа</option>
+            </select>
+          </label>
+          {!target && (
+            <label className="field">
+              <span>Название программы</span>
+              <input id="free-program-name" value={programName} onChange={(e) => setProgramName(e.target.value)} />
+            </label>
+          )}
+          <label className="field">
+            <span>Название тренировки</span>
+            <input id="free-day-name" value={dayName} onChange={(e) => setDayName(e.target.value)} />
+          </label>
+          <p className="muted small">
+            {entries.filter((e) => e.extra).length} упражнений с теми же подходами и повторами. Сегодняшние результаты останутся в истории, прогрессия продолжится.
+          </p>
+          <button className="btn btn-primary btn-block" disabled={busy || !dayName.trim()} onClick={() => void save()}>
+            {busy ? 'Сохраняем…' : target ? 'Добавить тренировку в программу' : 'Создать программу'}
+          </button>
+        </>
       )}
     </Sheet>
   );

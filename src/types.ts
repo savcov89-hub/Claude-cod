@@ -114,6 +114,8 @@ export interface WorkoutPayload {
   days?: Array<{ id: string; name: string }>;
   nextDayId?: string;
   day: { id: string; name: string; exercises: WorkoutExercise[] };
+  /** Free workout only: what was done last time, to start "как в прошлый раз". */
+  lastFree?: Array<{ exerciseId: string; exerciseName: string; sets: number; repMin: number; repMax: number; targetRir: number }>;
 }
 export interface Coach {
   trainerId: string;

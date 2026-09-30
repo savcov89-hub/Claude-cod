@@ -101,6 +101,13 @@ interface ProgramRecord {
   archived?: boolean;
   /** Hidden per-client program for workouts made up in the gym ("Свободная тренировка"). */
   free?: boolean;
+  /** Free program only: exercises of the last free workout, to start the next one "как в прошлый раз". */
+  lastFree?: FreeExercise[];
+}
+interface FreeExercise extends ExtraPlan {
+  exerciseId: string;
+  exerciseName: string;
+  sets: number;
 }
 interface AssignmentRecord {
   trainerId: string;
@@ -1002,6 +1009,68 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
       },
     ],
 
+    /**
+     * Turns a free workout into a program day: appended to one of the client's programs, or the first day of a new one.
+     * The program's next day stays as it was — this workout is already done.
+     */
+    'POST /api/free/:clientId/save': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const profile = await trainerOnly(ctx);
+        if (!profile) return error('Доступ только для тренера.', 403);
+        const trainerId = ctx.user!.userId;
+        const client = await findClient(trainerId, ctx.params.clientId);
+        if (!client) return error('Клиент не найден.', 404);
+        const b = ctx.body || {};
+        const dayName = text(b.dayName, 80);
+        if (!dayName) return error('Назовите тренировку.', 400);
+        const list: any[] = Array.isArray(b.exercises) ? b.exercises.slice(0, 30) : [];
+        if (!list.length) return error('Добавьте упражнения.', 400);
+        const findKnown = knownExercises(trainerId);
+        const exercises: ProgramExercise[] = [];
+        for (const x of list) {
+          const known = await findKnown(String(x?.exerciseId));
+          const extra = cleanExtra(x);
+          const sets = Math.round(Number(x?.sets));
+          if (!known || !extra || !(sets >= 1 && sets <= 10)) return error('Проверьте подходы и повторы.', 400);
+          if (exercises.some((e) => e.exerciseId === known.id)) continue;
+          exercises.push(toProgramExercise({ ...extra, sets }, known));
+        }
+        const at = nowIso();
+        const table = programsTable(trainerId);
+        if (b.programId) {
+          const [program] = await db.get<ProgramRecord>(table, [String(b.programId)]);
+          if (!program || program.trainerId !== trainerId || program.clientId !== client.clientId || program.free)
+            return error('Программа не найдена.', 404);
+          if (program.days.length >= 14) return error('В программе уже 14 тренировок.', 400);
+          const used = new Set(program.days.map((d) => d.id));
+          let n = program.days.length + 1;
+          while (used.has('day-' + n)) n++;
+          const day: ProgramDay = { id: 'day-' + n, name: dayName, exercises };
+          const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
+          const [ok] = await db.update(table, [{ id: String(b.programId), record: { ...rest, days: [...program.days, day], updatedAt: at } }]);
+          return ok ? json({ programId: b.programId, dayId: day.id, programName: program.name }) : error('Не удалось сохранить.', 500);
+        }
+        const name = text(b.programName, 100) || 'Программа';
+        const record: ProgramRecord = {
+          trainerId,
+          trainerName: profile.name,
+          clientId: client.clientId,
+          clientName: client.clientName,
+          name,
+          days: [{ id: 'day-1', name: dayName, exercises }],
+          createdAt: at,
+          updatedAt: at,
+        };
+        const [programId] = await db.add(table, [record]);
+        if (!programId) return error('Не удалось сохранить.', 500);
+        await db.add(assignmentsTable(client.clientId), [
+          { trainerId, trainerName: profile.name, programId, programName: name, assignedAt: at } satisfies AssignmentRecord,
+        ]);
+        return json({ programId, dayId: 'day-1', programName: name }, 201);
+      },
+    ],
+
     'POST /api/programs/:programId/archive': [
       requireAuth(),
       async (ctx: Ctx) => {
@@ -1081,6 +1150,7 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
           days: program.days.map((d) => ({ id: d.id, name: d.name })),
           nextDayId: program.nextDayId || program.days[0]?.id,
           day: { ...day, exercises },
+          ...(program.free ? { lastFree: program.lastFree || [] } : {}),
         });
       },
     ],
@@ -1199,7 +1269,23 @@ export function createHandler({ db, error, json, requireAuth, router }: Sdk) {
         const nextDayId = program.days[(idx + 1) % program.days.length].id;
         const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
         const [updated] = await db.update(programsTable(trainerId), [
-          { id: programId, record: { ...rest, nextDayId, lastCompletedAt: completedAt, lastRecordedByRole: access.role } },
+          {
+            id: programId,
+            record: {
+              ...rest,
+              nextDayId,
+              lastCompletedAt: completedAt,
+              lastRecordedByRole: access.role,
+              // A free workout is remembered as the starting point of the next one.
+              ...(program.free
+                ? {
+                    lastFree: matched
+                      .filter((e) => e.extra)
+                      .map((e) => ({ exerciseId: e.exerciseId, exerciseName: e.exerciseName, sets: e.sets.length, ...e.extra! })),
+                  }
+                : {}),
+            },
+          },
         ]);
         return json(
           updated ? { saved: true, sessionId } : { saved: true, sessionId, warning: 'Результат сохранён. Следующий день выберите вручную.' },
