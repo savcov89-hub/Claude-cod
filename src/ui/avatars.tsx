@@ -322,7 +322,7 @@ export const AVATARS: Array<{ id: string; label: string; look: Look }> = [
   { id: 'asym-glasses-dark', label: 'Асимметрия и очки, тёмная', look: { bg: '#dfe7ee', skin: SKIN.fair, shirt: '#22333b', hair: HAIR.black, top: 'asym', glasses: 'round', lashes: true, earring: true, lips: true } },
   { id: 'asym-glasses-light', label: 'Асимметрия и очки, светлая', look: { bg: '#f6e6ee', skin: SKIN.light, shirt: '#9a8c98', hair: HAIR.blonde, top: 'asym', glasses: 'square', smile: true, lashes: true, earring: true, lips: true } },
   { id: 'sweep-glasses', label: 'Короткая с чёлкой набок, очки без оправы', look: { bg: '#dfe9d0', skin: SKIN.tan, shirt: '#1d1d1f', collar: '#8a9aa6', hair: HAIR.black, top: 'sweep', glasses: 'rimless', earring: 'stud', teeth: true, lips: true, lashes: true } },
-  { id: 'buzz-beard', label: 'Короткий ёжик, залысины, тёмная борода', look: { bg: '#ecebe7', skin: SKIN.fair, shirt: '#3b3f45', hair: '#4a3426', top: 'buzz', beard: 'full', eyes: '#6d8794', earring: 'plug' } },
+  { id: 'buzz-beard', label: 'Короткий ёжик, залысины, тёмная борода', look: { bg: '#ecebe7', skin: SKIN.fair, shirt: '#3b3f45', hair: '#4a3426', top: 'buzz', beard: 'full', eyes: '#6d8794' } },
   { id: 'spiky', label: 'Ёжик', look: { bg: '#fff1c9', skin: SKIN.fair, shirt: '#0096c7', hair: HAIR.blonde, top: 'spiky', smile: true } },
 ];
 
