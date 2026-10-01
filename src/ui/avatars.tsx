@@ -11,9 +11,9 @@ interface Look {
   shirt: string;
   hair?: string;
   /** Hair behind the head (long, bob, afro…). */
-  back?: 'long' | 'bob' | 'afro' | 'longMale' | 'pigtails' | 'shaggy' | 'curls';
+  back?: 'long' | 'bob' | 'afro' | 'longMale' | 'pigtails' | 'shaggy' | 'curls' | 'wavy';
   /** Hair on top. */
-  top?: 'short' | 'receding' | 'bangs' | 'side' | 'curly' | 'bun' | 'spiky' | 'asym' | 'pixie' | 'sweep' | 'buzz' | 'curlFringe';
+  top?: 'short' | 'receding' | 'bangs' | 'side' | 'curly' | 'bun' | 'spiky' | 'asym' | 'pixie' | 'sweep' | 'buzz' | 'curlFringe' | 'parted';
   beard?: 'full' | 'braided' | 'mustache' | 'goatee' | 'stubble' | 'viking';
   beardColor?: string;
   glasses?: 'round' | 'square' | 'sun' | 'rimless';
@@ -36,6 +36,9 @@ interface Look {
   /** Neckline trim of the top. */
   collar?: string;
   smile?: boolean;
+  /** A tank top of this colour (shoulders bare) instead of a shirt. */
+  tank?: string;
+  necklace?: boolean;
   /** Square jaw, thick brows, wider neck. */
   manly?: boolean;
   lashes?: boolean;
@@ -52,6 +55,15 @@ function Face({ look }: { look: Look }) {
   if (look.back === 'afro') parts.push(<circle key="afro" cx="32" cy="25" r="20" fill={hair} />);
   if (look.back === 'long') parts.push(<path key="long" d="M15 30 C13 10 51 10 49 30 L51 54 L13 54 Z" fill={hair} />);
   if (look.back === 'longMale') parts.push(<path key="lm" d="M17 28 C16 12 48 12 47 28 L48 48 L16 48 Z" fill={hair} />);
+  // Long wavy hair down past the shoulders.
+  if (look.back === 'wavy')
+    parts.push(
+      <path
+        key="wavy"
+        d="M15.5 30 C13 11 51 11 48.5 30 C51 37 47.5 41.5 50.5 46.5 C53 51.5 49 55.5 51 60.5 L44.5 61.5 C42.5 56.5 45.5 52.5 42.5 48 L21.5 48 C18.5 52.5 21.5 56.5 19.5 61.5 L13 60.5 C15 55.5 11 51.5 13.5 46.5 C16.5 41.5 13 37 15.5 30 Z"
+        fill={hair}
+      />,
+    );
   // A big rounded mass of separate curls (afro-like volume, loose ringlets).
   if (look.back === 'curls') {
     const ring: Array<[number, number, number]> = [];
@@ -86,7 +98,11 @@ function Face({ look }: { look: Look }) {
         <ellipse cx="50" cy="36" rx="5" ry="9" />
       </g>,
     );
-  parts.push(<path key="body" d="M10 64 C10 52 20 48 32 48 C44 48 54 52 54 64 Z" fill={look.shirt} />);
+  parts.push(<path key="body" d="M10 64 C10 52 20 48 32 48 C44 48 54 52 54 64 Z" fill={look.tank ? skin : look.shirt} />);
+  if (look.tank)
+    parts.push(
+      <path key="tank" d="M17 64 C17 56 20.5 52.5 24.5 51.6 L26.5 54.6 C28.5 57.6 35.5 57.6 37.5 54.6 L39.5 51.6 C43.5 52.5 47 56 47 64 Z" fill={look.tank} />,
+    );
   parts.push(
     look.manly ? (
       <rect key="neck" x="26" y="40" width="12" height="10" rx="3" fill={skin} />
@@ -94,6 +110,13 @@ function Face({ look }: { look: Look }) {
       <rect key="neck" x="27.5" y="40" width="9" height="10" rx="3" fill={skin} />
     ),
   );
+  if (look.necklace)
+    parts.push(
+      <g key="nk">
+        <path d="M27 46.5 C28.5 52.3 35.5 52.3 37 46.5" stroke="#d9a441" strokeWidth="0.6" fill="none" />
+        <circle cx="32" cy="51.1" r="0.8" fill="#d9a441" />
+      </g>,
+    );
   if (look.collar) parts.push(<path key="col" d="M25.5 49.2 C28 52.5 36 52.5 38.5 49.2" stroke={look.collar} strokeWidth="1.6" fill="none" strokeLinecap="round" />);
   // Ears, head.
   parts.push(<circle key="el" cx="19.5" cy="31" r="3" fill={skin} />, <circle key="er" cx="44.5" cy="31" r="3" fill={skin} />);
@@ -147,6 +170,15 @@ function Face({ look }: { look: Look }) {
   if (top === 'asym')
     parts.push(
       <path key="t" d="M19.5 29 C18 10 47 9 46.8 30 L47 41.5 C45 41.5 43.6 39.5 43.6 36 C43 27 37 22.5 30 22 C25.5 22.5 22 25 19.5 29 Z" fill={hair} />,
+    );
+  // Parted in the middle, curtains framing the face.
+  if (top === 'parted')
+    parts.push(
+      <g key="t" fill={hair}>
+        <path d="M19.5 27 C19 11 45 11 44.5 27 C41 18 36 16.6 32 17.4 C28 16.6 23 18 19.5 27 Z" />
+        <path d="M19.4 31 C18.4 20 24 16.4 31.2 17.2 C27 19.4 23 24.5 21.4 33.5 Z" />
+        <path d="M44.6 31 C45.6 20 40 16.4 32.8 17.2 C37 19.4 41 24.5 42.6 33.5 Z" />
+      </g>,
     );
   // Curls falling over the forehead.
   if (top === 'curlFringe')
@@ -443,6 +475,7 @@ export const AVATARS: Array<{ id: string; label: string; look: Look }> = [
   { id: 'asym-glasses-light', label: 'Асимметрия и очки, светлая', look: { bg: '#f6e6ee', skin: SKIN.light, shirt: '#9a8c98', hair: HAIR.blonde, top: 'asym', glasses: 'square', smile: true, lashes: true, earring: true, lips: true } },
   { id: 'sweep-glasses', label: 'Короткая с чёлкой набок, очки без оправы', look: { bg: '#dfe9d0', skin: SKIN.tan, shirt: '#1d1d1f', collar: '#8a9aa6', hair: HAIR.black, top: 'sweep', glasses: 'rimless', earring: 'stud', teeth: true, lips: true, lashes: true } },
   { id: 'buzz-beard', label: 'Короткий ёжик, залысины, тёмная борода', look: { bg: '#ecebe7', skin: SKIN.fair, shirt: '#3b3f45', hair: '#4a3426', top: 'buzz', beard: 'full', eyes: '#6d8794' } },
+  { id: 'long-wavy', label: 'Длинные волнистые тёмные волосы', look: { bg: '#e6e8ec', skin: SKIN.light, shirt: '#f2ede3', tank: '#f2ede3', necklace: true, hair: '#3b2a22', back: 'wavy', top: 'parted', eyes: '#7c8b70', lashes: true, teeth: true, lips: true } },
   { id: 'spiky', label: 'Ёжик', look: { bg: '#fff1c9', skin: SKIN.fair, shirt: '#0096c7', hair: HAIR.blonde, top: 'spiky', smile: true } },
 ];
 
