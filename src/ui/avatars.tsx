@@ -352,7 +352,7 @@ function Face({ look }: { look: Look }) {
 }
 
 export const AVATARS: Array<{ id: string; label: string; look: Look }> = [
-  { id: 'pirate', label: 'Пират', look: { bg: '#cfe3f3', skin: SKIN.tan, shirt: '#2f3b4c', hair: HAIR.black, beard: 'braided', hat: 'tricorn', patch: true, earring: true } },
+  { id: 'pirate', label: 'Пират', look: { bg: '#cfe3f3', skin: SKIN.tan, shirt: '#2f3b4c', hair: HAIR.black, beard: 'braided', hat: 'tricorn', patch: true, earring: 'left' } },
   { id: 'captain', label: 'Капитан с вороной', look: { bg: '#2b2d31', skin: '#c9a689', shirt: '#2c3440', hair: '#c9ccd1', back: 'shaggy', beard: 'full', hat: 'tricorn', hatColor: '#26272b', hatTrim: '#a7adb5', patch: 'skull', angry: true, teeth: true, pipe: true, crow: true, earring: 'left' } },
   { id: 'bald-beard', label: 'Лысый, русая борода', look: { bg: '#e8dccb', skin: SKIN.fair, shirt: '#3d5a40', hair: HAIR.brown, beard: 'full', smile: true } },
   { id: 'blonde', label: 'Блондинка', look: { bg: '#f6dbe3', skin: SKIN.light, shirt: '#c2577a', hair: HAIR.blonde, back: 'long', top: 'side', smile: true, lashes: true } },
