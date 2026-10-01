@@ -1284,7 +1284,8 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           const sets = Math.round(Number(x?.sets));
           if (!known || !extra || !(sets >= 1 && sets <= 10)) return error('Проверьте подходы и повторы.', 400);
           if (exercises.some((e) => e.exerciseId === known.id)) continue;
-          exercises.push(toProgramExercise({ ...extra, sets }, known));
+          // Muscles chosen for an own exercise in the source program come along (a copied workout).
+          exercises.push(toProgramExercise({ ...extra, sets, muscles: Array.isArray(x?.muscles) ? x.muscles : undefined }, known));
         }
         const at = nowIso();
         const table = programsTable(trainerId);

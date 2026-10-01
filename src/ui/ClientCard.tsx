@@ -3,8 +3,8 @@ import { ArrowLeft, Copy, Pencil, Plus, Smartphone, Archive, RotateCcw, Share2 }
 import { api, inGym, readError } from '../transport';
 import { inviteLink } from '../invite';
 import type { Program, Session } from '../types';
-import { lastVisit, programsOf, visits30, type TrainerData } from './data';
-import { Avatar, Confirm, Empty, VisitGrid, ago, fmtDate } from './common';
+import { activeClients, lastVisit, programsOf, visits30, type TrainerData } from './data';
+import { Avatar, Confirm, Empty, Sheet, VisitGrid, ago, fmtDate } from './common';
 import { ProgressView } from './Progress';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
@@ -18,15 +18,21 @@ export function ClientCard({
   initialTab = 'overview',
   onBack,
   openBuilder,
+  onTabChange,
 }: {
   data: TrainerData;
   clientId: string;
   initialTab?: string;
+  onTabChange?: (tab: string) => void;
   onBack: () => void;
   openBuilder: (opts: { clientId: string; program?: Program; copy?: boolean }) => void;
 }) {
   const client = data.clients.find((c) => c.clientId === clientId);
-  const [tab, setTab] = useState<Tab>((initialTab as Tab) || 'overview');
+  const [tab, setTabState] = useState<Tab>((initialTab as Tab) || 'overview');
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    onTabChange?.(t);
+  };
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -462,6 +468,8 @@ export function ProgramCard({
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const [err, setErr] = useState('');
+  const [copying, setCopying] = useState<string | null>(null);
+  const [copied, setCopied] = useState('');
   const archive = async (archived: boolean) => {
     try {
       await api.post('/api/programs/' + p.id + '/archive', { archived });
@@ -512,6 +520,9 @@ export function ProgramCard({
                     Открыть журнал · {d.name}
                   </button>
                 )}
+                <button className="btn btn-block" onClick={() => setCopying(d.id)}>
+                  <Copy size={15} /> Копировать тренировку «{d.name}»
+                </button>
               </div>
             )}
           </div>
@@ -524,12 +535,123 @@ export function ProgramCard({
           </button>
         )}
         <button className="btn btn-sm" onClick={() => openBuilder({ clientId: p.clientId, program: p, copy: true })}>
-          <Copy size={15} /> Копировать
+          <Copy size={15} /> Копировать программу
         </button>
         <button className="btn btn-sm btn-quiet" onClick={() => archive(!p.archived)}>
           {p.archived ? <RotateCcw size={15} /> : <Archive size={15} />} {p.archived ? 'Вернуть' : 'В архив'}
         </button>
       </footer>
+      {copied && <p className="tone-good small">{copied}</p>}
+      {copying && (
+        <CopyDay
+          program={p}
+          dayId={copying}
+          data={data}
+          onClose={() => setCopying(null)}
+          onDone={(text) => {
+            setCopying(null);
+            setCopied(text);
+          }}
+        />
+      )}
     </article>
+  );
+}
+
+/** One workout of a program into a program of this or another client (a new day), or into a new program. */
+function CopyDay({
+  program,
+  dayId,
+  data,
+  onClose,
+  onDone,
+}: {
+  program: Program;
+  dayId: string;
+  data: TrainerData;
+  onClose: () => void;
+  onDone: (text: string) => void;
+}) {
+  const day = program.days.find((d) => d.id === dayId)!;
+  const clients = activeClients(data.clients);
+  const [clientId, setClientId] = useState(program.clientId);
+  const targets = data.programs.filter((x) => x.clientId === clientId && !x.archived);
+  const [target, setTarget] = useState<string>(program.id);
+  const [dayName, setDayName] = useState(day.name);
+  const [programName, setProgramName] = useState(program.name);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const pickClient = (id: string) => {
+    setClientId(id);
+    const list = data.programs.filter((x) => x.clientId === id && !x.archived);
+    setTarget(list.some((x) => x.id === program.id) ? program.id : list[0]?.id || '');
+  };
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post('/api/free/' + encodeURIComponent(clientId) + '/save', {
+        programId: target || null,
+        programName,
+        dayName,
+        exercises: day.exercises.map((e) => ({
+          exerciseId: e.exerciseId,
+          sets: e.sets,
+          repMin: e.repMin,
+          repMax: e.repMax,
+          targetRir: e.targetRir,
+          muscles: e.muscles,
+        })),
+      });
+      await data.reload();
+      const who = clients.find((c) => c.clientId === clientId)?.clientName || '';
+      onDone(`Скопировано: «${dayName}» → ${who}, программа «${r.data.programName}».`);
+    } catch (e) {
+      setErr(readError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Sheet title={'Копировать «' + day.name + '»'} onClose={onClose}>
+      {err && <div className="alert">{err}</div>}
+      <label className="field">
+        <span>Клиент</span>
+        <select id="copy-day-client" value={clientId} onChange={(e) => pickClient(e.target.value)}>
+          {clients.map((c) => (
+            <option key={c.clientId} value={c.clientId}>
+              {c.clientName}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        <span>В программу</span>
+        <select id="copy-day-program" value={target} onChange={(e) => setTarget(e.target.value)}>
+          {targets.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.name} · {x.days.length} трен.
+            </option>
+          ))}
+          <option value="">Новая программа</option>
+        </select>
+      </label>
+      {!target && (
+        <label className="field">
+          <span>Название программы</span>
+          <input id="copy-day-program-name" value={programName} onChange={(e) => setProgramName(e.target.value)} />
+        </label>
+      )}
+      <label className="field">
+        <span>Название тренировки</span>
+        <input id="copy-day-name" value={dayName} onChange={(e) => setDayName(e.target.value)} />
+      </label>
+      <p className="muted small">
+        {day.exercises.length} упр. с теми же подходами, повторами и RIR. Добавится новой тренировкой в конец программы — её можно
+        потом изменить.
+      </p>
+      <button className="btn btn-primary btn-block" disabled={busy || !dayName.trim() || !clientId} onClick={() => void save()}>
+        {busy ? 'Копируем…' : 'Копировать'}
+      </button>
+    </Sheet>
   );
 }

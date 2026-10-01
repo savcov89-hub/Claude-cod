@@ -85,10 +85,12 @@ export function TrainerApp({ header, onSwitchRole }: { profile: Profile; header:
             )}
             {overlay === 'card' && (
               <ClientCard
-                key={card!.id + (card!.tab || '')}
+                key={card!.id}
                 data={data}
                 clientId={card!.id}
                 initialTab={card!.tab}
+                // The open tab is remembered, so coming back from the program editor lands on it again.
+                onTabChange={(t) => setCard((c) => (c ? { ...c, tab: t } : c))}
                 onBack={() => setCard(null)}
                 openBuilder={openBuilder}
               />
