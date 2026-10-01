@@ -27,7 +27,8 @@ interface Look {
   pipe?: boolean;
   /** A crow on the shoulder. */
   crow?: boolean;
-  earring?: boolean | 'stud' | 'plug';
+  /** true: a hoop in the right ear (left on the picture); 'left': in the left ear (right on the picture). */
+  earring?: boolean | 'stud' | 'plug' | 'left';
   /** Eye colour (dark by default). */
   eyes?: string;
   /** A wide smile showing teeth. */
@@ -260,7 +261,8 @@ function Face({ look }: { look: Look }) {
         )}
       </g>,
     );
-  if (look.earring === 'plug') parts.push(<circle key="ea" cx="19.2" cy="34.4" r="1.3" fill="#3a3a3a" stroke="#1d1d1f" strokeWidth="0.5" />);
+  if (look.earring === 'left') parts.push(<circle key="ea" cx="45.2" cy="35" r="1.8" fill="none" stroke="#d9a441" strokeWidth="1.1" />);
+  else if (look.earring === 'plug') parts.push(<circle key="ea" cx="19.2" cy="34.4" r="1.3" fill="#3a3a3a" stroke="#1d1d1f" strokeWidth="0.5" />);
   else if (look.earring === 'stud')
     parts.push(
       <g key="ea" fill="#1d1d1f">
@@ -351,7 +353,7 @@ function Face({ look }: { look: Look }) {
 
 export const AVATARS: Array<{ id: string; label: string; look: Look }> = [
   { id: 'pirate', label: 'Пират', look: { bg: '#cfe3f3', skin: SKIN.tan, shirt: '#2f3b4c', hair: HAIR.black, beard: 'braided', hat: 'tricorn', patch: true, earring: true } },
-  { id: 'captain', label: 'Капитан с вороной', look: { bg: '#2b2d31', skin: '#c9a689', shirt: '#2c3440', hair: '#c9ccd1', back: 'shaggy', beard: 'full', hat: 'tricorn', hatColor: '#26272b', hatTrim: '#a7adb5', patch: 'skull', angry: true, teeth: true, pipe: true, crow: true } },
+  { id: 'captain', label: 'Капитан с вороной', look: { bg: '#2b2d31', skin: '#c9a689', shirt: '#2c3440', hair: '#c9ccd1', back: 'shaggy', beard: 'full', hat: 'tricorn', hatColor: '#26272b', hatTrim: '#a7adb5', patch: 'skull', angry: true, teeth: true, pipe: true, crow: true, earring: 'left' } },
   { id: 'bald-beard', label: 'Лысый, русая борода', look: { bg: '#e8dccb', skin: SKIN.fair, shirt: '#3d5a40', hair: HAIR.brown, beard: 'full', smile: true } },
   { id: 'blonde', label: 'Блондинка', look: { bg: '#f6dbe3', skin: SKIN.light, shirt: '#c2577a', hair: HAIR.blonde, back: 'long', top: 'side', smile: true, lashes: true } },
   { id: 'brunette', label: 'Брюнетка', look: { bg: '#e7dff3', skin: SKIN.fair, shirt: '#5a4a8a', hair: HAIR.black, back: 'long', top: 'bangs', lashes: true } },
