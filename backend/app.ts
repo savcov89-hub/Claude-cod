@@ -1392,6 +1392,8 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           draft: draft?.closed ? null : draft || null,
           // When the client was marked «Пришёл»: the journal shows the time spent in the gym.
           checkedInAt: client?.checkedInAt || null,
+          // An open workout takes set counts changed in the program after it was started.
+          programUpdatedAt: program.updatedAt || program.createdAt,
           revision: draft?.revision || null,
           ownerId,
           ownerName: program.clientName,

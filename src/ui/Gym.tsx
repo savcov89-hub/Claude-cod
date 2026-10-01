@@ -431,6 +431,10 @@ export function Gym({
                 trainerId={src.trainerId || program!.trainerId}
                 programId={src.programId}
                 dayId={src.dayId}
+                version={(() => {
+                  const p = data.programs.find((x) => x.id === src.programId);
+                  return p ? p.updatedAt || p.createdAt : '';
+                })()}
                 onActivity={handlers[c.clientId]?.activity}
                 onRegisterFinish={handlers[c.clientId]?.register}
                 onDayChange={(dayId) => setSources((s) => ({ ...s, [c.clientId]: { programId: src.programId, dayId } }))}
@@ -471,6 +475,8 @@ const GymJournal = memo(
     trainerId: string;
     programId: string;
     dayId: string;
+    /** The program's last change: an edit made elsewhere reloads the open journal. */
+    version: string;
     onActivity?: (a: JournalActivity) => void;
     onRegisterFinish?: (f: Finisher | null) => void;
     onDayChange: (dayId: string) => void;
@@ -481,6 +487,7 @@ const GymJournal = memo(
       <Journal
         embedded
         source={{ trainerId: props.trainerId, programId: props.programId, dayId: props.dayId }}
+        version={props.version}
         onActivity={props.onActivity}
         onRegisterFinish={props.onRegisterFinish}
         onDayChange={props.onDayChange}
@@ -493,6 +500,7 @@ const GymJournal = memo(
     a.clientId === b.clientId &&
     a.programId === b.programId &&
     a.dayId === b.dayId &&
+    a.version === b.version &&
     a.onActivity === b.onActivity &&
     a.onRegisterFinish === b.onRegisterFinish,
 );

@@ -378,7 +378,8 @@ export function ProgramBuilder({
       )}
       {issue && <p className="tone-bad small">{issue}</p>}
 
-      <div className="sticky-foot">
+      {/* At the very end, not pinned: a pinned button covered the field being typed in above the keyboard. */}
+      <div className="builder-foot">
         <button className="btn btn-primary btn-block" disabled={saving || !!issue} onClick={save}>
           {saving ? 'Сохраняем…' : editing ? 'Сохранить изменения' : 'Назначить клиенту'}
         </button>

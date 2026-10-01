@@ -2791,3 +2791,42 @@ h2 {
   flex: 1;
   min-width: 0;
 }
+.builder-foot {
+  margin-top: 8px;
+  padding-bottom: 16px;
+}
+.builder-foot .btn {
+  min-height: 52px;
+}
+/* Up / down on a journal card: this workout's order */
+.ex-move {
+  flex: none;
+  display: grid;
+  grid-template-columns: 30px 30px;
+  gap: 2px;
+}
+.ex-move button {
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink-2);
+  background: var(--surface, transparent);
+}
+.ex-move button:disabled {
+  opacity: 0.3;
+}
+.order-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--info-soft);
+  font-size: 13px;
+}
+.order-bar .btn {
+  flex: none;
+}

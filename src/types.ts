@@ -105,6 +105,8 @@ export interface WorkoutPayload {
   revision?: string | null;
   /** When the client was marked «Пришёл». */
   checkedInAt?: string | null;
+  /** Last change of the program: set counts changed after the workout was started apply to it. */
+  programUpdatedAt?: string;
   ownerName?: string;
   actorRole?: Role;
   ownerId: string;

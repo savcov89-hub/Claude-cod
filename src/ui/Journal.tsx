@@ -50,8 +50,11 @@ export function Journal({
   onDayChange,
   onRegisterFinish,
   onProgramChanged,
+  version = '',
   embedded = false,
 }: {
+  /** Changes when the program changes; the journal then loads again (entries kept). */
+  version?: string;
   onRegisterFinish?: (f: JournalFinisher | null) => void;
   /** The trainer changed the day's exercises in the program from the journal. */
   onProgramChanged?: () => void;
@@ -73,12 +76,12 @@ export function Journal({
     setErrorText('');
     api
       .get('/api/workout/' + key)
-      .then((r) => alive && setPayload({ key: key + ':' + nonce, data: r.data }))
+      .then((r) => alive && setPayload({ key: key + ':' + nonce + ':' + version, data: r.data }))
       .catch((err) => alive && setErrorText(readError(err)));
     return () => {
       alive = false;
     };
-  }, [key, nonce]);
+  }, [key, nonce, version]);
   if (errorText)
     return (
       <div className="journal">
@@ -88,10 +91,10 @@ export function Journal({
         </button>
       </div>
     );
-  if (payload?.key !== key + ':' + nonce) return <div className="loader-block"><span className="loader" /></div>;
+  if (payload?.key !== key + ':' + nonce + ':' + version) return <div className="loader-block"><span className="loader" /></div>;
   return (
     <JournalBody
-      key={key + ':' + nonce}
+      key={key + ':' + nonce + ':' + version}
       workout={payload.data}
       embedded={embedded}
       onBack={onBack}
@@ -203,6 +206,18 @@ function JournalBody({
     !!initialCache?.pending &&
     (initialCache.baseRevision || null) === (workout.revision || null) &&
     matchesPlan(initialCache.results);
+  // The program was edited after this workout was started: its set counts apply (done sets stay).
+  const programChanged =
+    !!draftOf && !!workout.programUpdatedAt && Date.parse(workout.programUpdatedAt) > Date.parse(draftOf.updatedAt);
+  const fitToPlan = (list: SessionExercise[]) =>
+    list.map((e) => {
+      const p = e.extra ? null : workout.day.exercises.find((x) => x.exerciseId === slotOf(e));
+      if (!p || e.sets.length === p.sets) return e;
+      let sets = [...e.sets];
+      while (sets.length < p.sets) sets.push({ weight: sets.at(-1)?.weight || 0, reps: 0, rir: null });
+      while (sets.length > p.sets && sets.at(-1)!.reps === 0) sets = sets.slice(0, -1);
+      return { ...e, sets };
+    });
   // Sets carried over from a workout opened by mistake (only into a workout with nothing done yet).
   const carried = useMemo(
     () => (carry && carry.key === carryKeyOf({ trainerId: workout.trainerId, programId: workout.programId, dayId: workout.day.id }) ? carry.entries : null),
@@ -211,7 +226,7 @@ function JournalBody({
   const [results, setResults] = useState<SessionExercise[]>(() => {
     const doneIn = (list?: SessionExercise[]) => (list || []).some((e) => e.sets.some((s) => s.reps > 0));
     const base = cacheUsable ? initialCache!.results : matchesPlan(draftOf?.exercises) ? draftOf!.exercises : null;
-    if (base && !(carried && !doneIn(base))) return base;
+    if (base && !(carried && !doneIn(base))) return programChanged ? fitToPlan(base) : base;
     const fresh = workout.day.exercises.map((e, i) => ({
       exerciseId: e.exerciseId,
       exerciseName: e.exerciseName,
@@ -270,7 +285,6 @@ function JournalBody({
   const [swapInfo, setSwapInfo] = useState<Record<string, Previous>>({});
   const [swapping, setSwapping] = useState<{ ei: number; list: Exercise[] } | null>(null);
   const [menu, setMenu] = useState<number | null>(null);
-  const [ordering, setOrdering] = useState<SessionExercise[] | null>(null);
   const [programBusy, setProgramBusy] = useState(false);
   // Adding an exercise for today: pick it, then its sets and reps.
   const [adding, setAdding] = useState<{ list: Exercise[]; picked?: Exercise } | null>(null);
@@ -432,6 +446,11 @@ function JournalBody({
     };
   }, [persist]);
 
+  // Set counts taken from the edited program are saved right away.
+  useEffect(() => {
+    if (programChanged && !carried) schedule();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Carried sets are saved right away, like any entry.
   useEffect(() => {
     if (!carried) return;
@@ -486,6 +505,11 @@ function JournalBody({
       setSwitching(false);
     }
   };
+
+  // Planned exercises in another order than the program (trainer can keep it there).
+  const orderChanged =
+    canProgram &&
+    results.filter((e) => !e.extra).map(slotOf).join('|') !== workout.day.exercises.map((e) => e.exerciseId).join('|');
 
   const countDone = (list: SessionExercise[]) => list.reduce((n, e) => n + e.sets.filter((s) => s.reps > 0).length, 0);
   const done = countDone(results);
@@ -686,6 +710,8 @@ function JournalBody({
     closeMenu();
     update(latest.current.map((x, i) => (i === ei ? { ...x, skipped } : x)));
   };
+  /** Arrows on the card: the order of this workout; the trainer can then keep it in the program. */
+  const move = (ei: number, step: -1 | 1) => update(moveBy(latest.current, ei, step));
   const moveBy = (list: SessionExercise[], ei: number, step: -1 | 1) => {
     const to = ei + step;
     if (to < 0 || to >= list.length) return list;
@@ -940,6 +966,14 @@ function JournalBody({
         </div>
       )}
 
+      {orderChanged && (
+        <div className="order-bar">
+          <span>Порядок изменён на эту тренировку.</span>
+          <button className="btn btn-sm" disabled={programBusy} onClick={() => void saveDayToProgram(latest.current)}>
+            {programBusy ? 'Сохраняем…' : 'Сохранить в программе'}
+          </button>
+        </div>
+      )}
       <fieldset className={'exercise-list' + (showRir ? ' with-rir' : '')} disabled={finishing || conflict}>
         {plan.map((e, ei) => {
           const sug = planSuggestions[ei];
@@ -997,6 +1031,28 @@ function JournalBody({
                 </div>
                 <span className={'hint hint-' + sug.kind} title={sug.text}>
                   {shortHint(sug)}
+                </span>
+                <span className="ex-move">
+                  <button
+                    aria-label={'Выше: ' + e.exerciseName}
+                    disabled={ei === 0}
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      move(ei, -1);
+                    }}
+                  >
+                    <ArrowUp size={15} />
+                  </button>
+                  <button
+                    aria-label={'Ниже: ' + e.exerciseName}
+                    disabled={ei === plan.length - 1}
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      move(ei, 1);
+                    }}
+                  >
+                    <ArrowDown size={15} />
+                  </button>
                 </span>
                 <button
                   className="icon-btn sm ex-menu-btn"
@@ -1162,7 +1218,6 @@ function JournalBody({
           removeBlocked={!results[menu].extra && latest.current.length === 1}
           canEditTargets={canProgram || !!results[menu].extra}
           canJoin={canProgram}
-          canSaveOrder={canProgram}
           busy={programBusy}
           onConfirm={setMenuConfirm}
           onSwap={() => void openSwap(menu)}
@@ -1181,10 +1236,6 @@ function JournalBody({
           onKeepSwap={async () => {
             const entry = latest.current[menu];
             if (entry.replaces && (await saveExerciseToProgram(entry.replaces, { replaceWith: entry.exerciseId }))) closeMenu();
-          }}
-          onOrder={() => {
-            closeMenu();
-            setOrdering(latest.current);
           }}
           onRemove={async () => {
             const keep = latest.current.filter((_, i) => i !== menu);
@@ -1315,54 +1366,6 @@ function JournalBody({
         </Sheet>
       )}
 
-      {ordering && (
-        <Sheet title="Порядок упражнений" onClose={() => setOrdering(null)}>
-          <ol className="order-list">
-            {ordering.map((x, i) => (
-              <li key={slotOf(x)} className={x.skipped ? 'muted' : ''}>
-                <span className="ex-num num">{i + 1}</span>
-                <span className="grow">{x.exerciseName}</span>
-                <button className="icon-btn sm" aria-label={'Выше: ' + x.exerciseName} disabled={i === 0} onClick={() => setOrdering(moveBy(ordering, i, -1))}>
-                  <ArrowUp size={16} />
-                </button>
-                <button
-                  className="icon-btn sm"
-                  aria-label={'Ниже: ' + x.exerciseName}
-                  disabled={i === ordering.length - 1}
-                  onClick={() => setOrdering(moveBy(ordering, i, 1))}
-                >
-                  <ArrowDown size={16} />
-                </button>
-              </li>
-            ))}
-          </ol>
-          <div className="order-actions">
-            <button
-              className="btn btn-block"
-              disabled={programBusy}
-              onClick={() => {
-                update(ordering);
-                setOrdering(null);
-              }}
-            >
-              Только в этой тренировке
-            </button>
-            {workout.actorRole === 'trainer' && !isFree && (
-              <button
-                className="btn btn-primary btn-block"
-                disabled={programBusy}
-                onClick={async () => {
-                  await saveDayToProgram(ordering);
-                  setOrdering(null);
-                }}
-              >
-                {programBusy ? 'Сохраняем…' : 'Сохранить в программе'}
-              </button>
-            )}
-          </div>
-        </Sheet>
-      )}
-
       <div className="j-foot">
         {confirmFinish ? (
           <Confirm
@@ -1415,7 +1418,6 @@ function ExerciseMenu({
   removeBlocked,
   canEditTargets,
   canJoin,
-  canSaveOrder,
   busy,
   onConfirm,
   onSwap,
@@ -1425,7 +1427,6 @@ function ExerciseMenu({
   onJoin,
   onTargets,
   onKeepSwap,
-  onOrder,
   onRemove,
   onClose,
 }: {
@@ -1438,7 +1439,6 @@ function ExerciseMenu({
   removeBlocked: boolean;
   canEditTargets: boolean;
   canJoin: boolean;
-  canSaveOrder: boolean;
   busy: boolean;
   onConfirm: (c: MenuConfirm | null) => void;
   onSwap: () => void;
@@ -1448,7 +1448,6 @@ function ExerciseMenu({
   onJoin: () => void;
   onTargets: () => void;
   onKeepSwap: () => void;
-  onOrder: () => void;
   onRemove: () => void;
   onClose: () => void;
 }) {
@@ -1538,13 +1537,6 @@ function ExerciseMenu({
               </span>
             </button>
           )}
-          <button className="menu-item" onClick={onOrder}>
-            <ListOrdered size={18} />
-            <span className="grow">
-              Изменить порядок
-              <small>{canSaveOrder ? 'сегодня или в программе' : 'в этой тренировке'}</small>
-            </span>
-          </button>
           {extra ? (
             <button className="menu-item danger" onClick={() => (ticked ? onConfirm('drop') : onDrop())}>
               <Trash2 size={18} />
