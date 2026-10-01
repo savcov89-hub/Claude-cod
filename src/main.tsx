@@ -14,13 +14,31 @@ if (vv) {
       const html = document.documentElement;
       // Pinch zoom also shrinks the visual viewport; only follow it at normal scale.
       const zoomed = Math.abs(vv.scale - 1) > 0.01;
-      html.style.setProperty("--vv-top", (zoomed ? 0 : vv.offsetTop) + "px");
-      html.style.setProperty("--vv-height", (zoomed ? html.clientHeight : vv.height) + "px");
-      html.classList.toggle("kb-open", !zoomed && vv.height < html.clientHeight - 120);
+      // Only a field being typed in brings the keyboard. iOS can report a short viewport without one
+      // (after locking the screen or coming back to the app); the layout must not stay squeezed then.
+      const kb = !zoomed && typing() && vv.height < html.clientHeight - 120;
+      html.style.setProperty("--vv-top", (kb ? vv.offsetTop : 0) + "px");
+      html.style.setProperty("--vv-height", (kb ? vv.height : html.clientHeight) + "px");
+      html.classList.toggle("kb-open", kb);
     });
+  };
+  const typing = () => {
+    const el = document.activeElement;
+    if (el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return true;
+    if (el instanceof HTMLInputElement) return !["checkbox", "radio", "button", "submit", "range", "color", "file"].includes(el.type);
+    return el instanceof HTMLElement && el.isContentEditable;
   };
   vv.addEventListener("resize", sync);
   vv.addEventListener("scroll", sync);
+  window.addEventListener("resize", sync);
+  window.addEventListener("pageshow", sync);
+  document.addEventListener("visibilitychange", sync);
+  document.addEventListener("focusin", sync);
+  // Leaving a field: once the keyboard has gone, the full height comes back.
+  document.addEventListener("focusout", () => {
+    sync();
+    window.setTimeout(sync, 400);
+  });
   sync();
 
   // iOS scrolls the page for the keyboard, but the fixed layout shrinks instead, so the field being typed in
