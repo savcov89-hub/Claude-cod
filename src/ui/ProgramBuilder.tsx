@@ -93,6 +93,13 @@ export function ProgramBuilder({
   };
   const patchExercise = (i: number, patch: Partial<ProgramExercise>) =>
     patchDay({ ...day, exercises: day.exercises.map((e, j) => (j === i ? { ...e, ...patch } : e)) });
+  // Quick rep ranges: one exercise in a tap, or every exercise of the program after a confirmation.
+  const [rangeAll, setRangeAll] = useState<[number, number] | null>(null);
+  const setRangeEverywhere = ([repMin, repMax]: [number, number]) => {
+    setDays((ds) => ds.map((d) => ({ ...d, exercises: d.exercises.map((e) => ({ ...e, repMin, repMax })) })));
+    setRangeAll(null);
+  };
+  const totalExercises = days.reduce((n, d) => n + d.exercises.length, 0);
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;
     if (j < 0 || j >= day.exercises.length) return;
@@ -242,6 +249,27 @@ export function ProgramBuilder({
         )}
       </section>
 
+      {totalExercises > 0 && (
+        <div className="field">
+          <span>Повторы для всей программы</span>
+          <div className="chips range-chips">
+            {QUICK_RANGES.map(([a, b]) => (
+              <button key={a + '-' + b} className="filter" onClick={() => setRangeAll([a, b])}>
+                {a}–{b}
+              </button>
+            ))}
+          </div>
+          {rangeAll && (
+            <Confirm
+              text={`Поставить ${rangeAll[0]}–${rangeAll[1]} повторов всем упражнениям программы (${totalExercises})? Подходы и RIR не меняются.`}
+              confirmLabel="Поставить"
+              onConfirm={() => setRangeEverywhere(rangeAll)}
+              onCancel={() => setRangeAll(null)}
+            />
+          )}
+        </div>
+      )}
+
       <div className="day-tabs" role="tablist">
         {days.map((d, i) => (
           <button key={d.id} role="tab" aria-selected={i === activeDay} className={i === activeDay ? 'on' : ''} onClick={() => setActiveDay(i)}>
@@ -379,6 +407,17 @@ export function ProgramBuilder({
                     </label>
                   ))}
                 </div>
+                <div className="chips range-chips" role="group" aria-label={'Повторы: ' + e.exerciseName}>
+                  {QUICK_RANGES.map(([a, b]) => (
+                    <button
+                      key={a + '-' + b}
+                      className={'filter' + (e.repMin === a && e.repMax === b ? ' on' : '')}
+                      onClick={() => patchExercise(i, { repMin: a, repMax: b })}
+                    >
+                      {a}–{b}
+                    </button>
+                  ))}
+                </div>
               </div>
             );
           })}
@@ -437,6 +476,15 @@ export function ProgramBuilder({
 }
 
 /** Whole-number field that lets the value be typed freely and only clamps it to [min, max] on leaving. */
+/** Rep ranges offered in one tap. */
+const QUICK_RANGES: Array<[number, number]> = [
+  [4, 6],
+  [6, 8],
+  [8, 12],
+  [12, 15],
+  [15, 20],
+];
+
 function RxInput({ value, min, max, onChange }: { value: number; min: number; max: number; onChange: (n: number) => void }) {
   const [text, setText] = useState(String(value));
   const focused = useRef(false);

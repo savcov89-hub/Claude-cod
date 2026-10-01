@@ -2990,3 +2990,15 @@ h2 {
     font-size: 16px;
   }
 }
+/* Quick rep ranges in the program editor: one row */
+.range-chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  gap: 6px;
+}
+.range-chips .filter {
+  flex: 1 0 auto;
+  min-height: 36px;
+  padding-inline: 10px;
+}
