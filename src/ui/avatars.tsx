@@ -11,7 +11,7 @@ interface Look {
   shirt: string;
   hair?: string;
   /** Hair behind the head (long, bob, afro…). */
-  back?: 'long' | 'bob' | 'afro' | 'longMale' | 'pigtails';
+  back?: 'long' | 'bob' | 'afro' | 'longMale' | 'pigtails' | 'shaggy';
   /** Hair on top. */
   top?: 'short' | 'receding' | 'bangs' | 'side' | 'curly' | 'bun' | 'spiky' | 'asym' | 'pixie' | 'sweep' | 'buzz';
   beard?: 'full' | 'braided' | 'mustache' | 'goatee' | 'stubble' | 'viking';
@@ -19,7 +19,14 @@ interface Look {
   glasses?: 'round' | 'square' | 'sun' | 'rimless';
   hat?: 'bandana' | 'beanie' | 'cap' | 'helmet' | 'headband' | 'tricorn';
   hatColor?: string;
-  patch?: boolean;
+  patch?: boolean | 'skull';
+  /** Tricorn trim colour (gold by default). */
+  hatTrim?: string;
+  /** Frowning brows. */
+  angry?: boolean;
+  pipe?: boolean;
+  /** A crow on the shoulder. */
+  crow?: boolean;
   earring?: boolean | 'stud' | 'plug';
   /** Eye colour (dark by default). */
   eyes?: string;
@@ -42,6 +49,14 @@ function Face({ look }: { look: Look }) {
   if (look.back === 'afro') parts.push(<circle key="afro" cx="32" cy="25" r="20" fill={hair} />);
   if (look.back === 'long') parts.push(<path key="long" d="M15 30 C13 10 51 10 49 30 L51 54 L13 54 Z" fill={hair} />);
   if (look.back === 'longMale') parts.push(<path key="lm" d="M17 28 C16 12 48 12 47 28 L48 48 L16 48 Z" fill={hair} />);
+  // Wild hair sticking out at the sides under a hat.
+  if (look.back === 'shaggy')
+    parts.push(
+      <g key="sh" fill={hair}>
+        <path d="M21 22 C15 25 13 31 14.5 37 L12.5 40 L16.5 40 L15.5 44 L19.5 41.5 L20.5 46 L23 40 L22.5 28 Z" />
+        <path d="M43 22 C49 25 51 31 49.5 37 L51.5 40 L47.5 40 L48.5 44 L44.5 41.5 L43.5 46 L41 40 L41.5 28 Z" />
+      </g>,
+    );
   if (look.back === 'bob') parts.push(<path key="bob" d="M16 30 C14 11 50 11 48 30 L48 43 L16 43 Z" fill={hair} />);
   if (look.back === 'pigtails')
     parts.push(
@@ -148,8 +163,17 @@ function Face({ look }: { look: Look }) {
     );
   parts.push(
     <g key="br" stroke={look.top === 'receding' && !look.hair ? '#2a2220' : beard} strokeWidth="1.3" strokeLinecap="round" fill="none">
-      <path d="M24.5 26.5 Q27 25.3 29.3 26.3" />
-      <path d="M34.7 26.3 Q37 25.3 39.5 26.5" />
+      {look.angry ? (
+        <>
+          <path d="M24 25.2 L29.6 27.4" />
+          <path d="M34.4 27.4 L40 25.2" />
+        </>
+      ) : (
+        <>
+          <path d="M24.5 26.5 Q27 25.3 29.3 26.3" />
+          <path d="M34.7 26.3 Q37 25.3 39.5 26.5" />
+        </>
+      )}
     </g>,
   );
   parts.push(<path key="n" d="M32 32 Q31 35 32.8 35.4" stroke="rgba(0,0,0,0.25)" strokeWidth="1" fill="none" strokeLinecap="round" />);
@@ -226,6 +250,14 @@ function Face({ look }: { look: Look }) {
       <g key="pa">
         <path d="M20 23 L44.5 33" stroke="#1d1d1f" strokeWidth="1.2" />
         <ellipse cx="37" cy="30.8" rx="3.6" ry="3.2" fill="#1d1d1f" />
+        {look.patch === 'skull' && (
+          <g fill="#d9dde2">
+            <circle cx="37" cy="30.1" r="1.7" />
+            <rect x="36" y="31.2" width="2" height="1.3" rx="0.3" />
+            <circle cx="36.35" cy="30" r="0.45" fill="#1d1d1f" />
+            <circle cx="37.65" cy="30" r="0.45" fill="#1d1d1f" />
+          </g>
+        )}
       </g>,
     );
   if (look.earring === 'plug') parts.push(<circle key="ea" cx="19.2" cy="34.4" r="1.3" fill="#3a3a3a" stroke="#1d1d1f" strokeWidth="0.5" />);
@@ -279,12 +311,38 @@ function Face({ look }: { look: Look }) {
   if (look.hat === 'tricorn')
     parts.push(
       <g key="h">
-        <path d="M19.5 23 C19 9 45 9 44.5 23 Z" fill="#2b2118" />
-        <path d="M6 23.5 C11 13 20 17.5 32 9.5 C44 17.5 53 13 58 23.5 C51 20.5 41 21.5 32 26.5 C23 21.5 13 20.5 6 23.5 Z" fill="#3a2a1e" stroke="#d9a441" strokeWidth="1.1" strokeLinejoin="round" />
+        <path d="M19.5 23 C19 9 45 9 44.5 23 Z" fill={look.hatColor ? 'rgba(0,0,0,0.35)' : '#2b2118'} />
+        <path d="M6 23.5 C11 13 20 17.5 32 9.5 C44 17.5 53 13 58 23.5 C51 20.5 41 21.5 32 26.5 C23 21.5 13 20.5 6 23.5 Z" fill={look.hatColor || '#3a2a1e'} stroke={look.hatTrim || '#d9a441'} strokeWidth="1.1" strokeLinejoin="round" />
         <circle cx="32" cy="17.5" r="2.6" fill="#f4efe6" />
         <circle cx="31" cy="17.2" r="0.6" fill="#2b2118" />
         <circle cx="33" cy="17.2" r="0.6" fill="#2b2118" />
         <path d="M29.6 21 L34.4 23.6 M34.4 21 L29.6 23.6" stroke="#f4efe6" strokeWidth="0.9" strokeLinecap="round" />
+      </g>,
+    );
+  if (look.pipe)
+    parts.push(
+      <g key="pi">
+        <path d="M35.5 39.2 C38.5 40.4 41.5 42 43.2 44.2" stroke="#4a2f1f" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+        <path d="M41.6 43 h4.2 v3.6 c0 1.4 -4.2 1.4 -4.2 0 Z" fill="#5a3a26" />
+        <ellipse cx="43.7" cy="43" rx="2.1" ry="0.8" fill="#ff5a1f" />
+        <circle cx="43.7" cy="42.6" r="0.6" fill="#ffd166" />
+      </g>,
+    );
+  if (look.crow)
+    parts.push(
+      <g key="cr">
+        {/* body and folded wing */}
+        <path d="M46.5 49 C47.5 42.5 53 40 57.5 42 C61 43.8 62 48.5 60.5 52 C58 55.5 51 56 47.5 54 Z" fill="#101114" />
+        <path d="M49.5 47.5 C52.5 45 57 45 60 47.5 C58 50.5 53.5 52 50 51 Z" fill="#26292f" />
+        <path d="M59.5 51.5 L64 57 L58 54.5 Z" fill="#101114" />
+        {/* head, big beak, eye */}
+        <circle cx="53.5" cy="37" r="4.6" fill="#101114" />
+        <path d="M49.6 35.4 L42.8 38.6 L49.8 39.6 Z" fill="#4b4f57" />
+        <path d="M49.6 37.6 L43.6 38.6" stroke="#101114" strokeWidth="0.4" />
+        <circle cx="52.4" cy="36" r="1.1" fill="#d0d4da" />
+        <circle cx="52.2" cy="36" r="0.5" fill="#101114" />
+        {/* feet on the shoulder */}
+        <path d="M51 55.5 L50 58 M54 55.8 L54 58.4" stroke="#6b6f76" strokeWidth="0.8" strokeLinecap="round" />
       </g>,
     );
   if (look.hat === 'headband') parts.push(<rect key="h" x="19" y="20.5" width="26" height="4.2" rx="2" fill={hc} />);
@@ -293,6 +351,7 @@ function Face({ look }: { look: Look }) {
 
 export const AVATARS: Array<{ id: string; label: string; look: Look }> = [
   { id: 'pirate', label: 'Пират', look: { bg: '#cfe3f3', skin: SKIN.tan, shirt: '#2f3b4c', hair: HAIR.black, beard: 'braided', hat: 'tricorn', patch: true, earring: true } },
+  { id: 'captain', label: 'Капитан с вороной', look: { bg: '#2b2d31', skin: '#c9a689', shirt: '#2c3440', hair: '#c9ccd1', back: 'shaggy', beard: 'full', hat: 'tricorn', hatColor: '#26272b', hatTrim: '#a7adb5', patch: 'skull', angry: true, teeth: true, pipe: true, crow: true } },
   { id: 'bald-beard', label: 'Лысый, русая борода', look: { bg: '#e8dccb', skin: SKIN.fair, shirt: '#3d5a40', hair: HAIR.brown, beard: 'full', smile: true } },
   { id: 'blonde', label: 'Блондинка', look: { bg: '#f6dbe3', skin: SKIN.light, shirt: '#c2577a', hair: HAIR.blonde, back: 'long', top: 'side', smile: true, lashes: true } },
   { id: 'brunette', label: 'Брюнетка', look: { bg: '#e7dff3', skin: SKIN.fair, shirt: '#5a4a8a', hair: HAIR.black, back: 'long', top: 'bangs', lashes: true } },
