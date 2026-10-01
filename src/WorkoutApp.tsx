@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Activity, ChevronRight, ClipboardList, Dumbbell, KeyRound, LogOut, Mail, RotateCcw } from 'lucide-react';
+import { Activity, ChevronRight, ClipboardList, Dumbbell, KeyRound, LogOut, Mail, Moon, RotateCcw, Sun, SunMoon } from 'lucide-react';
+import { getTheme, nextTheme, setTheme, themeLabel, type ThemeMode } from './theme';
 import { api, isArtifactBuild, isLocal, readError } from './transport';
 import { auth, type AuthUser } from './supabase';
 import { OfflineBar } from './ui/OfflineBar';
@@ -75,6 +76,7 @@ function LocalApp() {
         <button className="icon-btn sm" aria-label="Сбросить тестовые данные" title="Сбросить тестовые данные" onClick={() => setConfirmReset(true)}>
           <RotateCcw size={16} />
         </button>
+        <ThemeButton />
         {!isArtifactBuild && (
           <a className="btn btn-sm btn-quiet" href={location.pathname}>
             Выйти из теста
@@ -527,6 +529,7 @@ function RealApp() {
         <Dumbbell size={18} /> Training Log
       </span>
       <span className="muted small grow">{profile.name}</span>
+      <ThemeButton />
       <button className="icon-btn sm" aria-label="Пароль для входа" title="Пароль для входа" onClick={() => setNewPassword(newPassword === null ? '' : null)}>
         <KeyRound size={16} />
       </button>
@@ -565,6 +568,26 @@ function RealApp() {
     <TrainerApp profile={profile} header={top} onSwitchRole={() => void switchRole('client')} />
   ) : (
     <ClientApp profile={profile} header={top} onSwitchRole={() => void switchRole('trainer')} />
+  );
+}
+
+/** Auto (as on the phone) → light → dark. */
+function ThemeButton() {
+  const [mode, setMode] = useState<ThemeMode>(getTheme);
+  const Icon = mode === 'light' ? Sun : mode === 'dark' ? Moon : SunMoon;
+  return (
+    <button
+      className="icon-btn sm"
+      aria-label={themeLabel[mode] + '. Сменить'}
+      title={themeLabel[mode]}
+      onClick={() => {
+        const next = nextTheme(mode);
+        setTheme(next);
+        setMode(next);
+      }}
+    >
+      <Icon size={16} />
+    </button>
   );
 }
 

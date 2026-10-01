@@ -8,7 +8,7 @@ import { Journal } from './Journal';
 import { ProgressView } from './Progress';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
-import { Empty, VisitGrid, fmtDate } from './common';
+import { Avatar, Empty, VisitGrid, fmtDate } from './common';
 
 type Tab = 'workout' | 'progress' | 'history' | 'body';
 
@@ -96,9 +96,12 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
       {header}
       <main className="main narrow">
         <div className="section-head">
-          <div>
-            <span className="eyebrow">Мои тренировки</span>
-            <h2>{profile.name}</h2>
+          <div className="me">
+            <Avatar name={profile.name} avatar={coaches.find((c) => c.avatar)?.avatar} />
+            <div>
+              <span className="eyebrow">Мои тренировки</span>
+              <h2>{profile.name}</h2>
+            </div>
           </div>
           {coaches.length > 0 && (
             <button className={'btn presence' + (here ? ' on' : '')} disabled={busy} onClick={toggleGym}>

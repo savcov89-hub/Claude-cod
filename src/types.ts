@@ -134,4 +134,6 @@ export interface Coach {
   trainerName: string;
   checkedInAt?: string | null;
   visits?: string[];
+  /** The picture the trainer chose for this client. */
+  avatar?: string;
 }

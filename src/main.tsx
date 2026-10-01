@@ -2,6 +2,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
+import { applyTheme } from "./theme";
+
+applyTheme();
 
 // The iOS keyboard covers the page instead of resizing it, so the phone layout and overlays size
 // themselves to the visible area (--vv-top / --vv-height) and stay above the keyboard.

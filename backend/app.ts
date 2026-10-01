@@ -1367,6 +1367,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
             trainerName: key.trainerName,
             checkedInAt: client?.checkedInAt || null,
             visits: client?.visits || [],
+            ...(client?.avatar ? { avatar: client.avatar } : {}),
           });
         }
         programs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));

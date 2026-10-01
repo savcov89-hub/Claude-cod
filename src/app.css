@@ -2879,3 +2879,15 @@ h2 {
   height: 52px;
   font-size: 18px;
 }
+/* Client home: own avatar next to the name */
+.me {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.me .avatar {
+  width: 52px;
+  height: 52px;
+  font-size: 18px;
+}
