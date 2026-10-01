@@ -2848,8 +2848,8 @@ h2 {
 }
 .avatar-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 6px;
 }
 .avatar-choice {
   display: grid;

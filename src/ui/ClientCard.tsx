@@ -140,14 +140,17 @@ export function ClientCard({
       {pickingAvatar && (
         <Sheet title="Аватарка" onClose={() => setPickingAvatar(false)}>
           <div className="avatar-grid">
-            <button className={'avatar-choice' + (!client.avatar ? ' on' : '')} onClick={() => void chooseAvatar('')}>
+            <button className={'avatar-choice' + (!client.avatar ? ' on' : '')} aria-label="Буква имени" onClick={() => void chooseAvatar('')}>
               <span className="avatar avatar-letter">{client.clientName.slice(0, 1).toUpperCase()}</span>
-              <small>Буква</small>
             </button>
             {AVATARS.map((a) => (
-              <button key={a.id} className={'avatar-choice' + (client.avatar === a.id ? ' on' : '')} onClick={() => void chooseAvatar(a.id)}>
+              <button
+                key={a.id}
+                className={'avatar-choice' + (client.avatar === a.id ? ' on' : '')}
+                aria-label={a.label}
+                onClick={() => void chooseAvatar(a.id)}
+              >
                 <AvatarArt id={a.id} size={56} />
-                <small>{a.label}</small>
               </button>
             ))}
           </div>

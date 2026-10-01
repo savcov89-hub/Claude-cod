@@ -54,13 +54,14 @@ function Face({ look }: { look: Look }) {
   if (top === 'short') parts.push(<path key="t" d="M19.5 29 C18 10 46 10 44.5 29 C42 21 37 19.5 32 19.5 C26 19.5 22 21 19.5 29 Z" fill={hair} />);
   if (top === 'spiky')
     parts.push(<path key="t" d="M19.5 29 C18 18 22 14 24 13 L26 17 L28 11 L31 16 L34 10 L36 16 L39 12 L40 17 L43 15 C46 19 46 24 44.5 29 C42 22 37 20 32 20 C26 20 22 22 19.5 29 Z" fill={hair} />);
+  // Receding at the temples, hair still on top (an M-shaped hairline).
   if (top === 'receding')
     parts.push(
-      <g key="t" fill={hair}>
-        <path d="M19.5 31 C19 23 21 19 24.5 17.5 L23.5 25 Z" />
-        <path d="M44.5 31 C45 23 43 19 39.5 17.5 L40.5 25 Z" />
-        <path d="M29 17 C31 15.8 33 15.8 35 17 C33.5 18.2 30.5 18.2 29 17 Z" />
-      </g>,
+      <path
+        key="t"
+        d="M19.5 30 C18.5 11 45.5 11 44.5 30 C44 27 43 24.5 41.8 22.8 C40 23.2 38.6 21.8 37.4 19.4 C35.4 20.3 33.6 21.4 32 23 C30.4 21.4 28.6 20.3 26.6 19.4 C25.4 21.8 24 23.2 22.2 22.8 C21 24.5 20 27 19.5 30 Z"
+        fill={hair}
+      />,
     );
   if (top === 'bangs') parts.push(<path key="t" d="M19.5 29 C19 11 45 11 44.5 29 C41 22 34 22.5 30 20.5 C26 23 22 24 19.5 29 Z" fill={hair} />);
   if (top === 'side') parts.push(<path key="t" d="M19.5 29 C18 10 46 10 44.5 29 C44 24 41 20.5 37 20 C31 21 25 23.5 19.5 29 Z" fill={hair} />);
