@@ -78,7 +78,7 @@ export function Dashboard({ data, openClient }: { data: TrainerData; openClient:
           <div className="attention">
             {rows.map(({ c, flags }) => (
               <button key={c.clientId} className="attention-row" onClick={() => openClient(c.clientId, c.needsReview ? 'history' : 'progress')}>
-                <Avatar name={c.clientName} />
+                <Avatar name={c.clientName} avatar={c.avatar} />
                 <span className="grow">
                   <strong>{c.clientName}</strong>
                   <span className="flags">

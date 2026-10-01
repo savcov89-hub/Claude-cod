@@ -9,6 +9,7 @@ import { ProgressView } from './Progress';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
 import { Journal } from './Journal';
+import { AVATARS, AvatarArt } from './avatars';
 
 type Tab = 'overview' | 'progress' | 'history' | 'body' | 'programs';
 
@@ -40,6 +41,16 @@ export function ClientCard({
   // Renaming: the new name while the field is open.
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
+  const [pickingAvatar, setPickingAvatar] = useState(false);
+  const chooseAvatar = async (avatar: string) => {
+    try {
+      await api.post('/api/client/' + clientId + '/update', { avatar });
+      await data.reloadClients();
+      setPickingAvatar(false);
+    } catch (e) {
+      setErr(readError(e));
+    }
+  };
 
   const loadHistory = async () => {
     try {
@@ -104,7 +115,9 @@ export function ClientCard({
         <button className="icon-btn" aria-label="Назад" onClick={onBack}>
           <ArrowLeft size={20} />
         </button>
-        <Avatar name={client.clientName} live={here} />
+        <button className="avatar-btn" aria-label="Выбрать аватарку" onClick={() => setPickingAvatar(true)}>
+          <Avatar name={client.clientName} live={here} avatar={client.avatar} />
+        </button>
         <div className="grow">
           <h2 className="client-name">
             <span className="client-name-text">{client.clientName}</span>
@@ -124,6 +137,22 @@ export function ClientCard({
           </button>
         )}
       </div>
+      {pickingAvatar && (
+        <Sheet title="Аватарка" onClose={() => setPickingAvatar(false)}>
+          <div className="avatar-grid">
+            <button className={'avatar-choice' + (!client.avatar ? ' on' : '')} onClick={() => void chooseAvatar('')}>
+              <span className="avatar avatar-letter">{client.clientName.slice(0, 1).toUpperCase()}</span>
+              <small>Буква</small>
+            </button>
+            {AVATARS.map((a) => (
+              <button key={a.id} className={'avatar-choice' + (client.avatar === a.id ? ' on' : '')} onClick={() => void chooseAvatar(a.id)}>
+                <AvatarArt id={a.id} size={56} />
+                <small>{a.label}</small>
+              </button>
+            ))}
+          </div>
+        </Sheet>
+      )}
       {renaming !== null && (
         <form
           className="rename-form"

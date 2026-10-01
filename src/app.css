@@ -2830,3 +2830,46 @@ h2 {
 .order-bar .btn {
   flex: none;
 }
+/* Ready-made avatars */
+.avatar.art {
+  overflow: hidden;
+  background: none;
+  padding: 0;
+}
+.avatar.art svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.avatar-btn {
+  flex: none;
+  border-radius: 50%;
+  padding: 0;
+}
+.avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 8px;
+}
+.avatar-choice {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 6px 2px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+.avatar-choice small {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--ink-2);
+}
+.avatar-choice.on {
+  border-color: var(--ink);
+}
+.avatar-letter {
+  width: 56px;
+  height: 56px;
+  font-size: 22px;
+}

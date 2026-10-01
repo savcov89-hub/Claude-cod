@@ -27,6 +27,8 @@ export interface ClientItem {
   notes?: ClientNotes;
   insights?: ClientInsights;
   archived?: boolean;
+  /** Ready-made picture (src/ui/avatars.tsx). */
+  avatar?: string;
 }
 export interface Exercise {
   id: string;

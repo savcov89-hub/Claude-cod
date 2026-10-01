@@ -77,6 +77,8 @@ interface ClientRecord {
   notes?: ClientNotes;
   insights?: ClientInsights;
   archived?: boolean;
+  /** Ready-made picture chosen by the trainer. */
+  avatar?: string;
 }
 interface CoachRecord {
   trainerId: string;
@@ -649,6 +651,11 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         if (b.notes)
           patch.notes = { goal: text(b.notes.goal, 300), limits: text(b.notes.limits, 500), notes: text(b.notes.notes, 2000) };
         if (typeof b.archived === 'boolean') patch.archived = b.archived;
+        // One of the ready-made pictures (src/ui/avatars.tsx); empty for the initial letter.
+        if (typeof b.avatar === 'string') {
+          if (b.avatar && !/^[a-z-]{1,24}$/.test(b.avatar)) return error('Нет такой аватарки.', 400);
+          patch.avatar = b.avatar || undefined;
+        }
         const ok = await saveClient(ctx.user!.userId, client, patch);
         if (ok && patch.clientName && patch.clientName !== client.clientName) {
           // Programs carry the client's name (journal header, program lists).

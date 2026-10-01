@@ -60,7 +60,7 @@ export function Clients({ data, openClient }: { data: TrainerData; openClient: (
             return (
               <div key={c.clientId} className={'client-row' + (here ? ' here' : '')}>
                 <button className="client-open" onClick={() => openClient(c.clientId)}>
-                  <Avatar name={c.clientName} live={here} />
+                  <Avatar name={c.clientName} live={here} avatar={c.avatar} />
                   <span className="grow">
                     <strong>
                       {c.clientName}

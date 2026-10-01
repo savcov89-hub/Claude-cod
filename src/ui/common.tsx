@@ -1,3 +1,4 @@
+import { AvatarArt, isAvatar } from './avatars';
 import { useEffect, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { SeriesPoint, Trend } from '../analytics';
@@ -105,9 +106,9 @@ export function Empty({ title, text, action }: { title: string; text?: string; a
   );
 }
 
-export const Avatar = ({ name, live = false }: { name: string; live?: boolean }) => (
-  <span className={'avatar' + (live ? ' live' : '')} aria-hidden="true">
-    {name.slice(0, 1).toUpperCase()}
+export const Avatar = ({ name, live = false, avatar }: { name: string; live?: boolean; avatar?: string }) => (
+  <span className={'avatar' + (live ? ' live' : '') + (isAvatar(avatar) ? ' art' : '')} aria-hidden="true">
+    {isAvatar(avatar) ? <AvatarArt id={avatar!} size={64} /> : name.slice(0, 1).toUpperCase()}
   </span>
 );
 

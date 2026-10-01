@@ -561,7 +561,7 @@ function ArrivalPicker({ clients, onDone }: { clients: ClientItem[]; onDone: (id
         const on = picked.includes(c.clientId);
         return (
           <button key={c.clientId} className={'arrival' + (on ? ' on' : '')} onClick={() => toggle(c.clientId)} aria-pressed={on}>
-            <Avatar name={c.clientName} live={on} />
+            <Avatar name={c.clientName} live={on} avatar={c.avatar} />
             <span className="grow">
               <strong>{c.clientName}</strong>
               <span className="muted small">
