@@ -2974,3 +2974,19 @@ h2 {
 .sheet-body {
   position: relative;
 }
+.program-text {
+  width: 100%;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.45;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface, transparent);
+  color: var(--ink);
+}
+@media (pointer: coarse) {
+  .program-text {
+    font-size: 16px;
+  }
+}

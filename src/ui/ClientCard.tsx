@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Copy, Pencil, Plus, Smartphone, Archive, RotateCcw, Share2 } from 'lucide-react';
+import { ArrowLeft, Clipboard, Copy, Pencil, Plus, Smartphone, Archive, RotateCcw, Share2 } from 'lucide-react';
 import { api, inGym, readError } from '../transport';
 import { inviteLink } from '../invite';
 import type { Program, Session } from '../types';
@@ -11,6 +11,7 @@ import { BodyView } from './Body';
 import { Journal } from './Journal';
 import { AVATARS, AvatarArt } from './avatars';
 import { RecordsSheet } from './Records';
+import { copyLater, programText } from './programText';
 import type { PersonalRecord } from '../analytics';
 
 type Tab = 'overview' | 'progress' | 'history' | 'body' | 'programs';
@@ -507,6 +508,20 @@ export function ProgramCard({
   const [err, setErr] = useState('');
   const [copying, setCopying] = useState<string | null>(null);
   const [copied, setCopied] = useState('');
+  // Plain text for a messenger: copied at once; shown to copy by hand when the browser does not allow it.
+  const [asText, setAsText] = useState<string | null>(null);
+  const [textBusy, setTextBusy] = useState(false);
+  const copyAsText = async (dayIds?: string[]) => {
+    setTextBusy(true);
+    const text = programText(p, dayIds);
+    try {
+      const failed = await copyLater(text);
+      if (failed) setAsText(failed);
+      else setCopied('Скопировано текстом — вставьте в сообщение.');
+    } finally {
+      setTextBusy(false);
+    }
+  };
   const archive = async (archived: boolean) => {
     try {
       await api.post('/api/programs/' + p.id + '/archive', { archived });
@@ -560,6 +575,9 @@ export function ProgramCard({
                 <button className="btn btn-block" onClick={() => setCopying(d.id)}>
                   <Copy size={15} /> Копировать тренировку «{d.name}»
                 </button>
+                <button className="btn btn-block" disabled={textBusy} onClick={() => void copyAsText([d.id])}>
+                  <Clipboard size={15} /> Скопировать «{d.name}» текстом
+                </button>
               </div>
             )}
           </div>
@@ -574,11 +592,40 @@ export function ProgramCard({
         <button className="btn btn-sm" onClick={() => openBuilder({ clientId: p.clientId, program: p, copy: true })}>
           <Copy size={15} /> Копировать программу
         </button>
+        <button className="btn btn-sm" disabled={textBusy} onClick={() => void copyAsText()}>
+          <Clipboard size={15} /> {textBusy ? 'Готовим…' : 'Скопировать текстом'}
+        </button>
         <button className="btn btn-sm btn-quiet" onClick={() => archive(!p.archived)}>
           {p.archived ? <RotateCcw size={15} /> : <Archive size={15} />} {p.archived ? 'Вернуть' : 'В архив'}
         </button>
       </footer>
       {copied && <p className="tone-good small">{copied}</p>}
+      {asText !== null && (
+        <Sheet title="Текст программы" onClose={() => setAsText(null)}>
+          <textarea className="program-text" readOnly rows={12} value={asText} onFocus={(e) => e.target.select()} />
+          <div className="order-actions">
+            <button
+              className="btn btn-primary btn-block"
+              onClick={() => {
+                void navigator.clipboard?.writeText(asText).then(
+                  () => {
+                    setCopied('Скопировано текстом — вставьте в сообщение.');
+                    setAsText(null);
+                  },
+                  () => undefined,
+                );
+              }}
+            >
+              <Clipboard size={15} /> Скопировать
+            </button>
+            {typeof navigator.share === 'function' && (
+              <button className="btn btn-block" onClick={() => void navigator.share({ text: asText }).catch(() => undefined)}>
+                <Share2 size={15} /> Отправить…
+              </button>
+            )}
+          </div>
+        </Sheet>
+      )}
       {copying && (
         <CopyDay
           program={p}
