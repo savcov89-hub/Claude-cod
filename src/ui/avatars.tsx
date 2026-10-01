@@ -13,7 +13,7 @@ interface Look {
   /** Hair behind the head (long, bob, afro…). */
   back?: 'long' | 'bob' | 'afro' | 'longMale' | 'pigtails';
   /** Hair on top. */
-  top?: 'short' | 'receding' | 'bangs' | 'side' | 'curly' | 'mohawk' | 'bun' | 'spiky';
+  top?: 'short' | 'receding' | 'bangs' | 'side' | 'curly' | 'bun' | 'spiky' | 'asym' | 'pixie';
   beard?: 'full' | 'braided' | 'mustache' | 'goatee' | 'stubble' | 'viking';
   beardColor?: string;
   glasses?: 'round' | 'square' | 'sun';
@@ -23,6 +23,8 @@ interface Look {
   earring?: boolean;
   smile?: boolean;
   lashes?: boolean;
+  /** Coloured lips. */
+  lips?: boolean;
 }
 
 function Face({ look }: { look: Look }) {
@@ -49,7 +51,7 @@ function Face({ look }: { look: Look }) {
   parts.push(<ellipse key="head" cx="32" cy="30" rx="12.5" ry="14.5" fill={skin} />);
   // Hair on top.
   const top = look.top;
-  if (top === 'short') parts.push(<path key="t" d="M19.5 29 C18 13 46 13 44.5 29 C42 21 37 19.5 32 19.5 C26 19.5 22 21 19.5 29 Z" fill={hair} />);
+  if (top === 'short') parts.push(<path key="t" d="M19.5 29 C18 10 46 10 44.5 29 C42 21 37 19.5 32 19.5 C26 19.5 22 21 19.5 29 Z" fill={hair} />);
   if (top === 'spiky')
     parts.push(<path key="t" d="M19.5 29 C18 18 22 14 24 13 L26 17 L28 11 L31 16 L34 10 L36 16 L39 12 L40 17 L43 15 C46 19 46 24 44.5 29 C42 22 37 20 32 20 C26 20 22 22 19.5 29 Z" fill={hair} />);
   if (top === 'receding')
@@ -60,13 +62,13 @@ function Face({ look }: { look: Look }) {
         <path d="M29 17 C31 15.8 33 15.8 35 17 C33.5 18.2 30.5 18.2 29 17 Z" />
       </g>,
     );
-  if (top === 'bangs') parts.push(<path key="t" d="M19.5 29 C19 14 45 14 44.5 29 C41 22 34 22.5 30 20.5 C26 23 22 24 19.5 29 Z" fill={hair} />);
-  if (top === 'side') parts.push(<path key="t" d="M19.5 29 C18 13 46 13 44.5 29 C44 24 41 20.5 37 20 C31 21 25 23.5 19.5 29 Z" fill={hair} />);
+  if (top === 'bangs') parts.push(<path key="t" d="M19.5 29 C19 11 45 11 44.5 29 C41 22 34 22.5 30 20.5 C26 23 22 24 19.5 29 Z" fill={hair} />);
+  if (top === 'side') parts.push(<path key="t" d="M19.5 29 C18 10 46 10 44.5 29 C44 24 41 20.5 37 20 C31 21 25 23.5 19.5 29 Z" fill={hair} />);
   if (top === 'bun')
     parts.push(
       <g key="t" fill={hair}>
         <circle cx="32" cy="12.5" r="5.5" />
-        <path d="M19.5 29 C18 14 46 14 44.5 29 C42 22 37 20.5 32 20.5 C27 20.5 22 22 19.5 29 Z" />
+        <path d="M19.5 29 C18 11 46 11 44.5 29 C42 22 37 20.5 32 20.5 C27 20.5 22 22 19.5 29 Z" />
       </g>,
     );
   if (top === 'curly')
@@ -85,7 +87,20 @@ function Face({ look }: { look: Look }) {
         ))}
       </g>,
     );
-  if (top === 'mohawk') parts.push(<path key="t" d="M29 24 C28.5 15 30 8 32 7 C34 8 35.5 15 35 24 Z" fill={hair} />);
+  // Short asymmetric cut: the left side short, a long sweep over the forehead down to the jaw on the right.
+  if (top === 'asym')
+    parts.push(
+      <path key="t" d="M19.5 29 C18 10 47 9 46.8 30 L47 41.5 C45 41.5 43.6 39.5 43.6 36 C43 27 37 22.5 30 22 C25.5 22.5 22 25 19.5 29 Z" fill={hair} />,
+    );
+  // Pixie: short, soft, a side fringe.
+  if (top === 'pixie')
+    parts.push(
+      <g key="t" fill={hair}>
+        <path d="M19 31 C17 10 47 10 45 31 C44.5 26 42.5 22 38.5 21 C35 24.5 28 25.5 23 24 C21 26 19.8 28 19 31 Z" />
+        <path d="M19 30 C18 34 18.5 38 20.5 40 C21 36 21 33 21.5 30 Z" />
+        <path d="M45 30 C46 34 45.5 38 43.5 40 C43 36 43 33 42.5 30 Z" />
+      </g>,
+    );
   // Eyes, brows, nose, mouth.
   if (!look.glasses || look.glasses !== 'sun') {
     parts.push(<circle key="e1" cx="27" cy="30.5" r="1.6" fill="#2a2220" />);
@@ -130,9 +145,9 @@ function Face({ look }: { look: Look }) {
   // Mouth, then mustache over it.
   parts.push(
     look.smile ? (
-      <path key="m" d="M28.3 38.2 Q32 41.6 35.7 38.2" stroke="#7a3b2e" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+      <path key="m" d="M28.3 38.2 Q32 41.6 35.7 38.2" stroke={look.lips ? '#c0395b' : '#7a3b2e'} strokeWidth={look.lips ? 1.9 : 1.4} fill="none" strokeLinecap="round" />
     ) : (
-      <path key="m" d="M29 38.8 Q32 40 35 38.8" stroke="#7a3b2e" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+      <path key="m" d="M29 38.8 Q32 40 35 38.8" stroke={look.lips ? '#c0395b' : '#7a3b2e'} strokeWidth={look.lips ? 1.9 : 1.4} fill="none" strokeLinecap="round" />
     ),
   );
   if (b === 'mustache' || b === 'full' || b === 'braided' || b === 'viking')
@@ -211,7 +226,7 @@ function Face({ look }: { look: Look }) {
 
 export const AVATARS: Array<{ id: string; label: string; look: Look }> = [
   { id: 'pirate', label: 'Пират', look: { bg: '#cfe3f3', skin: SKIN.tan, shirt: '#2f3b4c', hair: HAIR.black, beard: 'braided', hat: 'bandana', patch: true, earring: true } },
-  { id: 'bald-beard', label: 'Лысый с бородой', look: { bg: '#e8dccb', skin: SKIN.fair, shirt: '#3d5a40', hair: HAIR.brown, beard: 'full', smile: true } },
+  { id: 'bald-beard', label: 'Лысый, русая борода', look: { bg: '#e8dccb', skin: SKIN.fair, shirt: '#3d5a40', hair: HAIR.brown, beard: 'full', smile: true } },
   { id: 'blonde', label: 'Блондинка', look: { bg: '#f6dbe3', skin: SKIN.light, shirt: '#c2577a', hair: HAIR.blonde, back: 'long', top: 'side', smile: true, lashes: true } },
   { id: 'brunette', label: 'Брюнетка', look: { bg: '#e7dff3', skin: SKIN.fair, shirt: '#5a4a8a', hair: HAIR.black, back: 'long', top: 'bangs', lashes: true } },
   { id: 'receding', label: 'С залысинами', look: { bg: '#dfe9df', skin: SKIN.fair, shirt: '#55606e', hair: HAIR.brown, top: 'receding', beard: 'stubble' } },
@@ -220,7 +235,6 @@ export const AVATARS: Array<{ id: string; label: string; look: Look }> = [
   { id: 'grandpa', label: 'Седой с усами', look: { bg: '#ece7df', skin: SKIN.fair, shirt: '#8a6d4a', hair: HAIR.white, top: 'receding', beard: 'mustache', beardColor: HAIR.white, glasses: 'square' } },
   { id: 'bun', label: 'С пучком', look: { bg: '#e2f0ea', skin: SKIN.tan, shirt: '#e07a5f', hair: HAIR.brown, top: 'bun', smile: true, lashes: true, earring: true } },
   { id: 'hipster', label: 'Хипстер в шапке', look: { bg: '#f3e6d4', skin: SKIN.light, shirt: '#264653', hair: HAIR.brown, beard: 'full', hat: 'beanie', hatColor: '#e76f51' } },
-  { id: 'mohawk', label: 'Ирокез', look: { bg: '#e3e0f5', skin: SKIN.fair, shirt: '#1d1d1f', hair: '#7b3fe4', top: 'mohawk', earring: true } },
   { id: 'afro', label: 'Афро', look: { bg: '#f6e7c8', skin: SKIN.dark, shirt: '#f4a261', hair: HAIR.black, back: 'afro', smile: true } },
   { id: 'cap', label: 'В кепке', look: { bg: '#d9ecf2', skin: SKIN.tan, shirt: '#457b9d', hair: HAIR.black, hat: 'cap', hatColor: '#1d3557', beard: 'goatee' } },
   { id: 'viking', label: 'Викинг', look: { bg: '#dde3ea', skin: SKIN.light, shirt: '#6b4f3a', hair: HAIR.red, back: 'longMale', beard: 'viking', hat: 'helmet' } },
@@ -229,6 +243,17 @@ export const AVATARS: Array<{ id: string; label: string; look: Look }> = [
   { id: 'mustache', label: 'С усами', look: { bg: '#f1e3d3', skin: SKIN.tan, shirt: '#9c6644', hair: HAIR.black, top: 'short', beard: 'mustache', smile: true } },
   { id: 'curly', label: 'Кудрявый', look: { bg: '#e0efe0', skin: SKIN.fair, shirt: '#588157', hair: HAIR.brown, top: 'curly', smile: true } },
   { id: 'rocker', label: 'Рокер', look: { bg: '#e4e4e4', skin: SKIN.light, shirt: '#111111', hair: HAIR.blonde, back: 'longMale', top: 'side', glasses: 'sun', beard: 'goatee', beardColor: '#b89443' } },
+  { id: 'bald-black', label: 'Лысый, чёрная борода', look: { bg: '#dcdcdc', skin: SKIN.tan, shirt: '#1d3557', hair: HAIR.black, beard: 'full' } },
+  { id: 'bald-blond', label: 'Лысый, светлая борода', look: { bg: '#e9f1f7', skin: SKIN.light, shirt: '#6c757d', hair: '#d8b25a', beard: 'full', smile: true } },
+  { id: 'bald-red', label: 'Лысый, рыжая борода', look: { bg: '#f7e4d6', skin: SKIN.light, shirt: '#2d6a4f', hair: HAIR.red, beard: 'full' } },
+  { id: 'hair-beard-dark', label: 'Тёмный с бородой', look: { bg: '#e6e1da', skin: SKIN.fair, shirt: '#3a5a78', hair: HAIR.black, top: 'side', beard: 'full' } },
+  { id: 'hair-beard-light', label: 'Светлый с бородой', look: { bg: '#e3eef6', skin: SKIN.light, shirt: '#8d6e63', hair: '#d8b25a', top: 'short', beard: 'full', smile: true } },
+  { id: 'receding-beard-dark', label: 'Залысины, тёмная борода', look: { bg: '#e2e8df', skin: SKIN.fair, shirt: '#495057', hair: HAIR.black, top: 'receding', beard: 'full' } },
+  { id: 'receding-beard-light', label: 'Залысины, светлая борода', look: { bg: '#f3ecdf', skin: SKIN.light, shirt: '#5e548e', hair: '#d8b25a', top: 'receding', beard: 'full', smile: true } },
+  { id: 'short-blonde', label: 'Короткая, светлая', look: { bg: '#fdf0d5', skin: SKIN.light, shirt: '#e56b6f', hair: HAIR.blonde, top: 'pixie', smile: true, lashes: true, earring: true, lips: true } },
+  { id: 'short-dark', label: 'Короткая, тёмная', look: { bg: '#e8e0f0', skin: SKIN.fair, shirt: '#355070', hair: HAIR.black, top: 'pixie', smile: true, lashes: true, earring: true, lips: true } },
+  { id: 'asym-glasses-dark', label: 'Асимметрия и очки, тёмная', look: { bg: '#dfe7ee', skin: SKIN.fair, shirt: '#22333b', hair: HAIR.black, top: 'asym', glasses: 'round', lashes: true, earring: true, lips: true } },
+  { id: 'asym-glasses-light', label: 'Асимметрия и очки, светлая', look: { bg: '#f6e6ee', skin: SKIN.light, shirt: '#9a8c98', hair: HAIR.blonde, top: 'asym', glasses: 'square', smile: true, lashes: true, earring: true, lips: true } },
   { id: 'spiky', label: 'Ёжик', look: { bg: '#fff1c9', skin: SKIN.fair, shirt: '#0096c7', hair: HAIR.blonde, top: 'spiky', smile: true } },
 ];
 
