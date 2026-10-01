@@ -13,14 +13,16 @@ interface Look {
   /** Hair behind the head (long, bob, afro…). */
   back?: 'long' | 'bob' | 'afro' | 'longMale' | 'pigtails';
   /** Hair on top. */
-  top?: 'short' | 'receding' | 'bangs' | 'side' | 'curly' | 'bun' | 'spiky' | 'asym' | 'pixie' | 'sweep';
+  top?: 'short' | 'receding' | 'bangs' | 'side' | 'curly' | 'bun' | 'spiky' | 'asym' | 'pixie' | 'sweep' | 'buzz';
   beard?: 'full' | 'braided' | 'mustache' | 'goatee' | 'stubble' | 'viking';
   beardColor?: string;
   glasses?: 'round' | 'square' | 'sun' | 'rimless';
   hat?: 'bandana' | 'beanie' | 'cap' | 'helmet' | 'headband' | 'tricorn';
   hatColor?: string;
   patch?: boolean;
-  earring?: boolean | 'stud';
+  earring?: boolean | 'stud' | 'plug';
+  /** Eye colour (dark by default). */
+  eyes?: string;
   /** A wide smile showing teeth. */
   teeth?: boolean;
   /** Neckline trim of the top. */
@@ -98,6 +100,16 @@ function Face({ look }: { look: Look }) {
     parts.push(
       <path key="t" d="M19.5 29 C18 10 47 9 46.8 30 L47 41.5 C45 41.5 43.6 39.5 43.6 36 C43 27 37 22.5 30 22 C25.5 22.5 22 25 19.5 29 Z" fill={hair} />,
     );
+  // Buzz cut with a high receding hairline and a small tuft in the middle.
+  if (top === 'buzz')
+    parts.push(
+      <path
+        key="t"
+        d="M19.4 30 C18.4 11 45.6 11 44.6 30 C44.3 26.6 43.5 24 42.4 22.6 C40.4 22.4 38.6 21.2 37.2 19.4 C35.4 19.8 33.6 20.6 32 22 C30.4 20.6 28.6 19.8 26.8 19.4 C25.4 21.2 23.6 22.4 21.6 22.6 C20.5 24 19.7 26.6 19.4 30 Z"
+        fill={hair}
+        opacity="0.92"
+      />,
+    );
   // Short with volume on top and a long fringe swept across the forehead to one side.
   if (top === 'sweep')
     parts.push(
@@ -117,8 +129,15 @@ function Face({ look }: { look: Look }) {
     );
   // Eyes, brows, nose, mouth.
   if (!look.glasses || look.glasses !== 'sun') {
-    parts.push(<circle key="e1" cx="27" cy="30.5" r="1.6" fill="#2a2220" />);
-    if (!look.patch) parts.push(<circle key="e2" cx="37" cy="30.5" r="1.6" fill="#2a2220" />);
+    parts.push(<circle key="e1" cx="27" cy="30.5" r="1.6" fill={look.eyes || '#2a2220'} />);
+    if (!look.patch) parts.push(<circle key="e2" cx="37" cy="30.5" r="1.6" fill={look.eyes || '#2a2220'} />);
+    if (look.eyes)
+      parts.push(
+        <g key="pu" fill="#1d1d1f">
+          <circle cx="27" cy="30.5" r="0.7" />
+          <circle cx="37" cy="30.5" r="0.7" />
+        </g>,
+      );
   }
   if (look.lashes)
     parts.push(
@@ -209,7 +228,8 @@ function Face({ look }: { look: Look }) {
         <ellipse cx="37" cy="30.8" rx="3.6" ry="3.2" fill="#1d1d1f" />
       </g>,
     );
-  if (look.earring === 'stud')
+  if (look.earring === 'plug') parts.push(<circle key="ea" cx="19.2" cy="34.4" r="1.3" fill="#3a3a3a" stroke="#1d1d1f" strokeWidth="0.5" />);
+  else if (look.earring === 'stud')
     parts.push(
       <g key="ea" fill="#1d1d1f">
         <circle cx="19.2" cy="34.6" r="1" />
@@ -302,6 +322,7 @@ export const AVATARS: Array<{ id: string; label: string; look: Look }> = [
   { id: 'asym-glasses-dark', label: 'Асимметрия и очки, тёмная', look: { bg: '#dfe7ee', skin: SKIN.fair, shirt: '#22333b', hair: HAIR.black, top: 'asym', glasses: 'round', lashes: true, earring: true, lips: true } },
   { id: 'asym-glasses-light', label: 'Асимметрия и очки, светлая', look: { bg: '#f6e6ee', skin: SKIN.light, shirt: '#9a8c98', hair: HAIR.blonde, top: 'asym', glasses: 'square', smile: true, lashes: true, earring: true, lips: true } },
   { id: 'sweep-glasses', label: 'Короткая с чёлкой набок, очки без оправы', look: { bg: '#dfe9d0', skin: SKIN.tan, shirt: '#1d1d1f', collar: '#8a9aa6', hair: HAIR.black, top: 'sweep', glasses: 'rimless', earring: 'stud', teeth: true, lips: true, lashes: true } },
+  { id: 'buzz-beard', label: 'Короткий ёжик, залысины, тёмная борода', look: { bg: '#ecebe7', skin: SKIN.fair, shirt: '#3b3f45', hair: '#4a3426', top: 'buzz', beard: 'full', eyes: '#6d8794', earring: 'plug' } },
   { id: 'spiky', label: 'Ёжик', look: { bg: '#fff1c9', skin: SKIN.fair, shirt: '#0096c7', hair: HAIR.blonde, top: 'spiky', smile: true } },
 ];
 
