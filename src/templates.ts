@@ -405,6 +405,62 @@ const plans: Record<string, { name: string; slots: Slot[] }> = {
   },
 };
 
+// Extra single workouts for the per-day focus picker.
+Object.assign(plans, {
+  shouldersArms: {
+    name: 'Плечи · руки',
+    slots: [
+      s('machine-shoulder-press|dumbbell-shoulder-press', 3, '8-12', 2),
+      s('lateral-raise|cable-lateral-raise', 3, '12-20', 1),
+      s('reverse-pec-deck|face-pull', 2, '12-20', 1),
+      s('incline-curl|bayesian-curl', 3, '10-15', 1),
+      s('overhead-triceps|triceps-pushdown', 3, '10-15', 1),
+      s('hammer-curl', 2, '10-15', 1),
+    ],
+  },
+  glutesBack: {
+    name: 'Ягодицы · спина',
+    slots: [
+      s('hip-thrust', 3, '8-12', 2),
+      s('lat-pulldown|assisted-pull-up', 3, '8-12', 2),
+      s('bulgarian-split-squat|reverse-lunge', 3, '8-12', 2),
+      s('chest-supported-row|seated-row', 3, '8-12', 2),
+      s('hip-abduction', 2, '12-20', 1),
+      s('face-pull|reverse-pec-deck', 2, '12-20', 1),
+    ],
+  },
+});
+
+/** What one workout is for: picking it fills the day with fitting exercises. */
+export const DAY_FOCUS: Array<{ key: string; label: string }> = [
+  { key: 'glutesA', label: 'Ягодицы' },
+  { key: 'glutesB', label: 'Ягодицы · задняя поверхность' },
+  { key: 'glutesBack', label: 'Ягодицы · спина' },
+  { key: 'legs', label: 'Ноги' },
+  { key: 'legsShoulders', label: 'Ноги · плечи' },
+  { key: 'loA', label: 'Низ тела' },
+  { key: 'chestBack', label: 'Грудь · спина' },
+  { key: 'chestTri', label: 'Грудь · трицепс' },
+  { key: 'backBi', label: 'Спина · бицепс' },
+  { key: 'pushA', label: 'Грудь · плечи · трицепс' },
+  { key: 'shouldersArms', label: 'Плечи · руки' },
+  { key: 'arms', label: 'Руки' },
+  { key: 'upper', label: 'Верх тела' },
+  { key: 'fbA', label: 'Всё тело' },
+];
+
+/** Exercises for one workout of the given focus; `variant` picks the alternatives of each slot. */
+export function focusDay(key: string, variant = 0) {
+  const plan = plans[key];
+  if (!plan) throw new Error('Нет такого варианта тренировки.');
+  return plan.slots.map((slot) => {
+    const id = slot.ids[variant % slot.ids.length];
+    const e = catalog.find((c) => c.id === id);
+    if (!e) throw new Error('Упражнение не найдено: ' + id);
+    return { exerciseId: id, exerciseName: e.name, sets: slot.sets, repMin: slot.repMin, repMax: slot.repMax, targetRir: slot.rir };
+  });
+}
+
 export interface Template {
   name: string;
   keys: string[];

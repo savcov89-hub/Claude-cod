@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowLeft, ArrowUp, Plus, RefreshCw, Search, Trash2, Undo2 } from 'lucide-react';
 import { api, readError } from '../transport';
-import { templateDays, templates } from '../templates';
+import { DAY_FOCUS, focusDay, templateDays, templates } from '../templates';
 import {
   SESSION_SOFT_LIMIT,
   cycleLoad,
@@ -14,7 +14,7 @@ import {
 } from '../trainingRules';
 import { fmtKg } from '../analytics';
 import type { ClientItem, Exercise, Program, ProgramDay, ProgramExercise } from '../types';
-import { Sheet, searchKey } from './common';
+import { Confirm, Sheet, searchKey } from './common';
 import { AddExercise } from './Library';
 
 export interface BuilderOptions {
@@ -50,6 +50,9 @@ export function ProgramBuilder({
       : [{ id: 'day-1', name: 'Тренировка A', exercises: [] }],
   );
   const [activeDay, setActiveDay] = useState(0);
+  // Focus of a workout (muscle groups): asking before replacing exercises; the same focus again gives other exercises.
+  const [focusAsk, setFocusAsk] = useState<{ key: string; label: string } | null>(null);
+  const [lastFocus, setLastFocus] = useState<{ dayId: string; key: string; variant: number } | null>(null);
   const [template, setTemplate] = useState<number | null>(null);
   const [count, setCount] = useState<5 | 6>(6);
   const [withAbs, setWithAbs] = useState(true);
@@ -79,6 +82,15 @@ export function ProgramBuilder({
   };
 
   const patchDay = (next: ProgramDay) => setDays((ds) => ds.map((d, i) => (i === activeDay ? next : d)));
+  /** Fills the open workout for the chosen muscle groups; a default or earlier focus name becomes the focus name. */
+  const applyFocus = (f: { key: string; label: string }) => {
+    setFocusAsk(null);
+    const again = lastFocus?.dayId === day.id && lastFocus.key === f.key;
+    const v = again ? lastFocus!.variant + 1 : 0;
+    const generic = !day.name.trim() || /^Тренировка( [A-ZА-Я0-9]+)?$/i.test(day.name.trim()) || DAY_FOCUS.some((x) => x.label === day.name);
+    patchDay({ ...day, name: generic ? f.label : day.name, exercises: focusDay(f.key, v) });
+    setLastFocus({ dayId: day.id, key: f.key, variant: v });
+  };
   const patchExercise = (i: number, patch: Partial<ProgramExercise>) =>
     patchDay({ ...day, exercises: day.exercises.map((e, j) => (j === i ? { ...e, ...patch } : e)) });
   const move = (i: number, dir: -1 | 1) => {
@@ -268,6 +280,30 @@ export function ProgramBuilder({
             </button>
           )}
         </div>
+
+        <div className="field">
+          <span>Тренировка на</span>
+          <div className="chips focus-chips">
+            {DAY_FOCUS.map((f) => (
+              <button
+                key={f.key}
+                className={'filter' + (lastFocus?.dayId === day.id && lastFocus.key === f.key ? ' on' : '')}
+                onClick={() => (day.exercises.length && !(lastFocus?.dayId === day.id && lastFocus.key === f.key) ? setFocusAsk(f) : applyFocus(f))}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          {lastFocus?.dayId === day.id && <small className="muted">Нажмите ещё раз — другие упражнения на те же мышцы. Любое можно заменить или убрать.</small>}
+        </div>
+        {focusAsk && (
+          <Confirm
+            text={`Заменить ${day.exercises.length} упр. в «${day.name}» на тренировку «${focusAsk.label}»?`}
+            confirmLabel="Заменить"
+            onConfirm={() => applyFocus(focusAsk)}
+            onCancel={() => setFocusAsk(null)}
+          />
+        )}
 
         <div className="volume">
           <span className="eyebrow">Объём этой тренировки · мягкий лимит {SESSION_SOFT_LIMIT}</span>

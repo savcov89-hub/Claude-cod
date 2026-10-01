@@ -2891,3 +2891,13 @@ h2 {
   height: 52px;
   font-size: 18px;
 }
+/* Workout focus in the program editor: one row that scrolls sideways */
+.focus-chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.focus-chips .filter {
+  flex: none;
+}
