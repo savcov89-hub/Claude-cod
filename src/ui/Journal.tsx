@@ -105,6 +105,29 @@ export function Journal({
   );
 }
 
+/**
+ * Sets done in a workout opened by mistake, waiting for the workout picked instead (by its trainer/program/day key):
+ * the same exercises get their sets, other done ones come in as added exercises.
+ */
+let carry: { key: string; entries: SessionExercise[] } | null = null;
+const carryKeyOf = (w: { trainerId: string; programId: string; dayId: string }) => w.trainerId + '/' + w.programId + '/' + w.dayId;
+function mergeCarried(planned: SessionExercise[], carried: SessionExercise[]) {
+  const out = planned.map((e) => ({ ...e, sets: [...e.sets] }));
+  for (const c of carried) {
+    const done = c.sets.filter((s) => s.reps > 0);
+    if (!done.length) continue;
+    const target = out.find((e) => e.exerciseId === c.exerciseId);
+    if (target) {
+      const rest = target.sets.slice(done.length).map((s) => ({ ...s, weight: s.weight || done.at(-1)!.weight }));
+      target.sets = [...done, ...rest];
+      if (c.note) target.note = c.note;
+    } else if (c.extra) {
+      out.push({ exerciseId: c.exerciseId, exerciseName: c.exerciseName, extra: { ...c.extra, once: true }, ...(c.note ? { note: c.note } : {}), sets: c.sets });
+    }
+  }
+  return out;
+}
+
 const cacheKeyOf = (w: WorkoutPayload) =>
   'tl-draft:' + (isLocal() ? 'local:' : '') + w.ownerId + ':' + (w.actorRole || 'client') + ':' + w.programId + ':' + w.day.id;
 const legacyKeyOf = (w: WorkoutPayload) =>
@@ -180,10 +203,16 @@ function JournalBody({
     !!initialCache?.pending &&
     (initialCache.baseRevision || null) === (workout.revision || null) &&
     matchesPlan(initialCache.results);
+  // Sets carried over from a workout opened by mistake (only into a workout with nothing done yet).
+  const carried = useMemo(
+    () => (carry && carry.key === carryKeyOf({ trainerId: workout.trainerId, programId: workout.programId, dayId: workout.day.id }) ? carry.entries : null),
+    [workout],
+  );
   const [results, setResults] = useState<SessionExercise[]>(() => {
-    if (cacheUsable) return initialCache!.results;
-    if (matchesPlan(draftOf?.exercises)) return draftOf!.exercises;
-    return workout.day.exercises.map((e, i) => ({
+    const doneIn = (list?: SessionExercise[]) => (list || []).some((e) => e.sets.some((s) => s.reps > 0));
+    const base = cacheUsable ? initialCache!.results : matchesPlan(draftOf?.exercises) ? draftOf!.exercises : null;
+    if (base && !(carried && !doneIn(base))) return base;
+    const fresh = workout.day.exercises.map((e, i) => ({
       exerciseId: e.exerciseId,
       exerciseName: e.exerciseName,
       sets: Array.from({ length: e.sets }, (_, si) => ({
@@ -192,6 +221,7 @@ function JournalBody({
         rir: null,
       })),
     }));
+    return carried ? mergeCarried(fresh, carried) : fresh;
   });
   const [feedback, setFeedback] = useState(() => (cacheUsable ? initialCache!.feedback || '' : draftOf?.feedback || ''));
   const [status, setStatus] = useState<SaveStatus>(draftOf ? 'saved' : 'idle');
@@ -402,9 +432,64 @@ function JournalBody({
     };
   }, [persist]);
 
+  // Carried sets are saved right away, like any entry.
+  useEffect(() => {
+    if (!carried) return;
+    carry = null;
+    if (latest.current.some((e) => e.sets.some((s) => s.reps > 0))) {
+      setLastSetAt(Date.now());
+      schedule();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Another workout of the program instead of this one; with sets done, they move there or are cleared here.
+  const [picking, setPicking] = useState<{ dayId?: string } | null>(null);
+  const [switching, setSwitching] = useState(false);
+  const switchDay = async (dayId: string, move: boolean | null) => {
+    if (!onDayChange) return;
+    if (move === null) {
+      setPicking(null);
+      return onDayChange(dayId);
+    }
+    setSwitching(true);
+    try {
+      if (move)
+        carry = {
+          key: carryKeyOf({ trainerId: workout.trainerId, programId: workout.programId, dayId }),
+          entries: latest.current.map((e, i) => ({
+            ...e,
+            extra: e.extra || { repMin: plan[i].repMin, repMax: plan[i].repMax, targetRir: plan[i].targetRir },
+          })),
+        };
+      // This workout goes back to the plan with nothing done, so it does not stay half-finished.
+      update(
+        latest.current
+          .filter((e) => !e.extra)
+          .map((e) => {
+            const p = plannedOf(e);
+            return { exerciseId: p.exerciseId, exerciseName: p.exerciseName, sets: e.sets.map((s) => ({ ...s, reps: 0, rir: null })) };
+          }),
+      );
+      setFeedback('');
+      feedbackRef.current = '';
+      if (timer.current) clearTimeout(timer.current);
+      await persist().catch((err) => {
+        if (!isNetworkError(err)) throw err;
+      });
+      setPicking(null);
+      onDayChange(dayId);
+    } catch (err) {
+      carry = null;
+      setErrorText(readError(err));
+    } finally {
+      setSwitching(false);
+    }
+  };
+
   const countDone = (list: SessionExercise[]) => list.reduce((n, e) => n + e.sets.filter((s) => s.reps > 0).length, 0);
   const done = countDone(results);
-  const joinNote = addsJoin && results.some((e) => e.extra && e.sets.some((s) => s.reps > 0)) ? ' Добавленные упражнения войдут в программу.' : '';
+  const joinNote = addsJoin && results.some((e) => e.extra && !e.extra.once && e.sets.some((s) => s.reps > 0)) ? ' Добавленные упражнения войдут в программу.' : '';
   // A skipped exercise only counts the sets already done.
   const total = results.reduce((n, e) => n + (e.skipped ? e.sets.filter((s) => s.reps > 0).length : e.sets.length), 0);
   const currentIdx = results.findIndex((e) => !e.skipped && e.sets.some((x) => x.reps === 0));
@@ -667,7 +752,8 @@ function JournalBody({
     const e = latest.current[ei];
     const sets = resizeSets(ei, t.sets);
     if (e.extra) {
-      const { sets: _n, ...extra } = t;
+      const { sets: _n, ...targets } = t;
+      const extra = { ...targets, ...(e.extra.once ? { once: true } : {}) };
       update(latest.current.map((x, i) => (i === ei ? { ...x, sets, extra } : x)));
       setTargetsFor(null);
       return;
@@ -769,17 +855,12 @@ function JournalBody({
         )}
         <div className="j-title">
           {days.length > 1 && onDayChange ? (
-            <label className="day-select">
-              <select aria-label="Тренировка" value={workout.day.id} onChange={(e) => onDayChange(e.target.value)}>
-                {days.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                    {d.id === workout.nextDayId ? ' · по плану' : ''}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={15} />
-            </label>
+            <button className="day-switch" onClick={() => setPicking({})} aria-label={'Тренировка: ' + workout.day.name + '. Сменить'}>
+              <strong>{workout.day.name}</strong>
+              <span className="day-switch-btn">
+                сменить <ChevronDown size={14} />
+              </span>
+            </button>
           ) : (
             <strong>{workout.day.name}</strong>
           )}
@@ -903,7 +984,7 @@ function JournalBody({
                   <span className="ex-plan">
                     {e.sets}×{e.repMin}–{e.repMax} · RIR {e.targetRir}
                     {e.previousAt ? ' · прошл. ' + fmtDate(e.previousAt) : ''}
-                    {r.extra && !isFree ? (addsJoin ? ' · войдёт в программу' : ' · добавлено сегодня') : ''}
+                    {r.extra && !isFree ? (r.extra.once ? ' · перенесено' : addsJoin ? ' · войдёт в программу' : ' · добавлено сегодня') : ''}
                   </span>
                   {original && (
                     <span className="ex-swapped">
@@ -1165,6 +1246,44 @@ function JournalBody({
           onSubmit={(t) => void applyTargets(targetsFor, t)}
           onBack={() => setTargetsFor(null)}
         />
+      )}
+      {picking && (
+        <Sheet title={picking.dayId ? 'Подходы уже отмечены' : 'Сменить тренировку'} onClose={() => !switching && setPicking(null)}>
+          {!picking.dayId ? (
+            <div className="ex-menu">
+              {days.map((d) => (
+                <button
+                  key={d.id}
+                  className={'menu-item' + (d.id === workout.day.id ? ' on' : '')}
+                  disabled={d.id === workout.day.id}
+                  onClick={() => (done > 0 ? setPicking({ dayId: d.id }) : void switchDay(d.id, null))}
+                >
+                  <span className="grow">
+                    {d.name}
+                    <small>{d.id === workout.day.id ? 'открыта сейчас' : d.id === workout.nextDayId ? 'по плану' : ''}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <>
+              <p className="muted small">
+                В «{workout.day.name}» отмечено подходов: {done}. Тренировка «{days.find((d) => d.id === picking.dayId)?.name}» откроется вместо неё —
+                в историю ничего не запишется.
+              </p>
+              <div className="order-actions">
+                <button className="btn btn-primary btn-block" disabled={switching} onClick={() => void switchDay(picking.dayId!, true)}>
+                  {switching ? 'Переносим…' : 'Перенести подходы'}
+                </button>
+                <p className="muted small center-text">Те же упражнения получат свои подходы, остальные сделанные добавятся в тренировку.</p>
+                <button className="btn btn-block" disabled={switching} onClick={() => void switchDay(picking.dayId!, false)}>
+                  Начать с нуля
+                </button>
+                <p className="muted small center-text">Отмеченные здесь подходы сотрутся.</p>
+              </div>
+            </>
+          )}
+        </Sheet>
       )}
       {swapChoice && (
         <Sheet title={'Замена: ' + swapChoice.ex.name} onClose={() => setSwapChoice(null)}>

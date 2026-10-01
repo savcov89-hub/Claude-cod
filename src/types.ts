@@ -78,7 +78,7 @@ export interface SessionExercise {
   /** Left out of this workout only; done sets still count. */
   skipped?: boolean;
   /** Added in the gym for this workout only, with its own targets (sets = sets.length). */
-  extra?: { repMin: number; repMax: number; targetRir: number };
+  extra?: { repMin: number; repMax: number; targetRir: number; once?: boolean };
   /** Short comment on this exercise in this workout. */
   note?: string;
   sets: SetEntry[];

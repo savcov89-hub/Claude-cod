@@ -61,6 +61,12 @@ export const db: Db = {
       return true;
     });
   },
+  async remove(name: string, ids: string[]) {
+    const t = tables.get(name);
+    if (!t) return;
+    tables.set(name, t.filter((r) => !ids.includes(r.id)));
+    dirty.add(name);
+  },
 };
 
 // The demo has no real sign-in: an account is just a new id (one per email).

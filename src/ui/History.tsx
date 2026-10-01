@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { weightUnit } from '../analytics';
 import { safeStorage } from '../transport';
 import { exerciseRules, groupMuscles } from '../trainingRules';
 import type { Exercise, Program, Session, SetEntry } from '../types';
-import { Empty, fmtDate, fmtDateTime, fmtSets } from './common';
+import { Confirm, Empty, fmtDate, fmtDateTime, fmtSets } from './common';
 
 type View = 'sessions' | 'muscles';
 
@@ -39,8 +40,11 @@ export function HistoryList({
   sessions,
   programs = [],
   exercises = [],
+  onDelete,
 }: {
   sessions: Session[];
+  /** Trainer: removes a workout recorded by mistake. */
+  onDelete?: (sessionId: string) => Promise<void>;
   /** Programs and the exercise base tell the muscles of own exercises, which sessions do not carry. */
   programs?: Program[];
   exercises?: Exercise[];
@@ -66,7 +70,7 @@ export function HistoryList({
         ))}
       </div>
       {view === 'sessions' ? (
-        <SessionList sessions={sessions} />
+        <SessionList sessions={sessions} onDelete={onDelete} />
       ) : (
         <MuscleHistory sessions={sessions} programs={programs} exercises={exercises} />
       )}
@@ -74,7 +78,10 @@ export function HistoryList({
   );
 }
 
-function SessionList({ sessions }: { sessions: Session[] }) {
+function SessionList({ sessions, onDelete }: { sessions: Session[]; onDelete?: (sessionId: string) => Promise<void> }) {
+  const [asking, setAsking] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
   return (
     <>
       {sessions.map((s) => (
@@ -85,7 +92,35 @@ function SessionList({ sessions }: { sessions: Session[] }) {
               <span className="muted small">{s.programName}</span>
             </div>
             <time className="muted small">{fmtDateTime(s.completedAt)}</time>
+            {onDelete && (
+              <button className="icon-btn sm" aria-label={'Удалить тренировку ' + fmtDateTime(s.completedAt)} onClick={() => setAsking(s.id)}>
+                <Trash2 size={15} />
+              </button>
+            )}
           </header>
+          {asking === s.id && onDelete && (
+            <>
+              <Confirm
+                text="Удалить эту тренировку? Она пропадёт из истории, прогресса и счётчика тренировок. Подсказки веса возьмутся из предыдущей."
+                confirmLabel="Удалить"
+                busy={busy}
+                onConfirm={async () => {
+                  setBusy(true);
+                  try {
+                    await onDelete(s.id);
+                    setAsking(null);
+                    setErr('');
+                  } catch (e: any) {
+                    setErr(e?.response?.data?.error || e?.message || 'Не удалось удалить.');
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                onCancel={() => setAsking(null)}
+              />
+              {err && <div className="alert">{err}</div>}
+            </>
+          )}
           {s.recordedByRole && (
             <p className="muted small">
               Записал {s.recordedByRole === 'trainer' ? 'тренер' : 'клиент'}

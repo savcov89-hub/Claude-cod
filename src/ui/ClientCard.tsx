@@ -170,7 +170,16 @@ export function ClientCard({
               </button>
             </div>
           )}
-          {loading ? <div className="loader-block"><span className="loader" /></div> : <HistoryList sessions={sessions} programs={data.programs.filter((p) => p.clientId === clientId)} exercises={data.exercises} />}
+          {loading ? <div className="loader-block"><span className="loader" /></div> : <HistoryList
+              sessions={sessions}
+              programs={data.programs.filter((p) => p.clientId === clientId)}
+              exercises={data.exercises}
+              onDelete={async (sessionId) => {
+                await api.post('/api/client/' + encodeURIComponent(clientId) + '/sessions/' + encodeURIComponent(sessionId) + '/delete', {});
+                await loadHistory();
+                await data.reload();
+              }}
+            />}
         </>
       )}
       {tab === 'body' && <BodyView clientId={clientId} />}

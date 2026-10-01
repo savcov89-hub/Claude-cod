@@ -53,6 +53,10 @@ export function supabaseDb(sb: SupabaseClient): Db {
         }),
       );
     },
+    async remove(table: string, ids: string[]) {
+      if (!ids.length) return;
+      check('remove', await sb.from(ROWS).delete().eq('tbl', table).in('id', ids));
+    },
   };
 }
 

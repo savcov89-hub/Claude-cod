@@ -13,6 +13,7 @@ export interface Db {
   get<T>(table: string, ids: string[]): Promise<Array<T | null | undefined>>;
   add<T>(table: string, records: T[]): Promise<Array<string | null | undefined>>;
   update<T>(table: string, rows: Array<{ id: string; record: T }>): Promise<boolean[]>;
+  remove(table: string, ids: string[]): Promise<void>;
 }
 export interface Ctx {
   user?: { userId: string; name?: string; email?: string } | null;
@@ -166,6 +167,8 @@ interface ExtraPlan {
   repMin: number;
   repMax: number;
   targetRir: number;
+  /** Came over from another workout opened by mistake: for this workout only, never joins the program. */
+  once?: boolean;
 }
 interface SessionRecord {
   recordedByRole?: Role;
@@ -256,7 +259,7 @@ const cleanExtra = (x: any): ExtraPlan | null => {
   const repMax = Math.round(Number(x?.repMax));
   const targetRir = Math.round(Number(x?.targetRir));
   if (!(repMin >= 1 && repMax >= repMin && repMax <= 100 && targetRir >= 0 && targetRir <= 6)) return null;
-  return { repMin, repMax, targetRir };
+  return { repMin, repMax, targetRir, ...(x?.once === true ? { once: true } : {}) };
 };
 const randomId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -842,6 +845,52 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           .filter((s) => s.trainerId === ctx.user!.userId)
           .sort((a, b) => b.completedAt.localeCompare(a.completedAt));
         return json({ sessions });
+      },
+    ],
+
+    /**
+     * A workout recorded by mistake (e.g. the wrong day): gone from history and statistics. The last results
+     * behind the weight hints come from the workout before it; the program's next day goes back if it was the latest.
+     */
+    'POST /api/client/:clientId/sessions/:sessionId/delete': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        if (!(await trainerOnly(ctx))) return error('Доступ только для тренера.', 403);
+        const trainerId = ctx.user!.userId;
+        const { clientId, sessionId } = ctx.params;
+        if (!(await findClient(trainerId, clientId))) return error('Этот клиент не подключён к вам.', 403);
+        const table = sessionsTable(clientId);
+        const [session] = await db.get<SessionRecord>(table, [sessionId]);
+        if (!session || session.trainerId !== trainerId) return error('Тренировка не найдена.', 404);
+        await db.remove(table, [sessionId]);
+        const rest = (await listAll<SessionRecord>(table, 400)).sort((a, b) => b.completedAt.localeCompare(a.completedAt));
+        for (const e of session.exercises) {
+          const resultT = lastResultTable(clientId, e.exerciseId);
+          let prev: SessionExercise | undefined;
+          const before = rest.find((s) => (prev = s.exercises.find((x) => x.exerciseId === e.exerciseId)));
+          if (before && prev)
+            await upsertSingle(resultT, { sets: prev.sets, completedAt: before.completedAt, ...(prev.note ? { note: prev.note } : {}) });
+          else {
+            const rows = (await db.list(resultT, { limit: 10 })).items;
+            if (rows.length) await db.remove(resultT, rows.map((r) => r.id));
+          }
+        }
+        const mine = rest.filter((s) => s.trainerId === trainerId);
+        const client = await findClient(trainerId, clientId);
+        await refreshInsights(trainerId, clientId, {
+          latestSessionId: mine[0]?.id,
+          latestCompletedAt: mine[0]?.completedAt,
+          ...(client?.latestSessionId === sessionId ? { needsReview: false } : {}),
+        });
+        const [program] = await db.get<ProgramRecord>(programsTable(trainerId), [session.programId]);
+        if (program && program.lastCompletedAt === session.completedAt && program.days.some((d) => d.id === session.dayId)) {
+          const { id: _drop, ...record } = program as ProgramRecord & { id?: string };
+          const last = mine.find((s) => s.programId === session.programId);
+          await db.update(programsTable(trainerId), [
+            { id: session.programId, record: { ...record, nextDayId: session.dayId, lastCompletedAt: last?.completedAt } },
+          ]);
+        }
+        return json({ deleted: true });
       },
     ],
 
@@ -1473,7 +1522,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const nextDayId = program.days[(idx + 1) % program.days.length].id;
         // Exercises the trainer added in the gym and did join the program day, each after the planned
         // exercise it followed in the journal; the planned ones keep their order.
-        const joined = program.free || access.role !== 'trainer' ? [] : matched.filter((e) => e.extra && performed.some((p) => p.exerciseId === e.exerciseId));
+        const joined = program.free || access.role !== 'trainer' ? [] : matched.filter((e) => e.extra && !e.extra.once && performed.some((p) => p.exerciseId === e.exerciseId));
         let days = program.days;
         if (joined.length && day.exercises.length + joined.length <= 30) {
           const findKnown = knownExercises(trainerId);
@@ -1504,7 +1553,14 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
                 ? {
                     lastFree: matched
                       .filter((e) => e.extra)
-                      .map((e) => ({ exerciseId: e.exerciseId, exerciseName: e.exerciseName, sets: e.sets.length, ...e.extra! })),
+                      .map((e) => ({
+                        exerciseId: e.exerciseId,
+                        exerciseName: e.exerciseName,
+                        sets: e.sets.length,
+                        repMin: e.extra!.repMin,
+                        repMax: e.extra!.repMax,
+                        targetRir: e.extra!.targetRir,
+                      })),
                   }
                 : {}),
             },
