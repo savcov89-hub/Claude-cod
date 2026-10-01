@@ -17,7 +17,7 @@ interface Look {
   beard?: 'full' | 'braided' | 'mustache' | 'goatee' | 'stubble' | 'viking';
   beardColor?: string;
   glasses?: 'round' | 'square' | 'sun';
-  hat?: 'bandana' | 'beanie' | 'cap' | 'helmet' | 'headband';
+  hat?: 'bandana' | 'beanie' | 'cap' | 'helmet' | 'headband' | 'tricorn';
   hatColor?: string;
   patch?: boolean;
   earring?: boolean;
@@ -221,12 +221,23 @@ function Face({ look }: { look: Look }) {
         <rect x="30.8" y="23" width="2.4" height="11" rx="1" fill="#7c858f" />
       </g>,
     );
+  if (look.hat === 'tricorn')
+    parts.push(
+      <g key="h">
+        <path d="M19.5 23 C19 9 45 9 44.5 23 Z" fill="#2b2118" />
+        <path d="M6 23.5 C11 13 20 17.5 32 9.5 C44 17.5 53 13 58 23.5 C51 20.5 41 21.5 32 26.5 C23 21.5 13 20.5 6 23.5 Z" fill="#3a2a1e" stroke="#d9a441" strokeWidth="1.1" strokeLinejoin="round" />
+        <circle cx="32" cy="17.5" r="2.6" fill="#f4efe6" />
+        <circle cx="31" cy="17.2" r="0.6" fill="#2b2118" />
+        <circle cx="33" cy="17.2" r="0.6" fill="#2b2118" />
+        <path d="M29.6 21 L34.4 23.6 M34.4 21 L29.6 23.6" stroke="#f4efe6" strokeWidth="0.9" strokeLinecap="round" />
+      </g>,
+    );
   if (look.hat === 'headband') parts.push(<rect key="h" x="19" y="20.5" width="26" height="4.2" rx="2" fill={hc} />);
   return <>{parts}</>;
 }
 
 export const AVATARS: Array<{ id: string; label: string; look: Look }> = [
-  { id: 'pirate', label: 'Пират', look: { bg: '#cfe3f3', skin: SKIN.tan, shirt: '#2f3b4c', hair: HAIR.black, beard: 'braided', hat: 'bandana', patch: true, earring: true } },
+  { id: 'pirate', label: 'Пират', look: { bg: '#cfe3f3', skin: SKIN.tan, shirt: '#2f3b4c', hair: HAIR.black, beard: 'braided', hat: 'tricorn', patch: true, earring: true } },
   { id: 'bald-beard', label: 'Лысый, русая борода', look: { bg: '#e8dccb', skin: SKIN.fair, shirt: '#3d5a40', hair: HAIR.brown, beard: 'full', smile: true } },
   { id: 'blonde', label: 'Блондинка', look: { bg: '#f6dbe3', skin: SKIN.light, shirt: '#c2577a', hair: HAIR.blonde, back: 'long', top: 'side', smile: true, lashes: true } },
   { id: 'brunette', label: 'Брюнетка', look: { bg: '#e7dff3', skin: SKIN.fair, shirt: '#5a4a8a', hair: HAIR.black, back: 'long', top: 'bangs', lashes: true } },

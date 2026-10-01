@@ -715,8 +715,8 @@ table {
 }
 .avatar {
   flex: none;
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   border-radius: 50%;
@@ -2101,9 +2101,9 @@ h2 {
   padding: 6px 8px 6px 6px;
 }
 .avatar {
-  width: 32px;
-  height: 32px;
-  font-size: 13px;
+  width: 40px;
+  height: 40px;
+  font-size: 14px;
 }
 .program,
 .session {
@@ -2869,7 +2869,13 @@ h2 {
   border-color: var(--ink);
 }
 .avatar-letter {
-  width: 56px;
-  height: 56px;
+  width: 60px;
+  height: 60px;
   font-size: 22px;
+}
+/* The client card shows the avatar larger */
+.card-head .avatar {
+  width: 52px;
+  height: 52px;
+  font-size: 18px;
 }

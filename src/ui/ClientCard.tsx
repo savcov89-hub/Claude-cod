@@ -150,7 +150,7 @@ export function ClientCard({
                 aria-label={a.label}
                 onClick={() => void chooseAvatar(a.id)}
               >
-                <AvatarArt id={a.id} size={56} />
+                <AvatarArt id={a.id} size={60} />
               </button>
             ))}
           </div>
