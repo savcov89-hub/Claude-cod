@@ -13,14 +13,18 @@ interface Look {
   /** Hair behind the head (long, bob, afro…). */
   back?: 'long' | 'bob' | 'afro' | 'longMale' | 'pigtails';
   /** Hair on top. */
-  top?: 'short' | 'receding' | 'bangs' | 'side' | 'curly' | 'bun' | 'spiky' | 'asym' | 'pixie';
+  top?: 'short' | 'receding' | 'bangs' | 'side' | 'curly' | 'bun' | 'spiky' | 'asym' | 'pixie' | 'sweep';
   beard?: 'full' | 'braided' | 'mustache' | 'goatee' | 'stubble' | 'viking';
   beardColor?: string;
-  glasses?: 'round' | 'square' | 'sun';
+  glasses?: 'round' | 'square' | 'sun' | 'rimless';
   hat?: 'bandana' | 'beanie' | 'cap' | 'helmet' | 'headband' | 'tricorn';
   hatColor?: string;
   patch?: boolean;
-  earring?: boolean;
+  earring?: boolean | 'stud';
+  /** A wide smile showing teeth. */
+  teeth?: boolean;
+  /** Neckline trim of the top. */
+  collar?: string;
   smile?: boolean;
   lashes?: boolean;
   /** Coloured lips. */
@@ -46,6 +50,7 @@ function Face({ look }: { look: Look }) {
     );
   parts.push(<path key="body" d="M10 64 C10 52 20 48 32 48 C44 48 54 52 54 64 Z" fill={look.shirt} />);
   parts.push(<rect key="neck" x="27.5" y="40" width="9" height="10" rx="3" fill={skin} />);
+  if (look.collar) parts.push(<path key="col" d="M25.5 49.2 C28 52.5 36 52.5 38.5 49.2" stroke={look.collar} strokeWidth="1.6" fill="none" strokeLinecap="round" />);
   // Ears, head.
   parts.push(<circle key="el" cx="19.5" cy="31" r="3" fill={skin} />, <circle key="er" cx="44.5" cy="31" r="3" fill={skin} />);
   parts.push(<ellipse key="head" cx="32" cy="30" rx="12.5" ry="14.5" fill={skin} />);
@@ -92,6 +97,14 @@ function Face({ look }: { look: Look }) {
   if (top === 'asym')
     parts.push(
       <path key="t" d="M19.5 29 C18 10 47 9 46.8 30 L47 41.5 C45 41.5 43.6 39.5 43.6 36 C43 27 37 22.5 30 22 C25.5 22.5 22 25 19.5 29 Z" fill={hair} />,
+    );
+  // Short with volume on top and a long fringe swept across the forehead to one side.
+  if (top === 'sweep')
+    parts.push(
+      <g key="t" fill={hair}>
+        <path d="M18.6 31 C15.5 8 48.5 8 46.2 31 C45.8 34 44.4 36.4 42.8 37.2 C43.2 33 42.6 30.4 41.4 29.2 C35 28.4 27.4 25.2 22.4 23.2 C20.8 25.4 19.4 28 18.6 31 Z" />
+        <path d="M19 30 C18.4 33 18.8 35.5 20.2 37 C20.6 34.5 20.8 32 21.4 29.8 Z" />
+      </g>,
     );
   // Pixie: short, soft, a side fringe.
   if (top === 'pixie')
@@ -144,7 +157,14 @@ function Face({ look }: { look: Look }) {
   if (b === 'goatee') parts.push(<path key="b" d="M28 40 C28 46 36 46 36 40 C34 41.5 30 41.5 28 40 Z" fill={beard} />);
   if (b === 'stubble') parts.push(<path key="b" d="M20 33 C20.5 45 26 48 32 48 C38 48 43.5 45 44 33 C42 39 38 41 32 41 C26 41 22 39 20 33 Z" fill={beard} opacity="0.35" />);
   // Mouth, then mustache over it.
-  parts.push(
+  if (look.teeth)
+    parts.push(
+      <g key="m">
+        <path d="M27.6 37.4 Q32 42.6 36.4 37.4 Z" fill="#fff" stroke={look.lips ? '#a8344f' : '#7a3b2e'} strokeWidth="0.9" strokeLinejoin="round" />
+        <path d="M28.6 38.2 H35.4" stroke="rgba(0,0,0,0.12)" strokeWidth="0.5" />
+      </g>,
+    );
+  else parts.push(
     look.smile ? (
       <path key="m" d="M28.3 38.2 Q32 41.6 35.7 38.2" stroke={look.lips ? '#c0395b' : '#7a3b2e'} strokeWidth={look.lips ? 1.9 : 1.4} fill="none" strokeLinecap="round" />
     ) : (
@@ -166,6 +186,14 @@ function Face({ look }: { look: Look }) {
       </g>,
     );
   }
+  if (look.glasses === 'rimless')
+    parts.push(
+      <g key="gl" stroke="#c3ced6" strokeWidth="0.55" fill="rgba(235,245,250,0.12)">
+        <path d="M22.4 28.2 H31.2 C31.2 32.6 29.8 33.6 26.8 33.6 C23.8 33.6 22.4 32.6 22.4 28.2 Z" />
+        <path d="M32.8 28.2 H41.6 C41.6 32.6 40.2 33.6 37.2 33.6 C34.2 33.6 32.8 32.6 32.8 28.2 Z" />
+        <path d="M31.2 29 Q32 28.4 32.8 29 M22.4 28.6 L19.8 29.2 M41.6 28.6 L44.2 29.2" fill="none" />
+      </g>,
+    );
   if (look.glasses === 'sun')
     parts.push(
       <g key="gl" fill="#1d1d1f">
@@ -181,7 +209,14 @@ function Face({ look }: { look: Look }) {
         <ellipse cx="37" cy="30.8" rx="3.6" ry="3.2" fill="#1d1d1f" />
       </g>,
     );
-  if (look.earring) parts.push(<circle key="ea" cx="19" cy="35.5" r="1.8" fill="none" stroke="#d9a441" strokeWidth="1.1" />);
+  if (look.earring === 'stud')
+    parts.push(
+      <g key="ea" fill="#1d1d1f">
+        <circle cx="19.2" cy="34.6" r="1" />
+        <circle cx="44.8" cy="34.6" r="1" />
+      </g>,
+    );
+  else if (look.earring) parts.push(<circle key="ea" cx="19" cy="35.5" r="1.8" fill="none" stroke="#d9a441" strokeWidth="1.1" />);
   // Headwear.
   const hc = look.hatColor || '#c0392b';
   if (look.hat === 'bandana')
@@ -266,6 +301,7 @@ export const AVATARS: Array<{ id: string; label: string; look: Look }> = [
   { id: 'short-dark', label: 'Короткая, тёмная', look: { bg: '#e8e0f0', skin: SKIN.fair, shirt: '#355070', hair: HAIR.black, top: 'pixie', smile: true, lashes: true, earring: true, lips: true } },
   { id: 'asym-glasses-dark', label: 'Асимметрия и очки, тёмная', look: { bg: '#dfe7ee', skin: SKIN.fair, shirt: '#22333b', hair: HAIR.black, top: 'asym', glasses: 'round', lashes: true, earring: true, lips: true } },
   { id: 'asym-glasses-light', label: 'Асимметрия и очки, светлая', look: { bg: '#f6e6ee', skin: SKIN.light, shirt: '#9a8c98', hair: HAIR.blonde, top: 'asym', glasses: 'square', smile: true, lashes: true, earring: true, lips: true } },
+  { id: 'sweep-glasses', label: 'Короткая с чёлкой набок, очки без оправы', look: { bg: '#dfe9d0', skin: SKIN.tan, shirt: '#1d1d1f', collar: '#8a9aa6', hair: HAIR.black, top: 'sweep', glasses: 'rimless', earring: 'stud', teeth: true, lips: true, lashes: true } },
   { id: 'spiky', label: 'Ёжик', look: { bg: '#fff1c9', skin: SKIN.fair, shirt: '#0096c7', hair: HAIR.blonde, top: 'spiky', smile: true } },
 ];
 
