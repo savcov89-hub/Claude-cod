@@ -11,9 +11,9 @@ interface Look {
   shirt: string;
   hair?: string;
   /** Hair behind the head (long, bob, afro…). */
-  back?: 'long' | 'bob' | 'afro' | 'longMale' | 'pigtails' | 'shaggy';
+  back?: 'long' | 'bob' | 'afro' | 'longMale' | 'pigtails' | 'shaggy' | 'curls';
   /** Hair on top. */
-  top?: 'short' | 'receding' | 'bangs' | 'side' | 'curly' | 'bun' | 'spiky' | 'asym' | 'pixie' | 'sweep' | 'buzz';
+  top?: 'short' | 'receding' | 'bangs' | 'side' | 'curly' | 'bun' | 'spiky' | 'asym' | 'pixie' | 'sweep' | 'buzz' | 'curlFringe';
   beard?: 'full' | 'braided' | 'mustache' | 'goatee' | 'stubble' | 'viking';
   beardColor?: string;
   glasses?: 'round' | 'square' | 'sun' | 'rimless';
@@ -50,6 +50,24 @@ function Face({ look }: { look: Look }) {
   if (look.back === 'afro') parts.push(<circle key="afro" cx="32" cy="25" r="20" fill={hair} />);
   if (look.back === 'long') parts.push(<path key="long" d="M15 30 C13 10 51 10 49 30 L51 54 L13 54 Z" fill={hair} />);
   if (look.back === 'longMale') parts.push(<path key="lm" d="M17 28 C16 12 48 12 47 28 L48 48 L16 48 Z" fill={hair} />);
+  // A big rounded mass of separate curls (afro-like volume, loose ringlets).
+  if (look.back === 'curls') {
+    const ring: Array<[number, number, number]> = [];
+    for (let i = 0; i < 16; i++) {
+      const a = Math.PI * (0.92 + (i / 15) * 1.16);
+      ring.push([32 + Math.cos(a) * 16.5, 26 + Math.sin(a) * 15, 5.2 + (i % 3) * 0.5]);
+    }
+    parts.push(
+      <g key="curls" fill={hair} stroke="rgba(0,0,0,0.18)" strokeWidth="0.6">
+        <ellipse cx="32" cy="25" rx="17" ry="15" stroke="none" />
+        {ring.map(([x, y, r], i) => (
+          <circle key={i} cx={x.toFixed(1)} cy={y.toFixed(1)} r={r} />
+        ))}
+        <circle cx="16.5" cy="35" r="4.6" />
+        <circle cx="47.5" cy="35" r="4.6" />
+      </g>,
+    );
+  }
   // Wild hair sticking out at the sides under a hat.
   if (look.back === 'shaggy')
     parts.push(
@@ -115,6 +133,25 @@ function Face({ look }: { look: Look }) {
   if (top === 'asym')
     parts.push(
       <path key="t" d="M19.5 29 C18 10 47 9 46.8 30 L47 41.5 C45 41.5 43.6 39.5 43.6 36 C43 27 37 22.5 30 22 C25.5 22.5 22 25 19.5 29 Z" fill={hair} />,
+    );
+  // Curls falling over the forehead.
+  if (top === 'curlFringe')
+    parts.push(
+      <g key="t" fill={hair} stroke="rgba(0,0,0,0.18)" strokeWidth="0.6">
+        <path d="M19.5 28 C19 15 45 15 44.5 28 C40 21 24 21 19.5 28 Z" stroke="none" />
+        {[
+          [21.5, 22.5, 3.6],
+          [25.5, 20.5, 3.8],
+          [30, 19.8, 3.9],
+          [34.5, 19.8, 3.9],
+          [39, 20.5, 3.8],
+          [42.8, 22.8, 3.5],
+          [27.5, 23.4, 2.8],
+          [36.8, 23.4, 2.8],
+        ].map(([x, y, r]) => (
+          <circle key={x + '-' + y} cx={x} cy={y} r={r} />
+        ))}
+      </g>,
     );
   // Buzz cut with a high receding hairline and a small tuft in the middle.
   if (top === 'buzz')
@@ -369,6 +406,7 @@ export const AVATARS: Array<{ id: string; label: string; look: Look }> = [
   { id: 'sporty', label: 'С повязкой', look: { bg: '#fde2e4', skin: SKIN.brown, shirt: '#d62828', hair: HAIR.black, back: 'pigtails', top: 'short', hat: 'headband', hatColor: '#ffb703', smile: true, lashes: true } },
   { id: 'bob-glasses', label: 'Каре и очки', look: { bg: '#eae4f6', skin: SKIN.light, shirt: '#6d597a', hair: HAIR.black, back: 'bob', top: 'bangs', glasses: 'square', lashes: true } },
   { id: 'mustache', label: 'С усами', look: { bg: '#f1e3d3', skin: SKIN.tan, shirt: '#9c6644', hair: HAIR.black, top: 'short', beard: 'mustache', smile: true } },
+  { id: 'curly-afro', label: 'Пышные кудри, тёмно-русый', look: { bg: '#e4efe9', skin: SKIN.light, shirt: '#2a9d8f', hair: '#6e5236', back: 'curls', top: 'curlFringe', smile: true } },
   { id: 'curly', label: 'Кудрявый', look: { bg: '#e0efe0', skin: SKIN.fair, shirt: '#588157', hair: HAIR.brown, top: 'curly', smile: true } },
   { id: 'rocker', label: 'Рокер', look: { bg: '#e4e4e4', skin: SKIN.light, shirt: '#111111', hair: HAIR.blonde, back: 'longMale', top: 'side', glasses: 'sun', beard: 'goatee', beardColor: '#b89443' } },
   { id: 'bald-black', label: 'Лысый, чёрная борода', look: { bg: '#dcdcdc', skin: SKIN.tan, shirt: '#1d3557', hair: HAIR.black, beard: 'full' } },
