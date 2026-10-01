@@ -144,10 +144,10 @@ export function ClientCard({
         {(
           [
             ['overview', 'Обзор'],
-            ['progress', 'Прогресс'],
-            ['history', 'История'],
-            ['body', 'Замеры'],
             ['programs', 'Программы'],
+            ['body', 'Замеры'],
+            ['history', 'История'],
+            ['progress', 'Прогресс'],
           ] as [Tab, string][]
         ).map(([k, label]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
