@@ -347,3 +347,74 @@ export function recentMuscleSets(
 
 export const daysSince = (iso?: string | null, nowMs = Date.now()) =>
   iso ? Math.floor((nowMs - new Date(iso).getTime()) / 86400000) : null;
+
+/** A personal record set in a workout: its best set against the best before it. */
+export interface PersonalRecord {
+  exerciseId: string;
+  exerciseName: string;
+  equipment?: string;
+  best: SetLike;
+  previous: SetLike;
+  /** Growth of the estimated max, %. */
+  pct: number;
+}
+const bestOf = (sets: SetLike[]) => sets.filter((s) => s.reps > 0).reduce<SetLike | null>((a, b) => (!a || e1rm(b) > e1rm(a) ? b : a), null);
+
+/**
+ * Exercises of `current` whose best set beats every earlier workout (estimated max, RIR counted; bodyweight by reps).
+ * An exercise done for the first time is not a record yet. Tiny differences (under 0.5 %) do not count.
+ */
+export function sessionRecords(
+  earlier: SessionLike[],
+  current: { exercises: Array<{ exerciseId: string; exerciseName: string; sets: SetLike[]; equipment?: string }> },
+): PersonalRecord[] {
+  const out: PersonalRecord[] = [];
+  for (const e of current.exercises) {
+    const best = bestOf(e.sets);
+    if (!best) continue;
+    let previous: SetLike | null = null;
+    for (const s of earlier)
+      for (const x of s.exercises)
+        if (x.exerciseId === e.exerciseId) {
+          const b = bestOf(x.sets);
+          if (b && (!previous || e1rm(b) > e1rm(previous))) previous = b;
+        }
+    if (!previous) continue;
+    const before = e1rm(previous);
+    const now = e1rm(best);
+    if (now <= before * 1.005) continue;
+    out.push({
+      exerciseId: e.exerciseId,
+      exerciseName: e.exerciseName,
+      ...(e.equipment ? { equipment: e.equipment } : {}),
+      best: { weight: best.weight, reps: best.reps, rir: best.rir ?? null },
+      previous: { weight: previous.weight, reps: previous.reps, rir: previous.rir ?? null },
+      pct: Math.round(((now - before) / before) * 1000) / 10,
+    });
+  }
+  return out.sort((a, b) => b.pct - a.pct);
+}
+
+/** Best result of every exercise ever done: the set with the highest estimated max, its date and growth since the first time. */
+export function personalBests(sessions: SessionLike[]) {
+  const map = new Map<string, { exerciseId: string; exerciseName: string; best: SetLike; date: string; first: number; count: number }>();
+  const sorted = [...sessions].sort((a, b) => a.completedAt.localeCompare(b.completedAt));
+  for (const s of sorted)
+    for (const e of s.exercises) {
+      const b = bestOf(e.sets);
+      if (!b) continue;
+      const cur = map.get(e.exerciseId);
+      if (!cur) map.set(e.exerciseId, { exerciseId: e.exerciseId, exerciseName: e.exerciseName, best: b, date: s.completedAt, first: e1rm(b), count: 1 });
+      else {
+        cur.count += 1;
+        cur.exerciseName = e.exerciseName;
+        if (e1rm(b) > e1rm(cur.best)) {
+          cur.best = b;
+          cur.date = s.completedAt;
+        }
+      }
+    }
+  return [...map.values()]
+    .map((x) => ({ ...x, growthPct: x.first > 0 ? Math.round(((e1rm(x.best) - x.first) / x.first) * 1000) / 10 : 0 }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+}

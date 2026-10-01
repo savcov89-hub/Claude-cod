@@ -3,6 +3,7 @@ import { allTrends, fmtKg, recentMuscleSets, type ExerciseTrend } from '../analy
 import { muscleNames, muscleResolver } from '../trainingRules';
 import type { Exercise, Program, Session } from '../types';
 import { Empty, Sparkline, TrendChip, fmtDate, fmtSets, plural } from './common';
+import { PersonalBests } from './Records';
 
 const order: Record<string, number> = { down: 0, stall: 1, pr: 2, up: 3, flat: 4, new: 5 };
 
@@ -55,6 +56,8 @@ export function ProgressView({
           <strong className="num tone-bad">{count('down')}</strong>
         </div>
       </div>
+
+      <PersonalBests sessions={sessions} />
 
       {Object.keys(muscles).length > 0 && (
         <section className="block">

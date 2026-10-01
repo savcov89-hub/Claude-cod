@@ -9,6 +9,8 @@ import { ProgressView } from './Progress';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
 import { Avatar, Empty, VisitGrid, fmtDate } from './common';
+import { RecordsSheet } from './Records';
+import type { PersonalRecord } from '../analytics';
 
 type Tab = 'workout' | 'progress' | 'history' | 'body';
 
@@ -23,6 +25,7 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
   const [tab, setTab] = useState<Tab>('workout');
   const [journal, setJournal] = useState<{ program: Program; dayId: string } | null>(null);
   const [justDone, setJustDone] = useState(false);
+  const [newRecords, setNewRecords] = useState<PersonalRecord[] | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -79,9 +82,10 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
             source={{ trainerId: journal.program.trainerId, programId: journal.program.id, dayId: journal.dayId }}
             onBack={() => setJournal(null)}
             onDayChange={(dayId) => setJournal({ ...journal, dayId })}
-            onCompleted={async () => {
+            onCompleted={async ({ records }) => {
               setJournal(null);
               setJustDone(true);
+              if (records?.length) setNewRecords(records);
               await load();
             }}
           />
@@ -94,6 +98,7 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
   return (
     <div className="app">
       {header}
+      {newRecords && <RecordsSheet records={newRecords} onClose={() => setNewRecords(null)} />}
       <main className="main narrow">
         <div className="section-head">
           <div className="me">

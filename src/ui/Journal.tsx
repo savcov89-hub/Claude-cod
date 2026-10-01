@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, Check, ChevronDown, ListOrdered, Minus, MoreHorizontal, Pencil, Plus, SkipForward, Trash2, Undo2 } from 'lucide-react';
 import { api, inGym, isLocal, readError, safeStorage } from '../transport';
-import { equipmentOf, fmtKg, isStack, suggestNext, weightUnit, type Suggestion } from '../analytics';
+import { equipmentOf, fmtKg, isStack, suggestNext, weightUnit, type PersonalRecord, type Suggestion } from '../analytics';
 import { localDate } from '../clock';
 import { isNetworkError } from '../offline';
 import type { Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
@@ -60,7 +60,7 @@ export function Journal({
   onProgramChanged?: () => void;
   source: JournalSource;
   onBack?: () => void;
-  onCompleted: (summary: { sets: number }) => void;
+  onCompleted: (summary: { sets: number; records?: PersonalRecord[] }) => void;
   onActivity?: (a: JournalActivity) => void;
   onDayChange?: (dayId: string) => void;
   embedded?: boolean;
@@ -167,7 +167,7 @@ function JournalBody({
   workout: WorkoutPayload;
   embedded: boolean;
   onBack?: () => void;
-  onCompleted: (summary: { sets: number }) => void;
+  onCompleted: (summary: { sets: number; records?: PersonalRecord[] }) => void;
   onActivity?: (a: JournalActivity) => void;
   onDayChange?: (dayId: string) => void;
   onReload: () => void;
@@ -815,7 +815,7 @@ function JournalBody({
       completed.current = true;
       safeStorage.remove(cacheKey);
       if (r.data?.queued) safeStorage.set(doneKey, String(Date.now()));
-      onCompleted({ sets: performed });
+      onCompleted({ sets: performed, records: r.data?.records || [] });
       return true;
     } catch (err) {
       setErrorText(readError(err));

@@ -4,6 +4,8 @@ import type { ClientItem, Program } from '../types';
 import { api, readError } from '../transport';
 import { Journal, type JournalActivity } from './Journal';
 import { activeClients, lastVisit, presentClients, programsOf, type TrainerData } from './data';
+import { Confetti, RecordList } from './Records';
+import type { PersonalRecord } from '../analytics';
 import { Avatar, Empty, Sheet, ago, clock, elapsed, useNow } from './common';
 
 interface Source {
@@ -217,9 +219,11 @@ export function Gym({
       return rest;
     });
   };
+  const [records, setRecords] = useState<Record<string, PersonalRecord[]>>({});
   const onCompleted = useCallback(
-    (clientId: string, sets: number) => {
+    (clientId: string, sets: number, recs: PersonalRecord[] = []) => {
       setFinished((f) => ({ ...f, [clientId]: sets }));
+      setRecords((r) => ({ ...r, [clientId]: recs }));
       void data.reload();
     },
     [data.reload],
@@ -416,6 +420,15 @@ export function Gym({
                 </span>
                 <h3>Тренировка записана</h3>
                 <p className="muted">{finished[c.clientId]} подходов в истории.</p>
+                {!!records[c.clientId]?.length && (
+                  <div className="done-records">
+                    <Confetti />
+                    <strong className="tone-good">
+                      {records[c.clientId].length === 1 ? 'Новый личный рекорд!' : `Новые личные рекорды: ${records[c.clientId].length}`}
+                    </strong>
+                    <RecordList records={records[c.clientId]} />
+                  </div>
+                )}
                 <div className="row gap wrap center">
                   <button className="btn" onClick={() => nextWorkout(c.clientId)}>
                     Открыть следующую
@@ -480,7 +493,7 @@ const GymJournal = memo(
     onActivity?: (a: JournalActivity) => void;
     onRegisterFinish?: (f: Finisher | null) => void;
     onDayChange: (dayId: string) => void;
-    onCompleted: (clientId: string, sets: number) => void;
+    onCompleted: (clientId: string, sets: number, records?: PersonalRecord[]) => void;
     onProgramChanged: () => void;
   }) {
     return (
@@ -491,7 +504,7 @@ const GymJournal = memo(
         onActivity={props.onActivity}
         onRegisterFinish={props.onRegisterFinish}
         onDayChange={props.onDayChange}
-        onCompleted={({ sets }) => props.onCompleted(props.clientId, sets)}
+        onCompleted={({ sets, records }) => props.onCompleted(props.clientId, sets, records)}
         onProgramChanged={props.onProgramChanged}
       />
     );

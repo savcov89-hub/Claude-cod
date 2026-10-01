@@ -10,6 +10,8 @@ import { HistoryList } from './History';
 import { BodyView } from './Body';
 import { Journal } from './Journal';
 import { AVATARS, AvatarArt } from './avatars';
+import { RecordsSheet } from './Records';
+import type { PersonalRecord } from '../analytics';
 
 type Tab = 'overview' | 'progress' | 'history' | 'body' | 'programs';
 
@@ -42,6 +44,7 @@ export function ClientCard({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
   const [pickingAvatar, setPickingAvatar] = useState(false);
+  const [newRecords, setNewRecords] = useState<PersonalRecord[] | null>(null);
   const chooseAvatar = async (avatar: string) => {
     try {
       await api.post('/api/client/' + clientId + '/update', { avatar });
@@ -75,8 +78,9 @@ export function ClientCard({
         source={{ trainerId: journal.program.trainerId, programId: journal.program.id, dayId: journal.dayId }}
         onBack={() => setJournal(null)}
         onDayChange={(dayId) => setJournal({ ...journal, dayId })}
-        onCompleted={async () => {
+        onCompleted={async ({ records }) => {
           setJournal(null);
+          if (records?.length) setNewRecords(records);
           await data.reload();
           await loadHistory();
           setTab('history');
@@ -137,6 +141,7 @@ export function ClientCard({
           </button>
         )}
       </div>
+      {newRecords && <RecordsSheet records={newRecords} onClose={() => setNewRecords(null)} />}
       {pickingAvatar && (
         <Sheet title="Аватарка" onClose={() => setPickingAvatar(false)}>
           <div className="avatar-grid">

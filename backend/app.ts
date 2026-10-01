@@ -1,6 +1,6 @@
 import { catalog } from '../src/catalog';
 import { groupMuscles, exerciseRules, programIssue } from '../src/trainingRules';
-import { clientInsights, type ClientInsights } from '../src/analytics';
+import { clientInsights, sessionRecords, type ClientInsights } from '../src/analytics';
 import { nowIso } from '../src/clock';
 
 // The request logic is written against this small surface so the same code runs
@@ -1526,6 +1526,11 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           completedAt,
           exercises: performed,
         };
+        // Personal records: against every earlier workout of this client (all trainers).
+        const earlier = await listAll<SessionRecord>(sessionsTable(ownerId), 400);
+        const equipmentOf = equipmentLookup(trainerId);
+        const withEquipment = await Promise.all(performed.map(async (e) => ({ ...e, equipment: await equipmentOf(e.exerciseId) })));
+        const records = sessionRecords(earlier, { exercises: withEquipment });
         const [sessionId] = await db.add(sessionsTable(ownerId), [session]);
         if (!sessionId) return error('Не удалось сохранить тренировку.', 500);
         for (const e of performed)
@@ -1588,7 +1593,9 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           },
         ]);
         return json(
-          updated ? { saved: true, sessionId } : { saved: true, sessionId, warning: 'Результат сохранён. Следующий день выберите вручную.' },
+          updated
+            ? { saved: true, sessionId, records }
+            : { saved: true, sessionId, records, warning: 'Результат сохранён. Следующий день выберите вручную.' },
           201,
         );
       },
