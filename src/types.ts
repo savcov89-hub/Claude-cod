@@ -81,6 +81,8 @@ export interface SessionExercise {
   extra?: { repMin: number; repMax: number; targetRir: number; once?: boolean };
   /** Short comment on this exercise in this workout. */
   note?: string;
+  /** Own exercise: its muscles at the time (built-in ones are known by id). */
+  muscles?: string[];
   sets: SetEntry[];
 }
 export interface Session {

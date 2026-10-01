@@ -1,12 +1,21 @@
 import { useMemo, useState } from 'react';
 import { allTrends, fmtKg, recentMuscleSets, type ExerciseTrend } from '../analytics';
-import { muscleNames } from '../trainingRules';
-import type { Session } from '../types';
+import { muscleNames, muscleResolver } from '../trainingRules';
+import type { Exercise, Program, Session } from '../types';
 import { Empty, Sparkline, TrendChip, fmtDate, fmtSets, plural } from './common';
 
 const order: Record<string, number> = { down: 0, stall: 1, pr: 2, up: 3, flat: 4, new: 5 };
 
-export function ProgressView({ sessions }: { sessions: Session[] }) {
+export function ProgressView({
+  sessions,
+  programs = [],
+  exercises = [],
+}: {
+  sessions: Session[];
+  /** Muscles of own exercises come from the programs and the exercise base. */
+  programs?: Program[];
+  exercises?: Exercise[];
+}) {
   const [open, setOpen] = useState<string | null>(null);
   const trends = useMemo(
     () =>
@@ -17,7 +26,10 @@ export function ProgressView({ sessions }: { sessions: Session[] }) {
       ),
     [sessions],
   );
-  const muscles = useMemo(() => recentMuscleSets(sessions, 7), [sessions]);
+  const muscles = useMemo(
+    () => recentMuscleSets(sessions, 7, Date.now(), muscleResolver(programs, exercises)),
+    [sessions, programs, exercises],
+  );
   if (!sessions.length)
     return <Empty title="Пока нет завершённых тренировок" text="Прогресс появится после первой записанной тренировки." />;
 

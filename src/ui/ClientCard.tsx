@@ -159,7 +159,7 @@ export function ClientCard({
       {err && <div className="alert">{err}</div>}
 
       {tab === 'overview' && <Overview data={data} clientId={clientId} sessionsCount={sessions.length} />}
-      {tab === 'progress' && (loading ? <div className="loader-block"><span className="loader" /></div> : <ProgressView sessions={sessions} />)}
+      {tab === 'progress' && (loading ? <div className="loader-block"><span className="loader" /></div> : <ProgressView sessions={sessions} programs={data.programs.filter((p) => p.clientId === clientId)} exercises={data.exercises} />)}
       {tab === 'history' && (
         <>
           {client.needsReview && sessions.some((s) => s.id === client.latestSessionId) && (

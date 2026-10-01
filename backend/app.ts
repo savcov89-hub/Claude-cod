@@ -161,6 +161,8 @@ interface SessionExercise {
   extra?: ExtraPlan;
   /** Short comment on this exercise in this workout, e.g. "seat at 4, knee ok". */
   note?: string;
+  /** Own exercise: its muscles at the time, so volume and history do not depend on the program staying. */
+  muscles?: string[];
   sets: SetEntry[];
 }
 interface ExtraPlan {
@@ -1488,6 +1490,14 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           .map(({ skipped: _skipped, extra: _extra, ...e }) => ({ ...e, sets: e.sets.filter((s) => s.reps > 0).map(cleanSet) }))
           .filter((e) => e.sets.length > 0);
         if (!performed.length) return error('Нет выполненных подходов. Черновик сохранён — продолжите позже.', 400);
+        const findKnown = knownExercises(trainerId);
+        for (const e of performed) {
+          if (exerciseRules[e.exerciseId]) continue;
+          const planned = day.exercises.find((p) => p.exerciseId === e.exerciseId)?.muscles;
+          const known = planned?.length ? null : await findKnown(e.exerciseId);
+          const muscles = planned?.length ? planned : known?.muscles?.length ? known.muscles : groupMuscles(known?.muscleGroup);
+          if (muscles.length) (e as SessionExercise).muscles = muscles.slice(0, 6);
+        }
         // A workout left unfinished on an earlier day can be recorded with its own date (up to 14 days back).
         const nowMs = new Date(nowIso()).getTime();
         const requested = typeof b.completedAt === 'string' ? Date.parse(b.completedAt) : NaN;

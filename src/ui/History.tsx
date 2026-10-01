@@ -152,8 +152,11 @@ function MuscleHistory({ sessions, programs, exercises }: { sessions: Session[];
   const list = useMemo(() => {
     const programMuscles = new Map<string, string[]>();
     for (const p of programs) for (const d of p.days) for (const e of d.exercises) if (e.muscles?.length) programMuscles.set(e.exerciseId, e.muscles);
+    const own = new Map<string, string[]>();
+    for (const s of sessions) for (const e of s.exercises) if (e.muscles?.length && !own.has(e.exerciseId)) own.set(e.exerciseId, e.muscles);
     const mainMuscle = (id: string) =>
       exerciseRules[id]?.primary[0] ||
+      own.get(id)?.[0] ||
       programMuscles.get(id)?.[0] ||
       exercises.find((x) => x.id === id)?.muscles?.[0] ||
       groupMuscles(exercises.find((x) => x.id === id)?.muscleGroup)[0];

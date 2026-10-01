@@ -9,7 +9,7 @@ export interface SetLike {
 export interface SessionLike {
   id?: string;
   completedAt: string;
-  exercises: Array<{ exerciseId: string; exerciseName: string; sets: SetLike[] }>;
+  exercises: Array<{ exerciseId: string; exerciseName: string; sets: SetLike[]; muscles?: string[] }>;
 }
 export interface PlanLike {
   sets: number;
@@ -325,12 +325,18 @@ export const fmtKg = (w: number) =>
   Number.isInteger(w) ? String(w) : String(Math.round(w * 100) / 100).replace('.', ',');
 
 /** Working sets per muscle over the last `days` days; secondary muscles count as half. */
-export function recentMuscleSets(sessions: SessionLike[], days = 7, nowMs = Date.now()) {
+export function recentMuscleSets(
+  sessions: SessionLike[],
+  days = 7,
+  nowMs = Date.now(),
+  /** Muscles of own exercises (not in the built-in rules). */
+  resolve?: (exerciseId: string, own?: string[]) => string[] | undefined,
+) {
   const out: Record<string, number> = {};
   for (const s of sessions) {
     if (nowMs - new Date(s.completedAt).getTime() > days * 86400000) continue;
     for (const e of s.exercises) {
-      const { primary, secondary } = musclesOf(e.exerciseId);
+      const { primary, secondary } = musclesOf(e.exerciseId, resolve ? resolve(e.exerciseId, e.muscles) : e.muscles);
       const n = e.sets.length;
       for (const m of primary) out[m] = (out[m] || 0) + n;
       for (const m of secondary) if (!primary.includes(m)) out[m] = (out[m] || 0) + n * INDIRECT_FACTOR;

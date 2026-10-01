@@ -191,7 +191,7 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
                 </section>
               </>
             )}
-            {tab === 'progress' && <ProgressView sessions={sessions} />}
+            {tab === 'progress' && <ProgressView sessions={sessions} programs={programs} />}
             {tab === 'history' && <HistoryList sessions={sessions} programs={programs} />}
             {tab === 'body' && <BodyView />}
           </>

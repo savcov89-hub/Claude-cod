@@ -471,6 +471,22 @@ export const musclesOf = (exerciseId: string, fallback?: string[]) => {
     secondary: info?.secondary || [],
   };
 };
+/**
+ * Muscles of exercises outside the built-in rules (own exercises): from the session record, the program,
+ * the exercise base, or its muscle group.
+ */
+export function muscleResolver(
+  programs: Array<{ days: Array<{ exercises: Array<{ exerciseId: string; muscles?: string[] }> }> }> = [],
+  exercises: Array<{ id: string; muscles?: string[]; muscleGroup?: string }> = [],
+) {
+  const known = new Map<string, string[]>();
+  for (const x of exercises) {
+    const m = x.muscles?.length ? x.muscles : groupMuscles(x.muscleGroup);
+    if (m.length) known.set(x.id, m);
+  }
+  for (const p of programs) for (const d of p.days) for (const e of d.exercises) if (e.muscles?.length) known.set(e.exerciseId, e.muscles);
+  return (exerciseId: string, own?: string[]) => (own?.length ? own : known.get(exerciseId));
+}
 export function muscleLoad(exercises: VolumeExercise[]) {
   const load: Record<
     string,
