@@ -3002,3 +3002,49 @@ h2 {
   min-height: 36px;
   padding-inline: 10px;
 }
+/* Live workout: entries from the other phone */
+.live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--good);
+  animation: live-pulse 1.4s ease-in-out infinite;
+  flex: none;
+}
+@keyframes live-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.live-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--good);
+}
+.live-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--good);
+  border-radius: var(--radius-sm);
+  background: var(--good-soft);
+  text-align: left;
+}
+.live-banner .grow {
+  display: grid;
+  gap: 2px;
+}
+.live-banner small {
+  color: var(--ink-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-dot {
+    animation: none;
+  }
+}

@@ -433,6 +433,46 @@ function JournalBody({
     timer.current = setTimeout(() => void persist().catch(() => undefined), 700);
   };
 
+  // Live: entries made on the other phone (trainer ↔ client) show up while this journal is on screen.
+  // Only when nothing is waiting to be saved here and no number is being typed, so nobody's input is overwritten.
+  const [liveAt, setLiveAt] = useState<{ at: number; by?: string } | null>(null);
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
+  useEffect(() => {
+    let busy = false;
+    const tick = async () => {
+      if (busy || completed.current || conflictRef.current || pending.current || editingRef.current) return;
+      // Hidden journals (other gym tabs, display: none) have no boxes; fixed ones have no offsetParent, so boxes are checked.
+      if (document.visibilityState !== 'visible' || !rootRef.current?.getClientRects().length) return;
+      busy = true;
+      try {
+        const r = await api.get(`/api/draft/${encodeURIComponent(workout.trainerId)}/${encodeURIComponent(workout.programId)}/${encodeURIComponent(workout.day.id)}`);
+        const d = r.data;
+        if (!d?.revision || d.revision === baseRevision.current || pending.current || editingRef.current || completed.current) return;
+        // Finished on the other phone, or the program changed under it: load the journal again.
+        if (d.closed || !matchesPlan(d.exercises)) return onReload();
+        baseRevision.current = d.revision;
+        latest.current = d.exercises;
+        setResults(d.exercises);
+        feedbackRef.current = d.feedback || '';
+        setFeedback(d.feedback || '');
+        writeCache(false);
+        setStatus('saved');
+        const doneThere = (d.exercises as SessionExercise[]).some((e) => e.sets.some((x) => x.reps > 0));
+        if (doneThere) setLastSetAt(Date.parse(d.updatedAt) || Date.now());
+        setLiveAt({ at: Date.now(), by: d.updatedByRole && d.updatedByRole !== workout.actorRole ? d.updatedByRole : undefined });
+      } catch {
+        /* no network or no access: try again later */
+      } finally {
+        busy = false;
+      }
+    };
+    const t = window.setInterval(() => void tick(), 4000);
+    return () => window.clearInterval(t);
+    // refs and stable callbacks only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const retry = () => pending.current && !completed.current && void persist().catch(() => undefined);
     window.addEventListener('online', retry);
@@ -916,6 +956,7 @@ function JournalBody({
       <div className="meter" aria-hidden="true">
         <i style={{ width: (done / Math.max(1, total)) * 100 + '%' }} />
       </div>
+      {liveAt?.by && <LiveNote at={liveAt.at} by={liveAt.by} />}
 
       {stale && !conflict && (
         <div className="stale">
@@ -1827,6 +1868,19 @@ function SaveState({ status, since, lastSetAt }: { status: SaveStatus; since: nu
       </span>
     );
   return <span className={'save-dot ' + status}>{status === 'saving' ? 'сохр…' : lastSetAt ? clock(now - lastSetAt) : 'сохр.'}</span>;
+}
+
+/** «Тренер записывает · обновлено 5 с назад» — entries coming from the other phone. */
+function LiveNote({ at, by }: { at: number; by: string }) {
+  const now = useNow(1000);
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  if (s > 600) return null;
+  return (
+    <p className="live-note">
+      <span className="live-dot" /> {by === 'trainer' ? 'Тренер записывает' : 'Клиент отмечает'} · обновлено{' '}
+      {s < 5 ? 'только что' : s < 60 ? s + ' с назад' : Math.round(s / 60) + ' мин назад'}
+    </p>
+  );
 }
 
 /** A small comment line at the bottom of an exercise; last time's comment is shown above it. */

@@ -1371,7 +1371,18 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           });
         }
         programs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-        return json({ coaches, programs });
+        // A workout going on right now (sets done in the last 3 hours, not finished): the client can follow it.
+        const nowMs = Date.parse(nowIso());
+        let live: { programId: string; dayId: string; dayName: string; updatedAt: string; updatedByRole?: Role } | null = null;
+        for (const p of programs)
+          for (const d of p.days) {
+            const draft = await first<DraftRecord>(draftTable(p.clientId, p.id, d.id));
+            if (!draft || draft.closed || nowMs - Date.parse(draft.updatedAt) > 3 * 3600000) continue;
+            if (!draft.exercises.some((e) => e.sets.some((x) => x.reps > 0))) continue;
+            if (!live || draft.updatedAt > live.updatedAt)
+              live = { programId: p.id, dayId: d.id, dayName: d.name, updatedAt: draft.updatedAt, updatedByRole: draft.updatedByRole };
+          }
+        return json({ coaches, programs, live });
       },
     ],
 
@@ -1433,6 +1444,20 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           previousAt: last?.completedAt || null,
           ...(last?.note ? { previousNote: last.note } : {}),
         });
+      },
+    ],
+
+    /** The open workout as it is now, for a journal open on another phone (polled while it is on screen). */
+    'GET /api/draft/:trainerId/:programId/:dayId': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const { trainerId, programId, dayId } = ctx.params;
+        const access = await workoutOwner(ctx.user!.userId, trainerId, programId);
+        if (!access) return error('Нет доступа к тренировке.', 403);
+        const draft = await first<DraftRecord>(draftTable(access.ownerId, programId, dayId));
+        if (!draft) return json({ revision: null, closed: false, exercises: null });
+        const { id: _id, ...rest } = draft as DraftRecord & { id?: string };
+        return json({ ...rest, revision: draft.revision || null, closed: !!draft.closed });
       },
     ],
 

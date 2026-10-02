@@ -26,12 +26,15 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
   const [journal, setJournal] = useState<{ program: Program; dayId: string } | null>(null);
   const [justDone, setJustDone] = useState(false);
   const [newRecords, setNewRecords] = useState<PersonalRecord[] | null>(null);
+  // A workout the trainer is recording right now.
+  const [live, setLive] = useState<{ programId: string; dayId: string; dayName: string; updatedAt: string; updatedByRole?: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
       const [p, h] = await Promise.all([api.get('/api/my-programs'), api.get('/api/my-history')]);
       setCoaches(p.data.coaches);
       setPrograms(p.data.programs);
+      setLive(p.data.live || null);
       setSessions(h.data.sessions);
       setErr('');
     } catch (e) {
@@ -47,6 +50,21 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
       off();
     };
   }, [load]);
+  // While the home screen is open, notice a workout the trainer starts recording.
+  useEffect(() => {
+    if (journal) return;
+    const t = window.setInterval(async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const p = await api.get('/api/my-programs');
+        setLive(p.data.live || null);
+      } catch {
+        /* offline: keep what is shown */
+      }
+    }, 20000);
+    return () => window.clearInterval(t);
+  }, [journal]);
+  const liveProgram = live ? programs.find((p) => p.id === live.programId) : null;
 
   const connect = async () => {
     if (code.trim().length !== 6) return setErr('Введите шестизначный код тренера.');
@@ -115,6 +133,16 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
           )}
         </div>
         {err && <div className="alert">{err}</div>}
+        {live && liveProgram && (
+          <button className="live-banner" onClick={() => setJournal({ program: liveProgram, dayId: live.dayId })}>
+            <span className="live-dot" />
+            <span className="grow">
+              <strong>Тренировка идёт · {live.dayName}</strong>
+              <small>{live.updatedByRole === 'trainer' ? 'Тренер записывает подходы — смотрите вживую' : 'Откройте, чтобы продолжить'}</small>
+            </span>
+            <span className="btn btn-sm btn-primary">Открыть</span>
+          </button>
+        )}
         {loading ? (
           <div className="loader-block"><span className="loader" /></div>
         ) : coaches.length === 0 ? (

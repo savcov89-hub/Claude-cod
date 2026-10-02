@@ -151,7 +151,8 @@ async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promi
   }
   try {
     const res = await send(method, path, body, session?.access_token);
-    if (method === 'GET' && userId) saveCached(userId, path, res.data);
+    // The live draft check runs every few seconds; it is not worth keeping offline.
+    if (method === 'GET' && userId && !path.startsWith('/api/draft/')) saveCached(userId, path, res.data);
     if (method === 'POST' && userId) afterPost(userId, path, body, res.data);
     return res;
   } catch (err) {
