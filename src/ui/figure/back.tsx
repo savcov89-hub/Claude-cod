@@ -31,11 +31,11 @@ function pulldown(kind: 'cable' | 'stack' | 'plates'): Move {
         ];
   return {
     frames: [
-      // Seen from the side the forearms stay nearly upright under the bar; the elbows go down along the sides of
-      // the body to the ribs, a little behind (never forward to the face).
+      // Seen from the side the forearms stay nearly upright under the bar; the elbows go down to the ribs a little
+      // in front of the body (as in the pull-up), not back behind it.
       { ...base, trunk: -8, arm: wideArm([22.5, 4.6], [11.9, 2.4]) },
-      { ...base, trunk: -14, arm: wideArm([12, 6.5], [0.5, -1.5]) },
-      { ...base, trunk: -20, arm: wideArm([-1, 5.5], [-10, -3.5]) },
+      { ...base, trunk: -14, arm: wideArm([12, 6.5], [0.5, 1.8]) },
+      { ...base, trunk: -20, arm: wideArm([-1, 5.5], [-10, 3.2]) },
     ],
     work: ['lats', 'upperBack', 'biceps'],
     wideArms: true,
