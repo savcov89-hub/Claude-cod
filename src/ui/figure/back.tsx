@@ -1,5 +1,5 @@
 // Back: pulldowns, rows, pull-ups, extensions, deadlifts. Checked against the photos in scripts/figure-refs.json.
-import { ANKLE_Y, FLOOR, G, add, at, feetAt, lever, onTrunk, seat, SEAT_HIP_Y, trunkFrame, type Gear, type Joints, type Move, type Pose, type V } from './kit';
+import { ANKLE_Y, FLOOR, G, add, at, feetAt, lever, onTrunk, seat, SEAT_HIP_Y, sub, trunkFrame, type Gear, type Joints, type Move, type Pose, type V } from './kit';
 
 /** A wide-grip arm seen from the side: the hand at `hand`, the elbow at `elbow` (both from the shoulder, in the trunk's frame). */
 const wideArm = (hand: V, elbow: V) => ({ reach: { from: 'shoulder' as const, to: hand, bend: [0, -1] as V, bendTrunk: true, elbow } });
@@ -62,8 +62,8 @@ function pullUp(assisted: boolean): Move {
   return {
     frames: [
       { anchor: { at: 'hand', to: bar }, trunk: -6, head: -8, leg: legs, arm: wideArm([25, 1.5], [13.3, 0.8]) },
-      { anchor: { at: 'hand', to: bar }, trunk: -10, head: -10, leg: legs, arm: wideArm([13, 4.5], [1, -1.5]) },
-      { anchor: { at: 'hand', to: bar }, trunk: -14, head: -12, leg: legs, arm: wideArm([1.5, 6.5], [-9.5, -3]) },
+      { anchor: { at: 'hand', to: bar }, trunk: -10, head: -10, leg: legs, arm: wideArm([13, 4.5], [1, 1.8]) },
+      { anchor: { at: 'hand', to: bar }, trunk: -14, head: -12, leg: legs, arm: wideArm([1.5, 6.5], [-9.5, 3.2]) },
     ],
     work: ['lats', 'upperBack', 'biceps'],
     wideArms: true,
@@ -275,30 +275,51 @@ export const cablePullover: Move = (() => {
   };
 })();
 
-/** Chest-supported T-bar row: standing on the plate, chest on the pad, the lever from long arms to the chest. */
+/**
+ * Chest-supported T-bar row: standing on the foot plate, chest on the pad; the lever pivots low at the back by the
+ * foot plate and runs forward under the pad, the plates on its front end right past the handles — the handles and
+ * the plates go up together on an arc around the pivot, from long arms to the handles at the chest.
+ */
 export const chestSupportedRow: Move = (() => {
-  const base = { anchor: { at: 'ankle' as const, to: [34, ANKLE_Y - 4] as V }, trunk: 52, head: -24, leg: { a: 26, b: 12, foot: 90 } };
-  const j0 = at({ ...base, arm: { a: 0 } } as Pose);
-  const pivot: V = [j0.shoulder[0] + 30, FLOOR - 4];
+  // Leaning on the pad: the body almost in one line from the feet, the hips in front of the feet.
+  const base = { anchor: { at: 'ankle' as const, to: [22, ANKLE_Y - 4] as V }, trunk: 60, head: -26, leg: { a: -14, b: -22, foot: 90 } };
+  const j0 = at({ ...base, arm: { a: 2, b: 2 } } as Pose);
+  const pivot: V = [j0.ankle[0] - 3, FLOOR - 3];
   const padA = onTrunk(j0, 'shoulder', -2, 7);
   const padB = onTrunk(j0, 'shoulder', -18, 7);
+  // The hands on an arc around the pivot: from hanging to the chest.
+  const hang = sub(j0.hand, pivot);
+  const L = Math.hypot(hang[0], hang[1]);
+  const a0 = Math.atan2(hang[1], hang[0]);
+  const top = sub(onTrunk(j0, 'shoulder', -10, 7.5), pivot);
+  const a1 = Math.atan2(top[1], top[0]);
+  const handAt = (k: number): V => [pivot[0] + L * Math.cos(a0 + (a1 - a0) * k), pivot[1] + L * Math.sin(a0 + (a1 - a0) * k)];
+  const pull = (k: number): Pose => ({ ...base, arm: { reach: { to: handAt(k), bend: [-1, -0.6] } } } as Pose);
   return {
-    frames: [
-      { ...base, arm: { a: 2, b: 2 } },
-      { ...base, arm: { reach: { from: 'shoulder', to: [-11, 7.5], bend: [-0.6, -1], bendTrunk: true, shorten: 0.9 } } },
-    ],
+    frames: [{ ...base, arm: { a: 2, b: 2 } }, pull(0.5), pull(1)],
     work: ['upperBack', 'lats', 'biceps'],
-    show: [pivot, [j0.ankle[0] - 6, FLOOR]],
-    gear: (j) => [
-      { layer: 'back', node: G.floor() },
-      { layer: 'back', node: G.bar([j0.ankle[0] - 6, ANKLE_Y - 1], [pivot[0], FLOOR - 1], 2.4) },
-      { layer: 'back', node: G.pad([j0.ankle[0] - 5, ANKLE_Y - 1], [j0.ankle[0] + 9, ANKLE_Y - 1], 2) },
-      { layer: 'mid', node: G.pad(add(padA, [1.2, -1.2]), add(padB, [1.2, -1.2]), 3) },
-      { layer: 'back', node: G.bar(add(padB, [3, 1]), [padB[0] + 6, FLOOR], 2) },
-      { layer: 'back', node: G.plate(add(pivot, [-3, -7 - (j.hand[1] < 70 ? 4 : 0)]), 6.5) },
-      ...lever(pivot, j.hand),
-      { layer: 'front', node: G.bar(add(j.hand, [-1.6, 0]), add(j.hand, [1.6, 0]), 1.6) },
-    ],
+    show: [pivot, [j0.ankle[0] - 6, FLOOR], [j0.hand[0] + 12, j0.hand[1]]],
+    gear: (j) => {
+      // The lever runs just above the grips; the plates on its end a little past them.
+      const u = sub(j.hand, pivot);
+      const n = Math.hypot(u[0], u[1]);
+      const along: V = [u[0] / n, u[1] / n];
+      const upSide: V = [along[1], -along[0]];
+      const grip = add(j.hand, upSide, 2.4);
+      const end = add(add(pivot, along, n + 6), upSide, 2.4);
+      return [
+        { layer: 'back', node: G.floor() },
+        { layer: 'back', node: G.bar([j0.ankle[0] - 6, FLOOR], [j0.ankle[0] + 22, FLOOR], 2.4) },
+        { layer: 'back', node: G.pad([j0.ankle[0] - 5, ANKLE_Y - 1], [j0.ankle[0] + 9, ANKLE_Y - 1], 2) },
+        { layer: 'mid', node: G.pad(add(padA, [1.2, -1.2]), add(padB, [1.2, -1.2]), 3) },
+        { layer: 'back', node: G.bar(add(padB, [3, 1]), [padB[0] + 6, FLOOR], 2) },
+        { layer: 'back', node: G.plate(add(end, along, -1), 6.5) },
+        { layer: 'back', node: G.bar(pivot, end, 2.2) },
+        { layer: 'back', node: G.wheel(pivot, 1.6) },
+        { layer: 'back', node: G.bar(j.hand, grip, 1.6) },
+        { layer: 'front', node: G.bar(add(j.hand, [-1.6, 0]), add(j.hand, [1.6, 0]), 1.6) },
+      ];
+    },
   };
 })();
 

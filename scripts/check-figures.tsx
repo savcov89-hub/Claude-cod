@@ -46,6 +46,8 @@ for (const [id, m] of Object.entries(MOVES)) {
     // Nothing under the floor; standing feet flat on it.
     for (const [name, v] of Object.entries({ head: j.head, hand: j.hand, knee: j.knee, toe: j.toe, heel: j.heel }))
       if (v[1] > FLOOR - 0.6) problems.add(tag + name + ' под полом');
+    // The back and the buttocks (lying on the floor, a pelvis curling up) stay above it too.
+    for (let a = 0; a <= 25; a += 2.5) if (j.trunkAt(a, -5)[1] > FLOOR - 0.4) problems.add(tag + 'спина под полом');
     if (m.standing)
       for (const v of [j.toe, j.heel, j.toe2, j.heel2]) if (Math.abs(v[1] - (FLOOR - 3)) > 0.3) problems.add(tag + 'стопа не на полу');
     if (m.balance && m.standing) {

@@ -5,13 +5,16 @@ import { FLOOR, G, add, feetAt, onTrunk, seat, SEAT_HIP_Y, tower, type Move, typ
 const handsAtHead = { reach: { from: 'shoulder' as const, to: [4.5, 1.2] as V, bend: [-0.3, 1] as V, bendTrunk: true, shorten: 0.62 } };
 const MAT_Y = FLOOR - 0.8;
 
-/** Crunch on the floor: knees bent, feet flat; the shoulders curl up off the floor. */
+/**
+ * Crunch on the floor: knees bent, feet flat; the spine rounds and the shoulder blades come off the floor —
+ * the pelvis and the lower back stay on the mat (no sit-up from the hips).
+ */
 export const crunch: Move = (() => {
-  const hip: V = [52, MAT_Y - 4.6];
+  const hip: V = [52, MAT_Y - 5.4];
   return {
     frames: [
-      { anchor: { at: 'hip', to: hip }, trunk: -88, head: -4, leg: feetAt(hip[0] + 24), arm: handsAtHead },
-      { anchor: { at: 'hip', to: hip }, trunk: -56, head: 14, leg: feetAt(hip[0] + 24), arm: handsAtHead },
+      { anchor: { at: 'hip', to: hip }, trunk: -90, head: -4, leg: feetAt(hip[0] + 24), arm: handsAtHead },
+      { anchor: { at: 'hip', to: hip }, trunk: -90, spine: 55, head: 10, leg: feetAt(hip[0] + 24), arm: handsAtHead },
     ],
     work: ['abs'],
     wideArms: true,
@@ -22,14 +25,17 @@ export const crunch: Move = (() => {
   };
 })();
 
-/** Reverse crunch: lying on the back, knees bent up; the hips curl up and the knees come to the chest. */
+/**
+ * Reverse crunch: lying on the back, knees bent up over the hips; the pelvis curls up off the floor and the knees
+ * come to the chest — the spine rounds from the pelvis, the shoulder blades stay on the mat.
+ */
 export const reverseCrunch: Move = (() => {
-  const shoulder: V = [30, MAT_Y - 4.6];
-  const arm = { a: 90, b: 90 };
+  const shoulder: V = [30, MAT_Y - 5.4];
+  const arm = { a: 81, b: 81 };
   return {
     frames: [
       { anchor: { at: 'shoulder', to: shoulder }, trunk: -90, head: -4, leg: { a: 178, b: 92, foot: 170 }, arm },
-      { anchor: { at: 'shoulder', to: shoulder }, trunk: -70, head: -2, leg: { a: 220, b: 124, foot: 206 }, arm },
+      { anchor: { at: 'shoulder', to: shoulder }, trunk: -140, spine: 50, curl: 'lower', head: -4, leg: { a: 232, b: 140, foot: 222 }, arm },
     ],
     work: ['abs'],
     gear: () => [
@@ -39,15 +45,18 @@ export const reverseCrunch: Move = (() => {
   };
 })();
 
-/** Cable crunch: kneeling below a high pulley, the rope at the head; the trunk curls down to the thighs. */
+/**
+ * Cable crunch: kneeling below a high pulley, the rope at the head; the spine rounds and the elbows go down to the
+ * thighs — the pelvis stays where it is (no bending at the hips).
+ */
 export const cableCrunch: Move = (() => {
-  const knees = { a: 0, b: -90, foot: -52 };
-  const ankle: V = [30, FLOOR - 5.5];
+  const knees = { a: 16, b: -90, foot: -52 };
+  const ankle: V = [16, FLOOR - 5.5];
   const pulley: V = [62, 10];
   return {
     frames: [
-      { anchor: { at: 'ankle', to: ankle }, trunk: 18, head: 18, leg: knees, arm: handsAtHead },
-      { anchor: { at: 'ankle', to: ankle }, trunk: 78, head: 34, leg: knees, arm: handsAtHead },
+      { anchor: { at: 'ankle', to: ankle }, trunk: 36, head: 16, leg: knees, arm: handsAtHead },
+      { anchor: { at: 'ankle', to: ankle }, trunk: 36, spine: 85, head: 30, leg: knees, arm: handsAtHead },
     ],
     work: ['abs'],
     wideArms: true,
@@ -83,14 +92,14 @@ export const hangingLegRaise: Move = (() => {
   };
 })();
 
-/** Ab crunch machine: seated, the pads on the chest / handles by the head; the trunk curls forward. */
+/** Ab crunch machine: seated, the pads on the chest / handles by the head; the spine rounds forward, the pelvis stays. */
 function abMachine(plates: boolean): Move {
   const hip: V = [42, SEAT_HIP_Y];
   const base = { anchor: { at: 'hip' as const, to: hip }, leg: feetAt(hip[0] + 15) };
   return {
     frames: [
-      { ...base, trunk: -4, head: 0, arm: handsAtHead },
-      { ...base, trunk: 38, head: 22, arm: handsAtHead },
+      { ...base, trunk: -2, head: 0, arm: handsAtHead },
+      { ...base, trunk: -2, spine: 62, head: 10, arm: handsAtHead },
     ],
     work: ['abs'],
     wideArms: true,

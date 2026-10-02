@@ -144,7 +144,7 @@ const R = { upperA: 2.9, upperB: 2.2, foreA: 2.2, foreB: 1.6, hand: 1.9, thighA:
 const HALO = 0.9;
 
 function Leg({ j, far, cls, halo = 0 }: { j: Joints; far: boolean; cls: string; halo?: number }) {
-  const hip = far ? add(j.hip, j.front, -0.3) : j.hip;
+  const hip = far ? add(j.hip, j.frontHip, -0.3) : j.hip;
   const knee = far ? j.knee2 : j.knee;
   const ankle = far ? j.ankle2 : j.ankle;
   const toe = far ? j.toe2 : j.toe;
@@ -218,7 +218,7 @@ function LimbMuscle({ j, m }: { j: Joints; m: Muscle }) {
 export function Person({ j, work = [], gear = [], halo = true }: { j: Joints; work?: Muscle[]; gear?: Gear[]; halo?: boolean }) {
   // Raised shoulders (a shrug) lift the top of the trunk outline with them.
   const shrug = len(sub(j.shoulder, j.hip)) - BODY.trunk;
-  const at = (o: V): V => add(add(j.hip, j.up, o[0] + (o[0] > 17 ? shrug * Math.min(1, (o[0] - 17) / 7) : 0)), j.front, o[1]);
+  const at = (o: V): V => j.trunkAt(o[0] + (o[0] > 17 ? shrug * Math.min(1, (o[0] - 17) / 7) : 0), o[1]);
   const trunk = smooth(TRUNK.map(at));
   const layer = (l: Gear['layer']) => gear.filter((g) => g.layer === l).map((g, i) => <g key={l + i}>{g.node}</g>);
   const headR = BODY.head;

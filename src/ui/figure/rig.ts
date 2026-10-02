@@ -62,6 +62,13 @@ export interface Pose {
   head?: number;
   /** Shoulders raised (shrug), in units; the head stays. */
   shrug?: number;
+  /**
+   * The spine curled forward (crunches), in degrees between the pelvis and the shoulders: the lower back stays as
+   * `trunk`, the spine above the waist rounds evenly. The shoulders, the arms and the head follow the top.
+   */
+  spine?: number;
+  /** Where the spine rounds: 'upper' (default) — above the waist (a crunch); 'lower' — the lumbar, from the pelvis (a reverse crunch). */
+  curl?: 'upper' | 'lower';
   leg: Limb;
   arm: Limb;
   /** The other side when it differs (one-arm exercises); otherwise it copies the near side. */
@@ -74,9 +81,14 @@ export interface Joints {
   shoulder: V;
   neck: V;
   head: V;
-  /** Unit vectors of the trunk: up the spine and to the front. */
+  /** Unit vectors of the trunk at the shoulders: up the spine and to the front. */
   up: V;
   front: V;
+  /** The same at the pelvis (they differ when the spine is curled). */
+  upHip: V;
+  frontHip: V;
+  /** A point of the trunk: `along` the spine from the hip joint (following its curl), `side` units to the front. */
+  trunkAt: (along: number, side: number) => V;
   knee: V;
   ankle: V;
   toe: V;
@@ -90,7 +102,7 @@ export interface Joints {
   elbow2: V;
   hand2: V;
   /** Angles as drawn (for the joint checks). */
-  angles: { trunk: number; thigh: number; shin: number; foot: number; foot2: number; upper: number; fore: number; thigh2: number; shin2: number; upper2: number; fore2: number; head: number };
+  angles: { trunk: number; spine: number; thigh: number; shin: number; foot: number; foot2: number; upper: number; fore: number; thigh2: number; shin2: number; upper2: number; fore2: number; head: number };
   /** A limb that could not reach its point. */
   short: string[];
 }
@@ -122,21 +134,42 @@ function solve(root: V, end: V, a: number, b: number, bend: V): { mid: V; end: V
 /** Joint positions of a pose. */
 export function joints(p: Pose): Joints {
   const short: string[] = [];
-  const up = dirOf(180 - p.trunk);
-  const front: V = [-up[1], up[0]];
-  const inTrunk = (o: V, base: V): V => add(add(base, up, o[0]), front, o[1]);
+  const upHip = dirOf(180 - p.trunk);
+  const frontHip: V = [-upHip[1], upHip[0]];
   const at0: V = [0, 0];
   const hip0 = at0;
-  const shoulder0 = add(hip0, up, BODY.trunk + (p.shrug ?? 0));
-  const neckBase = add(hip0, up, BODY.trunk);
-  const bendOf = (r: Reach): V => (r.bendTrunk ? add([up[0] * r.bend[0], up[1] * r.bend[0]], front, r.bend[1]) : r.bend);
+  // The spine: straight from the hip joint up to the waist, then rounding evenly by `spine` degrees (up to the shoulders,
+  // or for the lower curl up to the middle of the back, straight above it).
+  const flex = p.spine ?? 0;
+  const [WAIST, TOP] = p.curl === 'lower' ? [3, 15] : [9, BODY.trunk];
+  const frameAt = (a: number): { up: V; front: V } => {
+    const th = rad(flex * Math.min(1, Math.max(0, (a - WAIST) / (TOP - WAIST))));
+    const u: V = [upHip[0] * Math.cos(th) + frontHip[0] * Math.sin(th), upHip[1] * Math.cos(th) + frontHip[1] * Math.sin(th)];
+    return { up: u, front: [-u[1], u[0]] };
+  };
+  const spineAt = (a: number): V => {
+    if (!flex || a <= WAIST) return add(hip0, upHip, a);
+    let pos = add(hip0, upHip, WAIST);
+    const n = Math.ceil((a - WAIST) / 0.75);
+    const step = (a - WAIST) / n;
+    for (let i = 0; i < n; i++) pos = add(pos, frameAt(WAIST + (i + 0.5) * step).up, step);
+    return pos;
+  };
+  const { up, front } = frameAt(BODY.trunk);
+  const trunkPoint = (a: number, side: number): V => add(spineAt(a), frameAt(a).front, side);
+  const inTrunk = (o: V, base: V): V => add(add(base, up, o[0]), front, o[1]);
+  const inHip = (o: V): V => add(add(hip0, upHip, o[0]), frontHip, o[1]);
+  const shoulder0 = flex ? add(spineAt(BODY.trunk), up, p.shrug ?? 0) : add(hip0, up, BODY.trunk + (p.shrug ?? 0));
+  const neckBase = spineAt(BODY.trunk);
+  const bendOf = (r: Reach, legs = false): V =>
+    r.bendTrunk ? (legs ? add([upHip[0] * r.bend[0], upHip[1] * r.bend[0]], frontHip, r.bend[1]) : add([up[0] * r.bend[0], up[1] * r.bend[0]], front, r.bend[1])) : r.bend;
 
   const leg = (l: Limb, name: string) => {
     let knee: V, ankle: V, thigh: number, shin: number;
     if (l.reach) {
       const k = l.reach.shorten ?? 1;
-      const target = l.reach.from ? inTrunk(l.reach.to, l.reach.from === 'hip' ? hip0 : shoulder0) : l.reach.to;
-      const r = solve(hip0, target, BODY.thigh * k * (l.reach.upperK ?? 1), BODY.shin * k, bendOf(l.reach));
+      const target = l.reach.from ? (l.reach.from === 'hip' ? inHip(l.reach.to) : inTrunk(l.reach.to, shoulder0)) : l.reach.to;
+      const r = solve(hip0, target, BODY.thigh * k * (l.reach.upperK ?? 1), BODY.shin * k, bendOf(l.reach, true));
       if (!r.ok) short.push(name);
       knee = r.mid;
       ankle = r.end;
@@ -157,7 +190,7 @@ export function joints(p: Pose): Joints {
     let elbow: V, hand: V, upper: number, fore: number;
     if (l.reach) {
       const k = l.reach.shorten ?? 1;
-      const target = l.reach.from ? inTrunk(l.reach.to, l.reach.from === 'hip' ? hip0 : shoulder0) : l.reach.to;
+      const target = l.reach.from ? (l.reach.from === 'hip' ? inHip(l.reach.to) : inTrunk(l.reach.to, shoulder0)) : l.reach.to;
       if (l.reach.elbow) {
         elbow = inTrunk(l.reach.elbow, shoulder0);
         hand = target;
@@ -187,7 +220,7 @@ export function joints(p: Pose): Joints {
     const L2 = leg(world(p.farLeg || p.leg), 'farLeg');
     const A = arm(world(p.arm), 'arm');
     const A2 = arm(world(p.farArm || p.arm), 'farArm');
-    const headDir = dirOf(180 - p.trunk - (p.head ?? 0));
+    const headDir = dirOf(180 - p.trunk - flex - (p.head ?? 0));
     const neck = add(neckBase, headDir, BODY.neck * 0.6);
     const head = add(add(neckBase, headDir, BODY.neck + BODY.head * 0.92), [-headDir[1], headDir[0]], 0.9);
     return {
@@ -197,6 +230,9 @@ export function joints(p: Pose): Joints {
       head: shift(head),
       up,
       front,
+      upHip,
+      frontHip,
+      trunkAt: (a: number, side: number) => shift(trunkPoint(a, side)),
       knee: shift(L.knee),
       ankle: shift(L.ankle),
       toe: shift(L.toe),
@@ -211,6 +247,7 @@ export function joints(p: Pose): Joints {
       hand2: shift(A2.hand),
       angles: {
         trunk: p.trunk,
+        spine: flex,
         thigh: L.thigh,
         shin: L.shin,
         foot: L.foot,
@@ -271,7 +308,7 @@ function inTrunk(p: Pose, far: boolean): Pose {
   const r = limb.reach;
   if (!r || (r.from === 'shoulder' && r.bendTrunk)) return p;
   const j = joints(p);
-  const to: V = r.from === 'shoulder' ? r.to : r.from === 'hip' ? toTrunk(j, sub(add(add(j.hip, j.up, r.to[0]), j.front, r.to[1]), j.shoulder)) : toTrunk(j, sub(r.to, j.shoulder));
+  const to: V = r.from === 'shoulder' ? r.to : r.from === 'hip' ? toTrunk(j, sub(add(add(j.hip, j.upHip, r.to[0]), j.frontHip, r.to[1]), j.shoulder)) : toTrunk(j, sub(r.to, j.shoulder));
   const bend: V = r.bendTrunk ? r.bend : toTrunk(j, r.bend);
   const next: Limb = { ...limb, reach: { ...r, from: 'shoulder', to, bend, bendTrunk: true } };
   return far ? { ...p, farArm: next } : { ...p, arm: next, farArm: p.farArm || p.arm };
@@ -327,6 +364,8 @@ export function mix(a0: Pose, b0: Pose, t: number): Pose {
     trunk: lerp(a.trunk, b.trunk, t),
     head: n(a.head ?? 0, b.head ?? 0),
     shrug: n(a.shrug ?? 0, b.shrug ?? 0),
+    spine: n(a.spine ?? 0, b.spine ?? 0),
+    curl: a.curl ?? b.curl,
     leg: limb(a.leg, b.leg),
     arm: limb(a.arm, b.arm),
     farLeg: a.farLeg || b.farLeg ? limb(a.farLeg || a.leg, b.farLeg || b.leg) : undefined,
@@ -356,10 +395,11 @@ export function jointProblems(j: Joints, opts: { wideArms?: boolean } = {}): str
       [' (дальняя)', g.upper2, g.fore2],
     ] as Array<[string, number, number]>) {
       check('локоть' + s, norm(fo - up), -5, 155);
-      const sh = norm(up + g.trunk);
+      const sh = norm(up + g.trunk + g.spine);
       check('плечо' + s, sh < -120 ? sh + 360 : sh, -70, 190);
     }
   check('шея', g.head, -45, 50);
+  check('позвоночник', g.spine, 0, 85);
   for (const s of j.short) out.push('не дотягивается: ' + s);
   return out;
 }

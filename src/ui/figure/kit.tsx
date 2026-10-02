@@ -27,12 +27,13 @@ export type { Gear, Joints, Pose, V, Muscle };
 
 /** A point in the trunk's frame: along the spine from the shoulder / hip (+ up) and towards the front. */
 export const onTrunk = (j: Joints, base: 'shoulder' | 'hip', along: number, front: number): V =>
-  add(add(base === 'shoulder' ? j.shoulder : j.hip, j.up, along), j.front, front);
+  base === 'shoulder' ? add(add(j.shoulder, j.up, along), j.front, front) : add(add(j.hip, j.upHip, along), j.frontHip, front);
 
 /** World point → the trunk frame of a pose ([along the spine from the shoulder, to the front]). */
 export function trunkFrame(j: Joints, p: V, base: 'shoulder' | 'hip' = 'shoulder'): V {
   const d = sub(p, base === 'shoulder' ? j.shoulder : j.hip);
-  return [d[0] * j.up[0] + d[1] * j.up[1], d[0] * j.front[0] + d[1] * j.front[1]];
+  const [u, f] = base === 'shoulder' ? [j.up, j.front] : [j.upHip, j.frontHip];
+  return [d[0] * u[0] + d[1] * u[1], d[0] * f[0] + d[1] * f[1]];
 }
 
 /** Sitting on a seat: thighs level, feet flat on the floor in front. */

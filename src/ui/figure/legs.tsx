@@ -146,16 +146,13 @@ export const smithSquat: Move = (() => {
   };
 })();
 
-/**
- * Hack squat (and pendulum squat): the back on a sled that slides along its rails, the feet on a tilted platform.
- * `pendulum` — a more upright back.
- */
-function hackSquat(pendulum: boolean): Move {
-  const trunk = pendulum ? -14 : -30;
+/** Hack squat: the back on a sled that slides along its rails, the feet on a tilted platform. */
+function hackSquat(): Move {
+  const trunk = -30;
   const rail = dirOf(180 - trunk); // up the sled, along the back
   // Feet far forward on the platform: the hip slides down the sled until the knee is a little sharper than 90°.
   const ankle: V = [62, ANKLE_Y - 4];
-  const toFeet: V = pendulum ? [-17.5, -30.9] : [-23, -27.1];
+  const toFeet: V = [-23, -27.1];
   const hipTop: V = add(ankle, toFeet);
   const hipAt = (s: number): V => add(hipTop, rail, -s);
   const kneeAngle = 85;
@@ -190,8 +187,61 @@ function hackSquat(pendulum: boolean): Move {
     },
   };
 }
-export const hackSquatMove = hackSquat(false);
-export const pendulumSquat = hackSquat(true);
+export const hackSquatMove = hackSquat();
+
+/**
+ * Pendulum squat: the back pad and the shoulder pads hang on the rear end of a swing arm whose axle is high up in
+ * front, above the feet; the feet far forward on a steep fixed platform. Going down, the pad swings on an arc down
+ * and forward towards the feet and leans back a little; the knees bend deep (about 120°), the back stays on the pad.
+ */
+export const pendulumSquat: Move = (() => {
+  const pivot: V = [67, 21];
+  const R = 40; // the axle → the shoulder joint
+  const [down0, down1] = [8, 32]; // the arm below level, top and bottom, degrees
+  const ankle: V = [67, 67];
+  const foot = 132; // the platform rises to the front
+  const arm = { reach: { from: 'shoulder' as const, to: [2, 4.5] as V, bend: [-1, 0.3] as V, bendTrunk: true, shorten: 0.85 } };
+  const pose = (down: number): Pose => {
+    const trunk = -20 - (down - down0); // the pad turns with the arm
+    const r = (down * Math.PI) / 180;
+    return {
+      anchor: { at: 'shoulder', to: [pivot[0] - R * Math.cos(r), pivot[1] + R * Math.sin(r)] },
+      trunk,
+      head: -4,
+      leg: { reach: { to: ankle, bend: [1, -0.6] }, foot },
+      arm,
+    };
+  };
+  const post = pivot[0] + 6;
+  return {
+    // Three frames: the shoulders go along the arc, not straight.
+    frames: [pose(down0), pose((down0 + down1) / 2), pose(down1)],
+    work: ['quads', 'glutes'],
+    wideArms: true,
+    show: [[pivot[0] - R - 14, pivot[1]], [post + 4, FLOOR], [pivot[0], pivot[1] - 4]],
+    gear: (j) => {
+      // The arm: from the axle to the top of the back pad and on behind it to the plate holder.
+      const padTop = onTrunk(j, 'shoulder', 3, -6.2);
+      const away = sub(padTop, pivot);
+      const horn = add(padTop, away, 9 / Math.hypot(away[0], away[1]));
+      const sole = dirOf(foot);
+      const under: V = [sole[1], -sole[0]]; // from the sole down into the platform
+      return [
+        { layer: 'back', node: G.floor() },
+        { layer: 'back', node: G.bar([post, FLOOR], [post, pivot[1] - 3], 2.6) },
+        { layer: 'back', node: G.bar([pivot[0] - 30, FLOOR], [post + 4, FLOOR], 2.4) },
+        { layer: 'back', node: G.bar(add(ankle, [0, 4]), [ankle[0] - 6, FLOOR], 2.2) },
+        { layer: 'back', node: G.plate(horn, 6.5) },
+        { layer: 'back', node: G.bar(pivot, horn, 2.4) },
+        { layer: 'back', node: G.bar(padTop, onTrunk(j, 'shoulder', -1, -6.2), 2) },
+        { layer: 'back', node: G.wheel(pivot, 1.8) },
+        { layer: 'back', node: G.pad(onTrunk(j, 'hip', -3, -6), onTrunk(j, 'shoulder', 2, -6), 3) },
+        { layer: 'front', node: G.roll(onTrunk(j, 'shoulder', 1.2, 2.2), 2.2) },
+        { layer: 'front', node: G.pad(add(add(ankle, sole, -4), under, 2.2), add(add(ankle, sole, 12), under, 2.2), 2.2) },
+      ];
+    },
+  };
+})();
 
 /** Belt squat: standing on two platforms, the belt from the hips down to the lever, hands on the rail in front. */
 export const beltSquat: Move = (() => {
@@ -272,7 +322,7 @@ export const seatedLegCurl: Move = (() => {
   };
 })();
 
-/** Lying leg curl: face down on the bench, the roller behind the ankles, heels up towards the buttocks. */
+/** Lying leg curl: face down on the bench, the roller on top, on the backs of the ankles, heels up towards the buttocks. */
 export const lyingLegCurl: Move = (() => {
   const hip: V = [48, 68];
   const base = { anchor: { at: 'hip' as const, to: hip }, trunk: 84, head: -30, arm: { a: 36, b: 40 } };
@@ -284,7 +334,7 @@ export const lyingLegCurl: Move = (() => {
     work: ['hams'],
     show: [[hip[0] - 34, FLOOR], [hip[0] + 30, FLOOR]],
     gear: (j) => {
-      const roller = add(j.ankle, dirOf(j.angles.shin + 90), 3.3);
+      const roller = add(j.ankle, dirOf(j.angles.shin - 90), 3.3);
       return [
         { layer: 'back', node: G.floor() },
         { layer: 'back', node: G.pad(add(hip, [-14, 5.2]), add(hip, [1, 4.4]), 3) },
