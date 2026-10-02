@@ -153,14 +153,23 @@ export const smithSquat: Move = (() => {
 function hackSquat(pendulum: boolean): Move {
   const trunk = pendulum ? -14 : -30;
   const rail = dirOf(180 - trunk); // up the sled, along the back
-  const ankle: V = [58, ANKLE_Y - 4];
-  const hipTop: V = add(ankle, [-10, -33.5]);
+  // Feet far forward on the platform: the hip slides down the sled until the knee is a little sharper than 90°.
+  const ankle: V = [62, ANKLE_Y - 4];
+  const toFeet: V = pendulum ? [-17.5, -30.9] : [-23, -27.1];
+  const hipTop: V = add(ankle, toFeet);
   const hipAt = (s: number): V => add(hipTop, rail, -s);
-  const legTo = { reach: { to: ankle, bend: [1, -0.4] as V }, foot: 76 };
+  const kneeAngle = 85;
+  const d = Math.sqrt(18.5 ** 2 + 17.5 ** 2 - 2 * 18.5 * 17.5 * Math.cos((kneeAngle * Math.PI) / 180));
+  // |ankle - hip(s)| = d: hip(s) = hipTop - rail·s, so (ankle - hipTop) + rail·s has length d.
+  const D = sub(ankle, hipTop);
+  const bq = 2 * (D[0] * rail[0] + D[1] * rail[1]);
+  const cq = D[0] ** 2 + D[1] ** 2 - d * d;
+  const bottom = (-bq - Math.sqrt(bq * bq - 4 * cq)) / 2;
+  const legTo = { reach: { to: ankle, bend: [1, -0.4] as V }, foot: 70 };
   const arm = { reach: { from: 'shoulder' as const, to: [2, 4.5] as V, bend: [-1, 0.3] as V, bendTrunk: true, shorten: 0.85 } };
   const pose = (s: number): Pose => ({ anchor: { at: 'hip', to: hipAt(s) }, trunk, head: -4, leg: legTo, arm });
   return {
-    frames: [pose(0), pose(pendulum ? 17 : 16)],
+    frames: [pose(0), pose(Math.abs(bottom))],
     work: ['quads', 'glutes'],
     wideArms: true,
     show: [add(hipTop, rail, 30), [ankle[0] + 10, FLOOR]],

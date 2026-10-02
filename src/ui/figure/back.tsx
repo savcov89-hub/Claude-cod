@@ -89,7 +89,8 @@ export const assistedPullUp = pullUp(true);
 export const seatedRow: Move = (() => {
   const hip: V = [34, 73];
   const feet = { reach: { to: [61, 74] as V, bend: [0.3, -1] as V }, foot: 168 };
-  const pulley: V = [64, 80];
+  // The cable comes out at the height of the navel (a little higher), so it pulls straight back to the belly.
+  const pulley: V = [64, 61.5];
   return {
     frames: [
       { anchor: { at: 'hip', to: hip }, trunk: 22, head: -12, leg: feet, arm: { reach: { from: 'shoulder', to: [-6, 22.5], bend: [-1, 0], bendTrunk: true, shorten: 0.98 } } },
