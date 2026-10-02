@@ -35,6 +35,8 @@ export interface Reach {
   shorten?: number;
   /** Only the upper part (upper arm / thigh) seen at an angle — arms out to the sides with the forearm upright. */
   upperK?: number;
+  /** `bend` is in the trunk's frame ([along the spine, to the front]) — it turns with the body. */
+  bendTrunk?: boolean;
 }
 
 export interface Limb {
@@ -53,6 +55,8 @@ export interface Pose {
   trunk: number;
   /** Head nod relative to the trunk (+ chin down to the chest). */
   head?: number;
+  /** Shoulders raised (shrug), in units; the head stays. */
+  shrug?: number;
   leg: Limb;
   arm: Limb;
   /** The other side when it differs (one-arm exercises); otherwise it copies the near side. */
@@ -81,7 +85,7 @@ export interface Joints {
   elbow2: V;
   hand2: V;
   /** Angles as drawn (for the joint checks). */
-  angles: { trunk: number; thigh: number; shin: number; foot: number; upper: number; fore: number; thigh2: number; shin2: number; upper2: number; fore2: number; head: number };
+  angles: { trunk: number; thigh: number; shin: number; foot: number; foot2: number; upper: number; fore: number; thigh2: number; shin2: number; upper2: number; fore2: number; head: number };
   /** A limb that could not reach its point. */
   short: string[];
 }
@@ -118,14 +122,16 @@ export function joints(p: Pose): Joints {
   const inTrunk = (o: V, base: V): V => add(add(base, up, o[0]), front, o[1]);
   const at0: V = [0, 0];
   const hip0 = at0;
-  const shoulder0 = add(hip0, up, BODY.trunk);
+  const shoulder0 = add(hip0, up, BODY.trunk + (p.shrug ?? 0));
+  const neckBase = add(hip0, up, BODY.trunk);
+  const bendOf = (r: Reach): V => (r.bendTrunk ? add([up[0] * r.bend[0], up[1] * r.bend[0]], front, r.bend[1]) : r.bend);
 
   const leg = (l: Limb, name: string) => {
     let knee: V, ankle: V, thigh: number, shin: number;
     if (l.reach) {
       const k = l.reach.shorten ?? 1;
       const target = l.reach.from ? inTrunk(l.reach.to, l.reach.from === 'hip' ? hip0 : shoulder0) : l.reach.to;
-      const r = solve(hip0, target, BODY.thigh * k * (l.reach.upperK ?? 1), BODY.shin * k, l.reach.bend);
+      const r = solve(hip0, target, BODY.thigh * k * (l.reach.upperK ?? 1), BODY.shin * k, bendOf(l.reach));
       if (!r.ok) short.push(name);
       knee = r.mid;
       ankle = r.end;
@@ -147,7 +153,7 @@ export function joints(p: Pose): Joints {
     if (l.reach) {
       const k = l.reach.shorten ?? 1;
       const target = l.reach.from ? inTrunk(l.reach.to, l.reach.from === 'hip' ? hip0 : shoulder0) : l.reach.to;
-      const r = solve(s, target, BODY.upper * k * (l.reach.upperK ?? 1), BODY.fore * k, l.reach.bend);
+      const r = solve(s, target, BODY.upper * k * (l.reach.upperK ?? 1), BODY.fore * k, bendOf(l.reach));
       if (!r.ok) short.push(name);
       elbow = r.mid;
       hand = r.end;
@@ -172,8 +178,8 @@ export function joints(p: Pose): Joints {
     const A = arm(world(p.arm), 'arm');
     const A2 = arm(world(p.farArm || p.arm), 'farArm');
     const headDir = dirOf(180 - p.trunk - (p.head ?? 0));
-    const neck = add(shoulder0, headDir, BODY.neck * 0.6);
-    const head = add(add(shoulder0, headDir, BODY.neck + BODY.head * 0.92), [-headDir[1], headDir[0]], 0.9);
+    const neck = add(neckBase, headDir, BODY.neck * 0.6);
+    const head = add(add(neckBase, headDir, BODY.neck + BODY.head * 0.92), [-headDir[1], headDir[0]], 0.9);
     return {
       hip: shift(hip0),
       shoulder: shift(shoulder0),
@@ -198,6 +204,7 @@ export function joints(p: Pose): Joints {
         thigh: L.thigh,
         shin: L.shin,
         foot: L.foot,
+        foot2: L2.foot,
         upper: A.upper,
         fore: A.fore,
         thigh2: L2.thigh,
@@ -233,6 +240,7 @@ export function mix(a: Pose, b: Pose, t: number): Pose {
     anchor: { at: b.anchor.at, to: lerpV(a.anchor.to, b.anchor.to, t) },
     trunk: lerp(a.trunk, b.trunk, t),
     head: n(a.head ?? 0, b.head ?? 0),
+    shrug: n(a.shrug ?? 0, b.shrug ?? 0),
     leg: limb(a.leg, b.leg),
     arm: limb(a.arm, b.arm),
     farLeg: a.farLeg || b.farLeg ? limb(a.farLeg || a.leg, b.farLeg || b.leg) : undefined,
@@ -250,7 +258,7 @@ export function jointProblems(j: Joints, opts: { wideArms?: boolean } = {}): str
   };
   for (const [s, th, sh, ft] of [
     ['', g.thigh, g.shin, g.foot],
-    [' (дальняя)', g.thigh2, g.shin2, g.foot],
+    [' (дальняя)', g.thigh2, g.shin2, g.foot2],
   ] as Array<[string, number, number, number]>) {
     check('колено' + s, norm(th - sh), -2, 155);
     check('таз' + s, norm(th + g.trunk), -35, 150);

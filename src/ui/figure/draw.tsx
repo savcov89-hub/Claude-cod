@@ -214,7 +214,9 @@ function LimbMuscle({ j, m }: { j: Joints; m: Muscle }) {
 
 /** The person in a pose, with the working muscles lit, between the layers of equipment. */
 export function Person({ j, work = [], gear = [], halo = true }: { j: Joints; work?: Muscle[]; gear?: Gear[]; halo?: boolean }) {
-  const at = (o: V): V => add(add(j.hip, j.up, o[0]), j.front, o[1]);
+  // Raised shoulders (a shrug) lift the top of the trunk outline with them.
+  const shrug = len(sub(j.shoulder, j.hip)) - BODY.trunk;
+  const at = (o: V): V => add(add(j.hip, j.up, o[0] + (o[0] > 17 ? shrug * Math.min(1, (o[0] - 17) / 7) : 0)), j.front, o[1]);
   const trunk = smooth(TRUNK.map(at));
   const layer = (l: Gear['layer']) => gear.filter((g) => g.layer === l).map((g, i) => <g key={l + i}>{g.node}</g>);
   const headR = BODY.head;
