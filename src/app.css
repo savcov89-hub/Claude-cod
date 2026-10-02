@@ -1592,6 +1592,61 @@ table {
   stroke: var(--line);
   stroke-width: 1;
 }
+/* A chart draws itself when it appears: the line from left to right, the fill behind it, then the last point. */
+@media (prefers-reduced-motion: no-preference) {
+  .spark-line {
+    stroke-dasharray: 1 1;
+    stroke-dashoffset: 1;
+    animation: spark-draw 1s cubic-bezier(0.45, 0, 0.2, 1) var(--spark-delay, 0ms) forwards;
+  }
+  .spark-area {
+    animation: spark-reveal 1s cubic-bezier(0.45, 0, 0.2, 1) var(--spark-delay, 0ms) both;
+  }
+  .spark-dot {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: spark-pop 0.4s cubic-bezier(0.3, 1.6, 0.5, 1) calc(var(--spark-delay, 0ms) + 0.85s) both;
+  }
+  .spark-grid {
+    animation: spark-fade 0.5s ease-out var(--spark-delay, 0ms) both;
+  }
+}
+@keyframes spark-draw {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
+  4% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+@keyframes spark-reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes spark-pop {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes spark-fade {
+  from {
+    opacity: 0;
+  }
+}
 
 /* builder */
 .builder-grid {

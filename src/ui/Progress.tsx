@@ -86,8 +86,8 @@ export function ProgressView({
           Прогресс — больше вес или больше повторов с тем же весом. Застой — 3 выполнения подряд без прибавки. График — расчётный максимум на 1 повтор.
         </p>
         <div className="trend-list">
-          {trends.map((t) => (
-            <TrendRow key={t.exerciseId} t={t} open={open === t.exerciseId} onToggle={() => setOpen(open === t.exerciseId ? null : t.exerciseId)} />
+          {trends.map((t, i) => (
+            <TrendRow key={t.exerciseId} t={t} delay={Math.min(i, 8) * 70} open={open === t.exerciseId} onToggle={() => setOpen(open === t.exerciseId ? null : t.exerciseId)} />
           ))}
         </div>
       </section>
@@ -95,7 +95,7 @@ export function ProgressView({
   );
 }
 
-function TrendRow({ t, open, onToggle }: { t: ExerciseTrend; open: boolean; onToggle: () => void }) {
+function TrendRow({ t, open, onToggle, delay = 0 }: { t: ExerciseTrend; open: boolean; onToggle: () => void; delay?: number }) {
   const last = t.series[t.series.length - 1];
   const weeks = Math.max(1, Math.round((new Date(last.date).getTime() - new Date(t.series[0].date).getTime()) / (7 * 86400000)));
   return (
@@ -116,7 +116,7 @@ function TrendRow({ t, open, onToggle }: { t: ExerciseTrend; open: boolean; onTo
             )}
           </span>
         </div>
-        <Sparkline points={t.series} />
+        <Sparkline points={t.series} delay={delay} />
         <TrendChip trend={t.trend} extra={t.trend === 'stall' ? t.stallSessions + ' тр.' : undefined} />
       </button>
       {open && (

@@ -135,15 +135,19 @@ export function Sparkline({
   width = 132,
   height = 40,
   fromZero = false,
+  delay = 0,
 }: {
   points: Array<Pick<SeriesPoint, 'date' | 'e1rm'>>;
   width?: number;
   height?: number;
   fromZero?: boolean;
+  /** The chart draws itself when it appears; several on a page start one after another (ms). */
+  delay?: number;
 }) {
+  const style = { ['--spark-delay' as string]: delay + 'ms' };
   if (points.length < 2)
     return (
-      <svg className="spark" width={width} height={height} aria-hidden="true">
+      <svg className="spark" width={width} height={height} aria-hidden="true" style={style}>
         <line x1="0" x2={width} y1={height - 6} y2={height - 6} className="spark-grid" />
       </svg>
     );
@@ -161,10 +165,10 @@ export function Sparkline({
   const area = line + ` L${px(x1).toFixed(1)} ${height - pad} L${px(x0).toFixed(1)} ${height - pad} Z`;
   const last = points[points.length - 1];
   return (
-    <svg className="spark" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+    <svg className="spark" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true" style={style}>
       <line x1={pad} x2={width - pad} y1={py(lo)} y2={py(lo)} className="spark-grid" />
       <path d={area} className="spark-area" />
-      <path d={line} className="spark-line" />
+      <path d={line} className="spark-line" pathLength={1} />
       <circle cx={px(x1)} cy={py(last.e1rm)} r="3.2" className="spark-dot" />
     </svg>
   );

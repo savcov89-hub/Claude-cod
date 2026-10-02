@@ -125,7 +125,7 @@ export function BodyView({ clientId }: { clientId?: string }) {
         </div>
         {steps.length > 1 ? (
           <div className="body-spark">
-            <Sparkline points={steps.map((e) => ({ date: e.date, e1rm: e.steps as number }))} width={320} height={64} fromZero />
+            <Sparkline points={steps.map((e) => ({ date: e.date, e1rm: e.steps as number }))} width={320} height={64} fromZero delay={180} />
             <div className="muted small row between">
               <span>{fmtDate(steps[0].date)}</span>
               <span>{fmtDate(steps[steps.length - 1].date)}</span>
@@ -148,7 +148,7 @@ export function BodyView({ clientId }: { clientId?: string }) {
         </div>
         {eaten.length > 1 && (
           <div className="body-spark">
-            <Sparkline points={eaten.map((e) => ({ date: e.date, e1rm: e.kcal as number }))} width={320} height={64} fromZero />
+            <Sparkline points={eaten.map((e) => ({ date: e.date, e1rm: e.kcal as number }))} width={320} height={64} fromZero delay={360} />
             <div className="muted small row between">
               <span>{fmtDate(eaten[0].date)}</span>
               <span>{fmtDate(eaten[eaten.length - 1].date)}</span>
