@@ -123,24 +123,35 @@ export const tricepsPushdown: Move = (() => {
   };
 })();
 
-/** Overhead rope extension: facing away from a high pulley, leaning forward; the hands from behind the head to straight. */
+/**
+ * Overhead rope extension: facing away from the stack, leaning forward; the pulley at the height of the pelvis behind,
+ * the rope runs up along the back over the shoulders to the hands; the hands from behind the head to straight.
+ */
 export const overheadTriceps: Move = (() => {
   const base = { anchor: { at: 'farAnkle' as const, to: [40, ANKLE_Y] as V }, trunk: 34, head: -14, leg: { a: 18, b: -6, foot: 90 }, farLeg: { a: -12, b: -16, foot: 90 } };
-  const pulley: V = [12, 16];
+  const j0 = at({ ...base, arm: { a: 0 } } as Pose);
+  const pulley: V = [12, onTrunk(j0, 'hip', 3, -6.2)[1]];
   return {
     frames: [
       { ...base, arm: { a: 148, b: 148 + 140 } },
       { ...base, arm: { a: 150, b: 150 } },
     ],
     work: ['triceps'],
-    show: [pulley, [pulley[0] - 3, FLOOR]],
-    gear: (j) => [
-      { layer: 'back', node: G.floor() },
-      { layer: 'back', node: G.bar([pulley[0] - 3, FLOOR], [pulley[0] - 3, pulley[1] - 4], 2.4) },
-      { layer: 'back', node: G.stack(pulley[0] - 8, 74, 6, 8) },
-      { layer: 'back', node: G.wheel(pulley) },
-      { layer: 'back', node: G.cable(pulley, j.hand) },
-    ],
+    show: [pulley, [pulley[0] - 3, FLOOR], [pulley[0] - 3, pulley[1] - 8]],
+    gear: (j) => {
+      // The rope lies along the back: from the hands over the shoulders down to the pelvis, then straight back to the pulley.
+      const onBack = onTrunk(j, 'shoulder', -1, -6.6);
+      const atPelvis = onTrunk(j, 'hip', 3, -6.2);
+      return [
+        { layer: 'back', node: G.floor() },
+        { layer: 'back', node: G.bar([pulley[0] - 3, FLOOR], [pulley[0] - 3, pulley[1] - 8], 2.4) },
+        { layer: 'back', node: G.stack(pulley[0] - 8, 74, 6, 8) },
+        { layer: 'back', node: G.wheel(pulley) },
+        { layer: 'back', node: G.cable(pulley, atPelvis) },
+        { layer: 'front', node: G.cable(atPelvis, onBack) },
+        { layer: 'front', node: G.cable(onBack, j.hand) },
+      ];
+    },
   };
 })();
 
