@@ -31,11 +31,14 @@ export function Gym({
   openClient,
   openBuilder,
   onSwitchRole,
+  focus,
 }: {
   data: TrainerData;
   openClient: (clientId: string) => void;
   openBuilder: (clientId: string) => void;
   onSwitchRole?: () => void;
+  /** Show this client's tab with this workout (from «Не завершена… Открыть» in the client card). */
+  focus?: { clientId: string; workout: OpenWorkout; n: number } | null;
 }) {
   const present = presentClients(data.clients);
   const [active, setActive] = useState<string | null>(null);
@@ -146,6 +149,30 @@ export function Gym({
     }
     if (ids.length && !activeId) setActive(ids[0]);
   };
+  // A workout opened from the client card: the client is checked in if not here, their tab shows it.
+  useEffect(() => {
+    if (!focus) return;
+    const id = focus.clientId;
+    const c = data.clients.find((x) => x.clientId === id);
+    if (!c) return;
+    const pending = goingClients.current[id];
+    if (pending) {
+      clearTimeout(pending.timer);
+      delete goingClients.current[id];
+      setGoing((ids) => ids.filter((x) => x !== id));
+    }
+    const src = asSource(focus.workout, id);
+    if (src) setSources((s) => ({ ...s, [id]: src }));
+    setFinished((f) => {
+      const { [id]: _drop, ...rest } = f;
+      return rest;
+    });
+    autoTried.current.delete(id);
+    setActive(id);
+    if (!present.some((x) => x.clientId === id)) void data.setPresence(c, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.n]);
+
   // "Ушёл" saves the workout to history automatically when sets were done.
   const checkOut = async (c: ClientItem) => {
     setLeaving(c.clientId);

@@ -534,6 +534,49 @@ await scenario('18. Клиентка сама начала тренировку 
   expect(cnt === '1', 'her workout with her set is open in the gym', cnt);
 });
 
+await scenario('19. Карточка клиента → «Не завершена… Открыть» → его вкладка в зале, среди всех', async () => {
+  await goGym();
+  const tabs = p.locator('.gym-tab:not(.add)');
+  const names = [];
+  for (let i = 0; i < (await tabs.count()); i++) names.push((await tabs.nth(i).locator('.gt-name').innerText()).trim());
+  // Someone in the gym with sets done, and another tab shown meanwhile.
+  let who = null;
+  for (const n of names) {
+    await p.locator('.gym-tab', { hasText: n }).first().click();
+    await p.waitForTimeout(500);
+    const done = Number((await pane().innerText()).match(/(\d+)\/(\d+)/)?.[1] || 0);
+    if (done > 0) {
+      who = n;
+      break;
+    }
+  }
+  if (!who) {
+    await checkIn('Иван');
+    await tickNext(pane(), 30);
+    await p.waitForTimeout(1500);
+    who = 'Иван';
+  }
+  const other = names.find((n) => n !== who);
+  if (other) await p.locator('.gym-tab', { hasText: other }).first().click();
+  await p.waitForTimeout(400);
+  const before = await p.locator('.gym-tab:not(.add)').count();
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: who }).first().locator('.client-open').click();
+  await p.waitForTimeout(1500);
+  const bar = p.locator('.review-bar', { hasText: 'Не завершена' }).first();
+  expect((await bar.count()) > 0, 'the client card shows «Не завершена…» for ' + who);
+  await bar.getByRole('button', { name: 'Открыть' }).click();
+  await p.waitForTimeout(1200);
+  const onGym = (await p.locator('.nav').getByRole('button', { name: 'Зал' }).getAttribute('aria-current')) === 'page';
+  const active = (await p.locator('.gym-tab.active .gt-name').innerText().catch(() => '')).trim();
+  const after = await p.locator('.gym-tab:not(.add)').count();
+  expect(onGym && active === who, '«Открыть» goes to the gym, to ' + who + "'s tab", [onGym, active]);
+  expect(after === before && after > 1, 'all clients in the gym are there to switch between', [before, after]);
+  const done = Number((await pane().innerText()).match(/(\d+)\/(\d+)/)?.[1] || 0);
+  expect(done > 0, 'the unfinished workout with its sets is the one shown', done);
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { BookOpen, ClipboardList, Dumbbell, LayoutDashboard, Users } from 'lucide-react';
-import type { Profile } from '../types';
+import type { OpenWorkout, Profile } from '../types';
 import { presentClients, useTrainerData } from './data';
 import { Gym } from './Gym';
 import { Dashboard } from './Dashboard';
@@ -18,6 +18,8 @@ export function TrainerApp({ header, onSwitchRole }: { profile: Profile; header:
   const [tab, setTab] = useState<Tab>('gym');
   const [card, setCard] = useState<{ id: string; tab?: string } | null>(null);
   const [builder, setBuilder] = useState<BuilderOptions | null>(null);
+  // An unfinished workout opened from the client card: shown on the client's tab in the gym (`n` — each request anew).
+  const [gymFocus, setGymFocus] = useState<{ clientId: string; workout: OpenWorkout; n: number } | null>(null);
   const present = presentClients(data.clients).length;
   const reviews = data.clients.filter((c) => c.needsReview && !c.archived).length;
 
@@ -27,6 +29,10 @@ export function TrainerApp({ header, onSwitchRole }: { profile: Profile; header:
     setTab(t);
     setCard(null);
     setBuilder(null);
+  };
+  const openInGym = (clientId: string, workout: OpenWorkout) => {
+    setGymFocus({ clientId, workout, n: Date.now() });
+    go('gym');
   };
 
   const nav: Array<[Tab, string, ReactNode, number]> = [
@@ -68,7 +74,13 @@ export function TrainerApp({ header, onSwitchRole }: { profile: Profile; header:
         ) : (
           <>
             <div hidden={tab !== 'gym' || !!overlay}>
-              <Gym data={data} openClient={openClient} openBuilder={(clientId) => openBuilder({ clientId })} onSwitchRole={onSwitchRole} />
+              <Gym
+                data={data}
+                openClient={openClient}
+                openBuilder={(clientId) => openBuilder({ clientId })}
+                onSwitchRole={onSwitchRole}
+                focus={gymFocus}
+              />
             </div>
             {overlay === 'builder' && (
               <ProgramBuilder
@@ -93,6 +105,7 @@ export function TrainerApp({ header, onSwitchRole }: { profile: Profile; header:
                 onTabChange={(t) => setCard((c) => (c ? { ...c, tab: t } : c))}
                 onBack={() => setCard(null)}
                 openBuilder={openBuilder}
+                openInGym={(w) => openInGym(card!.id, w)}
               />
             )}
             {!overlay && tab === 'dash' && <Dashboard data={data} openClient={openClient} />}

@@ -23,12 +23,15 @@ export function ClientCard({
   onBack,
   openBuilder,
   onTabChange,
+  openInGym,
 }: {
   data: TrainerData;
   clientId: string;
   initialTab?: string;
   onTabChange?: (tab: string) => void;
   onBack: () => void;
+  /** An unfinished workout goes to the client's tab in the gym (checked in if needed), among everyone there. */
+  openInGym?: (workout: OpenWorkout) => void;
   openBuilder: (opts: { clientId: string; program?: Program; copy?: boolean }) => void;
 }) {
   const client = data.clients.find((c) => c.clientId === clientId);
@@ -212,7 +215,10 @@ export function ClientCard({
           <span>
             Не завершена: <strong>{w.free ? 'свободная тренировка' : w.dayName}</strong> от {fmtDateTime(w.updatedAt)}, {w.done} подх.
           </span>
-          <button className="btn btn-primary btn-sm" onClick={() => setJournal({ trainerId: w.trainerId, programId: w.programId, dayId: w.dayId })}>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => (openInGym ? openInGym(w) : setJournal({ trainerId: w.trainerId, programId: w.programId, dayId: w.dayId }))}
+          >
             Открыть
           </button>
         </div>
