@@ -955,6 +955,8 @@ function JournalBody({
       }
       // Backdated to the last entry, wherever it was made.
       if (at && lastAt && Date.parse(at) < lastAt) at = new Date(lastAt).toISOString();
+      // Finished long after the last set (a workout left open and found later): dated to that set.
+      if (!at && lastSetAt && Date.now() - lastSetAt > AUTO_FINISH_IDLE_MS) at = new Date(Math.max(lastSetAt, lastAt || 0)).toISOString();
       pending.current = true;
       // Offline the draft stays unsaved: the workout itself goes to the outbox with all its sets.
       await persist().catch((err) => {
@@ -1418,7 +1420,7 @@ function JournalBody({
           onClose={() => setSavingDay(false)}
           onSaved={(text) => {
             setSavingDay(false);
-            setSavedDay(text);
+            setSavedDay(text + ' Эту тренировку продолжайте здесь — «Завершить» запишет её в историю.');
             onProgramChanged?.();
           }}
         />
@@ -1793,7 +1795,8 @@ function SaveAsDay({
             <input id="free-day-name" value={dayName} onChange={(e) => setDayName(e.target.value)} />
           </label>
           <p className="muted small">
-            {entries.filter((e) => e.extra).length} упражнений с теми же подходами и повторами. Сегодняшние результаты останутся в истории, прогрессия продолжится.
+            {entries.filter((e) => e.extra).length} упражнений с теми же подходами и повторами. Сегодняшняя тренировка
+            продолжается здесь и попадёт в историю после «Завершить тренировку» (или «Ушёл»), прогрессия продолжится.
           </p>
           <button className="btn btn-primary btn-block" disabled={busy || !dayName.trim()} onClick={() => void save()}>
             {busy ? 'Сохраняем…' : target ? 'Добавить тренировку в программу' : 'Создать программу'}

@@ -2,6 +2,7 @@ import { catalog } from '../src/catalog';
 import { groupMuscles, exerciseRules, programIssue } from '../src/trainingRules';
 import { clientInsights, sessionRecords, type ClientInsights } from '../src/analytics';
 import { nowIso } from '../src/clock';
+import type { OpenWorkout } from '../src/types';
 
 // The request logic is written against this small surface so the same code runs
 // on Supabase (backend/server.ts) and in the demo build (in-browser database).
@@ -394,6 +395,34 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     return out;
   }
 
+  /**
+   * Workouts of one client started with this trainer and not finished (sets done, draft still open), newest first:
+   * the gym opens the one under way, the client card offers to finish it.
+   */
+  async function openWorkouts(trainerId: string, clientId: string, maxAgeMs: number, all?: Array<ProgramRecord & { id: string }>) {
+    const programs = (all || (await listAll<ProgramRecord>(programsTable(trainerId)))).filter((p) => p.clientId === clientId && !p.archived);
+    const nowMs = Date.parse(nowIso());
+    const out: OpenWorkout[] = [];
+    for (const p of programs)
+      for (const d of p.days) {
+        const draft = await first<DraftRecord>(draftTable(clientId, p.id, d.id));
+        if (!draft || draft.closed || !(nowMs - Date.parse(draft.updatedAt) <= maxAgeMs)) continue;
+        const done = draft.exercises.reduce((n, e) => n + e.sets.filter((x) => x.reps > 0).length, 0);
+        if (done)
+          out.push({
+            trainerId,
+            programId: p.id,
+            programName: p.name,
+            dayId: d.id,
+            dayName: d.name,
+            updatedAt: draft.updatedAt,
+            done,
+            ...(p.free ? { free: true } : {}),
+          });
+      }
+    return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
   /** Finds a catalog exercise or one of the trainer's own; own exercises are read once per call site. */
   function knownExercises(trainerId: string) {
     let custom: Promise<Exercise[]> | null = null;
@@ -604,10 +633,19 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
       requireAuth(),
       async (ctx: Ctx) => {
         if (!(await trainerOnly(ctx))) return error('Доступ только для тренера.', 403);
-        const clients = (await clientsOf(ctx.user!.userId)).map(({ id: _id, ...c }) => ({
+        const trainerId = ctx.user!.userId;
+        const clients: any[] = (await clientsOf(trainerId)).map(({ id: _id, ...c }) => ({
           ...c,
           userId: c.userId === undefined ? c.clientId : c.userId,
         }));
+        // In the gym now: the workout under way (also a free one, or one left after a reload) opens by itself.
+        const nowMs = Date.parse(nowIso());
+        const present = clients.filter((c) => c.checkedInAt && nowMs - Date.parse(c.checkedInAt) < 12 * 3600000);
+        const programs = present.length ? await listAll<ProgramRecord>(programsTable(trainerId)) : [];
+        for (const c of present) {
+          const [live] = await openWorkouts(trainerId, c.clientId, 12 * 3600000, programs);
+          if (live) c.live = live;
+        }
         return json({ clients });
       },
     ],
@@ -853,7 +891,9 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const sessions = (await listAll<SessionRecord>(sessionsTable(clientId), 400))
           .filter((s) => s.trainerId === ctx.user!.userId)
           .sort((a, b) => b.completedAt.localeCompare(a.completedAt));
-        return json({ sessions });
+        // Started and not finished (up to 14 days back, as far as a workout can be backdated).
+        const open = await openWorkouts(ctx.user!.userId, clientId, 14 * 86400000);
+        return json({ sessions, open });
       },
     ],
 

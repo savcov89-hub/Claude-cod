@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Clipboard, Copy, Pencil, Plus, Smartphone, Archive, RotateCcw, Share2 } from 'lucide-react';
 import { api, inGym, readError } from '../transport';
 import { inviteLink } from '../invite';
-import type { Program, Session } from '../types';
+import type { OpenWorkout, Program, Session } from '../types';
 import { activeClients, lastVisit, programsOf, visits30, type TrainerData } from './data';
-import { Avatar, Confirm, Empty, Sheet, VisitGrid, ago, fmtDate } from './common';
+import { Avatar, Confirm, Empty, Sheet, VisitGrid, ago, fmtDate, fmtDateTime } from './common';
 import { ProgressView } from './Progress';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
@@ -40,7 +40,9 @@ export function ClientCard({
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
-  const [journal, setJournal] = useState<{ program: Program; dayId: string } | null>(null);
+  const [journal, setJournal] = useState<{ trainerId: string; programId: string; dayId: string } | null>(null);
+  // Started and not finished (e.g. a free workout left when the app was closed): offered to open and finish.
+  const [open, setOpen] = useState<OpenWorkout[]>([]);
   // Renaming: the new name while the field is open.
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
@@ -60,6 +62,7 @@ export function ClientCard({
     try {
       const r = await api.get('/api/client/' + clientId + '/history');
       setSessions(r.data.sessions);
+      setOpen(r.data.open || []);
     } catch (e) {
       setErr(readError(e));
     } finally {
@@ -76,8 +79,11 @@ export function ClientCard({
   if (journal)
     return (
       <Journal
-        source={{ trainerId: journal.program.trainerId, programId: journal.program.id, dayId: journal.dayId }}
-        onBack={() => setJournal(null)}
+        source={journal}
+        onBack={() => {
+          setJournal(null);
+          void loadHistory();
+        }}
         onDayChange={(dayId) => setJournal({ ...journal, dayId })}
         onCompleted={async ({ records }) => {
           setJournal(null);
@@ -201,6 +207,16 @@ export function ClientCard({
         ))}
       </nav>
       {err && <div className="alert">{err}</div>}
+      {open.map((w) => (
+        <div className="review-bar" key={w.programId + '/' + w.dayId}>
+          <span>
+            Не завершена: <strong>{w.free ? 'свободная тренировка' : w.dayName}</strong> от {fmtDateTime(w.updatedAt)}, {w.done} подх.
+          </span>
+          <button className="btn btn-primary btn-sm" onClick={() => setJournal({ trainerId: w.trainerId, programId: w.programId, dayId: w.dayId })}>
+            Открыть
+          </button>
+        </div>
+      ))}
 
       {tab === 'overview' && <Overview data={data} clientId={clientId} sessionsCount={sessions.length} />}
       {tab === 'progress' && (loading ? <div className="loader-block"><span className="loader" /></div> : <ProgressView sessions={sessions} programs={data.programs.filter((p) => p.clientId === clientId)} exercises={data.exercises} />)}
@@ -231,7 +247,7 @@ export function ClientCard({
         <ClientPrograms
           data={data}
           clientId={clientId}
-          onOpenDay={(program, dayId) => setJournal({ program, dayId })}
+          onOpenDay={(program, dayId) => setJournal({ trainerId: program.trainerId, programId: program.id, dayId })}
           openBuilder={openBuilder}
         />
       )}

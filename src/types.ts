@@ -29,6 +29,20 @@ export interface ClientItem {
   archived?: boolean;
   /** Ready-made picture (src/ui/avatars.tsx). */
   avatar?: string;
+  /** In the gym: the workout under way (sets done, not finished). */
+  live?: OpenWorkout;
+}
+/** A workout started and not finished: sets done, still open. */
+export interface OpenWorkout {
+  trainerId: string;
+  programId: string;
+  programName: string;
+  dayId: string;
+  dayName: string;
+  updatedAt: string;
+  done: number;
+  /** A free workout (no program). */
+  free?: boolean;
 }
 export interface Exercise {
   id: string;

@@ -57,10 +57,20 @@ export function Gym({
   const activeId = shown.some((c) => c.clientId === active) ? active : shown[0]?.clientId || null;
   const presentKey = present.map((c) => c.clientId).join(',');
 
+  const liveOf = (clientId: string): Source | null => {
+    const live = data.clients.find((c) => c.clientId === clientId)?.live;
+    if (!live) return null;
+    if (live.free) return { programId: live.programId, dayId: live.dayId, trainerId: live.trainerId, free: true };
+    const p = programsOf(data.programs, clientId).find((x) => x.id === live.programId);
+    return p?.days.some((d) => d.id === live.dayId) ? { programId: p.id, dayId: live.dayId } : null;
+  };
   const sourceOf = (clientId: string): Source | null => {
     const list = programsOf(data.programs, clientId);
     const chosen = sources[clientId];
     if (chosen && (chosen.free || list.some((p) => p.id === chosen.programId))) return chosen;
+    // A workout already under way (also a free one, e.g. after the app was reopened) comes first.
+    const live = liveOf(clientId);
+    if (live) return live;
     const p = defaultProgram(list);
     return p ? { programId: p.id, dayId: p.nextDayId || p.days[0].id } : null;
   };
@@ -188,6 +198,13 @@ export function Gym({
       const idle = a?.lastSetAt && a.done > 0 && now - a.lastSetAt > IDLE_MS;
       const empty = !a?.done && !!c.checkedInAt && now - new Date(c.checkedInAt).getTime() > EMPTY_MS;
       if (!idle && !empty) continue;
+      // Nothing done here, but a workout with sets is open elsewhere (another day, a free one): it is shown instead.
+      const live = empty ? liveOf(id) : null;
+      const src = sourceOf(id);
+      if (live && src && (live.programId !== src.programId || live.dayId !== src.dayId)) {
+        setSources((s) => ({ ...s, [id]: live }));
+        continue;
+      }
       autoTried.current.add(id);
       void (async () => {
         const finish = finishers.current[id];
