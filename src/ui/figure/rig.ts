@@ -37,6 +37,11 @@ export interface Reach {
   upperK?: number;
   /** `bend` is in the trunk's frame ([along the spine, to the front]) — it turns with the body. */
   bendTrunk?: boolean;
+  /**
+   * Where the elbow is seen (from the shoulder, in the trunk's frame) for arms that move out to the sides —
+   * the upper arm is then seen shorter or longer, the elbow follows this path instead of being solved.
+   */
+  elbow?: V;
 }
 
 export interface Limb {
@@ -153,10 +158,15 @@ export function joints(p: Pose): Joints {
     if (l.reach) {
       const k = l.reach.shorten ?? 1;
       const target = l.reach.from ? inTrunk(l.reach.to, l.reach.from === 'hip' ? hip0 : shoulder0) : l.reach.to;
-      const r = solve(s, target, BODY.upper * k * (l.reach.upperK ?? 1), BODY.fore * k, bendOf(l.reach));
-      if (!r.ok) short.push(name);
-      elbow = r.mid;
-      hand = r.end;
+      if (l.reach.elbow) {
+        elbow = inTrunk(l.reach.elbow, shoulder0);
+        hand = target;
+      } else {
+        const r = solve(s, target, BODY.upper * k * (l.reach.upperK ?? 1), BODY.fore * k, bendOf(l.reach));
+        if (!r.ok) short.push(name);
+        elbow = r.mid;
+        hand = r.end;
+      }
       upper = angleOf(sub(elbow, s));
       fore = angleOf(sub(hand, elbow));
     } else {
@@ -232,12 +242,82 @@ export function joints(p: Pose): Joints {
   return j;
 }
 
+/** World vector → the trunk's frame ([along the spine, to the front]). */
+function toTrunk(j: Joints, v: V): V {
+  return [v[0] * j.up[0] + v[1] * j.up[1], v[0] * j.front[0] + v[1] * j.front[1]];
+}
+
+/**
+ * An arm given by angles, as the same arm given by its hand's point (from the shoulder, in the trunk's frame),
+ * so that it can go smoothly to a pose where the hand holds something. `other` gives the elbow's side when the
+ * arm is straight.
+ */
+function armAsReach(p: Pose, far: boolean, other?: Reach): Limb {
+  const limb = far ? p.farArm || p.arm : p.arm;
+  if (limb.reach) return limb;
+  const j = joints(p);
+  const s = add(j.shoulder, j.front, 0.4);
+  const hand = far ? j.hand2 : j.hand;
+  const elbow = far ? j.elbow2 : j.elbow;
+  const mid = lerpV(s, hand, 0.5);
+  const off = sub(elbow, mid);
+  const bend: V = len(off) > 0.6 ? toTrunk(j, off) : other ? (other.bendTrunk ? other.bend : toTrunk(j, other.bend)) : toTrunk(j, j.front);
+  return { reach: { from: 'shoulder', to: toTrunk(j, sub(hand, j.shoulder)), bend, bendTrunk: true, shorten: 1 } };
+}
+
+/** A hand's reach given from the shoulder with the elbow's side in the trunk's frame (as the pose is now). */
+function inTrunk(p: Pose, far: boolean): Pose {
+  const limb = far ? p.farArm || p.arm : p.arm;
+  const r = limb.reach;
+  if (!r || (r.from === 'shoulder' && r.bendTrunk)) return p;
+  const j = joints(p);
+  const to: V = r.from === 'shoulder' ? r.to : r.from === 'hip' ? toTrunk(j, sub(add(add(j.hip, j.up, r.to[0]), j.front, r.to[1]), j.shoulder)) : toTrunk(j, sub(r.to, j.shoulder));
+  const bend: V = r.bendTrunk ? r.bend : toTrunk(j, r.bend);
+  const next: Limb = { ...limb, reach: { ...r, from: 'shoulder', to, bend, bendTrunk: true } };
+  return far ? { ...p, farArm: next } : { ...p, arm: next, farArm: p.farArm || p.arm };
+}
+
+/** Both poses' arms in the same form (angles, or hands at points), so the arm moves without a jump. */
+function sameArms(a: Pose, b: Pose): [Pose, Pose] {
+  let x = a;
+  let y = b;
+  for (const far of [false, true]) {
+    const la = far ? x.farArm || x.arm : x.arm;
+    const lb = far ? y.farArm || y.arm : y.arm;
+    if (!!la.reach === !!lb.reach) continue;
+    if (!la.reach) {
+      const r = armAsReach(x, far, lb.reach);
+      x = far ? { ...x, farArm: r } : { ...x, arm: r, farArm: x.farArm || x.arm };
+    } else {
+      const r = armAsReach(y, far, la.reach);
+      y = far ? { ...y, farArm: r } : { ...y, arm: r, farArm: y.farArm || y.arm };
+    }
+  }
+  for (const far of [false, true]) {
+    const la = (far ? x.farArm || x.arm : x.arm).reach;
+    const lb = (far ? y.farArm || y.arm : y.arm).reach;
+    if (la && lb && (la.from !== lb.from || !!la.bendTrunk !== !!lb.bendTrunk)) {
+      x = inTrunk(x, far);
+      y = inTrunk(y, far);
+    }
+  }
+  return [x, y];
+}
+
 /** A pose between two others: every angle and point goes its own way, evenly. */
-export function mix(a: Pose, b: Pose, t: number): Pose {
+export function mix(a0: Pose, b0: Pose, t: number): Pose {
+  const [a, b] = sameArms(a0, b0);
   const n = (x: number | undefined, y: number | undefined) => (x === undefined || y === undefined ? (t < 0.5 ? x : y) : lerp(x, y, t));
   const reach = (x?: Reach, y?: Reach): Reach | undefined =>
-    x && y
-      ? { ...y, to: lerpV(x.to, y.to, t), shorten: n(x.shorten ?? 1, y.shorten ?? 1), upperK: n(x.upperK ?? 1, y.upperK ?? 1), bend: lerpV(x.bend, y.bend, t) }
+    x && y && !!x.bendTrunk === !!y.bendTrunk && !!x.from === !!y.from
+      ? {
+          ...y,
+          to: lerpV(x.to, y.to, t),
+          shorten: n(x.shorten ?? 1, y.shorten ?? 1),
+          upperK: n(x.upperK ?? 1, y.upperK ?? 1),
+          bend: lerpV(x.bend, y.bend, t),
+          elbow: x.elbow && y.elbow ? lerpV(x.elbow, y.elbow, t) : y.elbow,
+        }
       : t < 0.5
         ? x
         : y;

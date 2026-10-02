@@ -1,6 +1,9 @@
 // Back: pulldowns, rows, pull-ups, extensions, deadlifts. Checked against the photos in scripts/figure-refs.json.
 import { ANKLE_Y, FLOOR, G, add, at, feetAt, lever, onTrunk, seat, SEAT_HIP_Y, trunkFrame, type Gear, type Joints, type Move, type Pose, type V } from './kit';
 
+/** A wide-grip arm seen from the side: the hand at `hand`, the elbow at `elbow` (both from the shoulder, in the trunk's frame). */
+const wideArm = (hand: V, elbow: V) => ({ reach: { from: 'shoulder' as const, to: hand, bend: [0, -1] as V, bendTrunk: true, elbow } });
+
 /** Lat pulldown: a cable from the top pulley (`cable`), or a lever machine with a stack or plates. */
 function pulldown(kind: 'cable' | 'stack' | 'plates'): Move {
   const base = { anchor: { at: 'hip' as const, to: [42, 71.2] as V }, head: -12, leg: { a: 90, b: 2, foot: 90 } };
@@ -28,8 +31,11 @@ function pulldown(kind: 'cable' | 'stack' | 'plates'): Move {
         ];
   return {
     frames: [
-      { ...base, trunk: -8, arm: { reach: { from: 'shoulder', to: [22, 4.6], bend: [-0.2, 1], shorten: 0.92 } } },
-      { ...base, trunk: -20, arm: { reach: { from: 'shoulder', to: [0.5, 6.8], bend: [-0.5, 1], shorten: 0.78 } } },
+      // Seen from the side the forearms stay nearly upright under the bar; the elbows go down along the sides of
+      // the body to the ribs, a little behind (never forward to the face).
+      { ...base, trunk: -8, arm: wideArm([22.5, 4.6], [11.9, 2.4]) },
+      { ...base, trunk: -14, arm: wideArm([12, 6.5], [0.5, -1.5]) },
+      { ...base, trunk: -20, arm: wideArm([-1, 5.5], [-10, -3.5]) },
     ],
     work: ['lats', 'upperBack', 'biceps'],
     wideArms: true,
@@ -55,10 +61,12 @@ function pullUp(assisted: boolean): Move {
   const legs = assisted ? { a: 4, b: -86, foot: 30 } : { a: 18, b: -78, foot: 36 };
   return {
     frames: [
-      { anchor: { at: 'hand', to: bar }, trunk: -6, head: -8, leg: legs, arm: { a: 176, b: 178 } },
-      { anchor: { at: 'hand', to: bar }, trunk: -14, head: -12, leg: legs, arm: { a: 28, b: 168 } },
+      { anchor: { at: 'hand', to: bar }, trunk: -6, head: -8, leg: legs, arm: wideArm([25, 1.5], [13.3, 0.8]) },
+      { anchor: { at: 'hand', to: bar }, trunk: -10, head: -10, leg: legs, arm: wideArm([13, 4.5], [1, -1.5]) },
+      { anchor: { at: 'hand', to: bar }, trunk: -14, head: -12, leg: legs, arm: wideArm([1.5, 6.5], [-9.5, -3]) },
     ],
     work: ['lats', 'upperBack', 'biceps'],
+    wideArms: true,
     show: [[bar[0], FLOOR], [bar[0] + 14, 10]],
     gear: (j) => [
       { layer: 'back', node: G.floor() },
@@ -148,7 +156,7 @@ export const barbellRow: Move = (() => {
   return {
     frames: [
       { ...base, arm: { a: -10, b: -10 } },
-      { ...base, arm: { reach: { from: 'shoulder', to: [-13.5, 7.2], bend: [-0.3, -1], shorten: 0.95 } } },
+      { ...base, arm: { reach: { from: 'shoulder', to: [-13.5, 7.2], bend: [-0.6, -1], bendTrunk: true, shorten: 0.95 } } },
     ],
     work: ['lats', 'upperBack', 'biceps'],
     standing: true,
@@ -175,7 +183,7 @@ export const oneArmRow: Move = (() => {
   return {
     frames: [
       { ...base, arm: { a: 2, b: 2 } },
-      { ...base, arm: { reach: { from: 'shoulder', to: [-15, 5], bend: [-0.3, -1], shorten: 0.95 } } },
+      { ...base, arm: { reach: { from: 'shoulder', to: [-15, 5], bend: [-0.6, -1], bendTrunk: true, shorten: 0.95 } } },
     ],
     work: ['lats', 'upperBack', 'biceps'],
     standing: false,
@@ -276,7 +284,7 @@ export const chestSupportedRow: Move = (() => {
   return {
     frames: [
       { ...base, arm: { a: 2, b: 2 } },
-      { ...base, arm: { reach: { from: 'shoulder', to: [-11, 7.5], bend: [-0.4, -1], shorten: 0.9 } } },
+      { ...base, arm: { reach: { from: 'shoulder', to: [-11, 7.5], bend: [-0.6, -1], bendTrunk: true, shorten: 0.9 } } },
     ],
     work: ['upperBack', 'lats', 'biceps'],
     show: [pivot, [j0.ankle[0] - 6, FLOOR]],
@@ -308,7 +316,7 @@ export const dorianRow: Move = (() => {
   return {
     frames: [
       { ...base, farArm: onKnee, arm: { a: -2, b: -2 } },
-      { ...base, farArm: onKnee, arm: { reach: { from: 'shoulder', to: [-15, 4], bend: [-0.4, -1], shorten: 0.95 } } },
+      { ...base, farArm: onKnee, arm: { reach: { from: 'shoulder', to: [-15, 4], bend: [-0.6, -1], bendTrunk: true, shorten: 0.95 } } },
     ],
     work: ['lats', 'upperBack', 'biceps'],
     wideArms: true,

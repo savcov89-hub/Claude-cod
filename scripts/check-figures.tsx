@@ -27,10 +27,21 @@ for (const [id, m] of Object.entries(MOVES)) {
   if (only && !only.has(id)) continue;
   const problems = new Set<string>();
   // Front-view moves: angles out to the sides only, checked on the sheet by eye.
+  let prev: ReturnType<typeof joints> | null = null;
   for (let s = 0; s <= 40 && !('view' in m); s++) {
     const t = s / 40;
     const j = joints(at(m.frames, t));
     const tag = `t=${t.toFixed(2)}: `;
+    // A joint that jumps between two neighbouring frames: an elbow or knee flipping to the other side.
+    if (prev)
+      for (const [name, a, b] of [
+        ['локоть', prev.elbow, j.elbow],
+        ['колено', prev.knee, j.knee],
+        ['кисть', prev.hand, j.hand],
+        ['стопа', prev.ankle, j.ankle],
+      ] as Array<[string, [number, number], [number, number]]>)
+        if (Math.hypot(a[0] - b[0], a[1] - b[1]) > 3.2) problems.add(tag + name + ' перескакивает');
+    prev = j;
     for (const p of jointProblems(j, { wideArms: m.wideArms })) problems.add(tag + p);
     // Nothing under the floor; standing feet flat on it.
     for (const [name, v] of Object.entries({ head: j.head, hand: j.hand, knee: j.knee, toe: j.toe, heel: j.heel }))

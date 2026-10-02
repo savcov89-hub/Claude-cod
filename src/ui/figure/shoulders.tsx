@@ -100,8 +100,9 @@ export const facePull: Move = (() => {
   const pulley: V = [j0.shoulder[0] + 34, j0.shoulder[1] - 6];
   return {
     frames: [
-      { ...base, arm: { reach: { from: 'shoulder', to: [3.5, 22.5], bend: [0, 1], shorten: 0.97 } } },
-      { ...base, arm: { reach: { from: 'shoulder', to: [6, 3], bend: [-1, -0.4], shorten: 0.8 } } },
+      // Elbows high and back.
+      { ...base, arm: { reach: { from: 'shoulder', to: [3.5, 22.5], bend: [0.4, -1], bendTrunk: true, shorten: 0.97 } } },
+      { ...base, arm: { reach: { from: 'shoulder', to: [6, 3], bend: [0.4, -1], bendTrunk: true, shorten: 0.8 } } },
     ],
     work: ['delts', 'upperBack'],
     wideArms: true,

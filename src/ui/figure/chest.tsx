@@ -1,12 +1,16 @@
 // Chest: presses, flies, dips. Checked against the photos in scripts/figure-refs.json.
 import { ANKLE_Y, FLOOR, G, add, at, feetAt, lever, onTrunk, seat, SEAT_HIP_Y, tower, trunkFrame, type Move, type Pose, type V } from './kit';
 
+/** An arm out to the side seen from the side: the hand at `hand`, the elbow at `elbow` (from the shoulder, in the trunk's frame). */
+const wideArm = (hand: V, elbow: V) => ({ reach: { from: 'shoulder' as const, to: hand, bend: [-1, 0] as V, bendTrunk: true, elbow } });
+
 export const benchPress: Move = (() => {
   const base = { anchor: { at: 'hip' as const, to: [62, 70.6] as V }, trunk: -90, head: -6, leg: { a: 88, b: -2, foot: 90 } };
   return {
     frames: [
-      { ...base, arm: { reach: { from: 'shoulder', to: [-1.5, 22.3], bend: [0.6, 1], shorten: 0.9 } } },
-      { ...base, arm: { reach: { from: 'shoulder', to: [-7.5, 7.6], bend: [0.35, 1], shorten: 0.9 } } },
+      // Elbows from straight down to below the bench, beside the body and a little towards the hips.
+      { ...base, arm: wideArm([-1.5, 22.3], [-1, 11.6]) },
+      { ...base, arm: wideArm([-7.5, 7.6], [-7, -3.4]) },
     ],
     work: ['chest', 'triceps', 'delts'],
     wideArms: true,
@@ -89,8 +93,9 @@ function machinePress(o: { plates?: boolean; incline?: number }): Move {
   const pivot: V = o.plates ? [j0.shoulder[0] - 4, j0.shoulder[1] - 15] : [j0.shoulder[0] - 2, j0.shoulder[1] - 16];
   return {
     frames: [
-      { ...base, arm: arm(near, [-1, 0.25], 0.8) },
-      { ...base, arm: arm(far, [-0.2, 1]) },
+      // Elbows back at chest height, then straight arms in front.
+      { ...base, arm: wideArm(trunkFrame(j0, near), [-4.5, -5.5]) },
+      { ...base, arm: wideArm(trunkFrame(j0, far), [trunkFrame(j0, far)[0] / 2 - 1.5, trunkFrame(j0, far)[1] / 2]) },
     ],
     work: ['chest', 'delts', 'triceps'],
     wideArms: true,
@@ -124,9 +129,9 @@ export const cableFly: Move = (() => {
   const pulley: V = [j0.shoulder[0] - 3.5, 12];
   return {
     frames: [
-      { ...base, arm: { reach: { from: 'shoulder', to: [-1, -7.5], bend: [0, 1], shorten: 0.5 } } },
-      { ...base, arm: { reach: { from: 'shoulder', to: [-4, 9], bend: [-0.1, 1], shorten: 0.7 } } },
-      { ...base, arm: { reach: { from: 'shoulder', to: [-14, 16.5], bend: [-0.2, 1], shorten: 0.95 } } },
+      { ...base, arm: wideArm([-1, -7.5], [-0.6, -3.8]) },
+      { ...base, arm: wideArm([-4, 9], [-2.6, 4.4]) },
+      { ...base, arm: wideArm([-14, 16.5], [-7.4, 8.8]) },
     ],
     work: ['chest', 'delts'],
     wideArms: true,
@@ -151,9 +156,9 @@ function pecDeck(): Move {
   const pivot: V = [j0.shoulder[0] + 0.5, j0.shoulder[1] - 15];
   return {
     frames: [
-      { ...base, arm: { reach: { from: 'shoulder', to: [-0.5, -7.2], bend: [0, 1], shorten: 0.5 } } },
-      { ...base, arm: { reach: { from: 'shoulder', to: [-6, 9], bend: [-0.2, 1], shorten: 0.6 } } },
-      { ...base, arm: { reach: { from: 'shoulder', to: [-1.5, 21.6], bend: [0, 1], shorten: 0.94 } } },
+      { ...base, arm: wideArm([-0.5, -7.2], [-0.8, -3.6]) },
+      { ...base, arm: wideArm([-6, 9], [-3.6, 4.4]) },
+      { ...base, arm: wideArm([-1.5, 21.6], [-1.8, 11.2]) },
     ],
     work: ['chest', 'delts'],
     wideArms: true,
