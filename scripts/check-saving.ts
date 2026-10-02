@@ -482,6 +482,29 @@ async function main() {
     expect(d['leg-press']?.length === 2 && d['lat-pulldown']?.length === 2, "all four sets in it", d);
   }
 
+  console.log('17. Клиентка пришла и записывает сама, тренер её не отмечал');
+  {
+    const s = await setup('q');
+    const present = async () => (await call(s.trainer, 'GET', '/api/clients')).clients.find((c: any) => c.clientId === s.clientId);
+    expect(!(await present()).checkedInAt, 'not in the gym yet');
+    await s.C.open();
+    s.C.fb = 'разминка';
+    s.C.pending = true;
+    await s.C.save();
+    expect(!(await present()).checkedInAt, 'a comment alone does not mark her in the gym');
+    s.C.set('leg-press', 0, { weight: 80, reps: 10 });
+    await s.C.save();
+    const c = await present();
+    expect(!!c.checkedInAt, 'her first set marks her in the gym', c.checkedInAt);
+    expect(c.live?.programId === s.program.id && c.live?.dayId === 'day-1', "the trainer's gym opens her workout", c.live);
+    expect((c.visits || []).includes('2026-10-02'), 'the visit is counted', c.visits);
+    // The trainer pressed «Ушёл» by mistake; her next set brings her back.
+    await call(s.trainer, 'POST', '/api/attendance', { clientId: s.clientId, present: false, localDate: '2026-10-02' });
+    s.C.set('leg-press', 1, { weight: 80, reps: 9 });
+    await s.C.save();
+    expect(!!(await present()).checkedInAt, 'a new set marks her in the gym again');
+  }
+
   console.log(`\n${checks} проверок, ошибок: ${failures}`);
   process.exit(failures ? 1 : 0);
 }

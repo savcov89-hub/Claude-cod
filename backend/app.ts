@@ -452,6 +452,18 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     return d?.revision || null;
   }
 
+  /**
+   * A client who records a set herself without «Я в зале» is marked in the gym, so the trainer sees her there
+   * (also from an older app). Not when she is already marked.
+   */
+  async function checkInByRecording(trainerId: string, clientId: string, localDay: unknown) {
+    const client = await findClient(trainerId, clientId);
+    if (!client || (client.checkedInAt && Date.parse(nowIso()) - Date.parse(client.checkedInAt) < 12 * 3600000)) return;
+    const date = DATE_RE.test(String(localDay || '')) ? String(localDay) : nowIso().slice(0, 10);
+    await saveClient(trainerId, client, { checkedInAt: nowIso(), visits: withVisit(client.visits, date) });
+  }
+  const doneCount = (list: SessionExercise[] | undefined) => (list || []).reduce((n, e) => n + e.sets.filter((x) => x.reps > 0).length, 0);
+
   /** Done sets of a workout as its record keeps them, with the muscles of own exercises. */
   async function performedOf(trainerId: string, day: ProgramDay | undefined, entries: SessionExercise[]) {
     const performed = entries
@@ -1663,6 +1675,9 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
             if (attempt < 5) continue;
             return error('Не удалось сохранить: телефоны сохраняют одновременно. Повторите.', 503);
           }
+          // A new set ticked by the client herself: she is in the gym.
+          if (access.role === 'client' && doneCount(saved) > doneCount(current && !current.closed ? current.exercises : []))
+            await checkInByRecording(b.trainerId, access.ownerId, b.localDate);
           // Merged with the other phone's entries or fitted to the program: the journal takes this version.
           const changed = merged || JSON.stringify(fitted) !== JSON.stringify(submitted);
           return json({ saved: true, updatedAt, revision, ...(changed ? { exercises: saved, feedback, merged } : {}) });

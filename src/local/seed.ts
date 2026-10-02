@@ -205,8 +205,8 @@ export async function seed(call: Call) {
     }
 
     setClockOffset(0);
-    if (plan.inGym)
-      await call(TRAINER_ID, 'POST', '/api/attendance', { clientId: client.clientId, present: true, localDate: localDate() });
+    // The sample's gym: only the planned clients are in it (a client's own sets mark her in the gym as she records).
+    await call(TRAINER_ID, 'POST', '/api/attendance', { clientId: client.clientId, present: !!plan.inGym, localDate: localDate() });
     if (plan.openDraft) {
       const { programs } = await call(TRAINER_ID, 'GET', '/api/programs');
       const p = programs.find((x: any) => x.id === program.id);

@@ -106,12 +106,21 @@ async function tick(p, ei, si, weight) {
 const noConflict = async (p) => !(await p.getByText('Журнал изменили на другом устройстве').count());
 
 const s = await setup();
-console.log('Тренер: «Пришёл» Ольга, зал');
-await api(s.ct, 'POST', '/api/attendance', { clientId: s.clientId, present: true, localDate: today });
+console.log('0. Тренер не отмечал Ольгу; приложение тренера открыто на «Зале». Ольга пришла и начала тренировку сама');
 const T = await phone('trainer', coach);
+expect((await T.p.locator('.gym-tab', { hasText: 'Ольга' }).count()) === 0, 'the gym is empty at first');
 const C = await phone('client', olga);
 await C.p.getByRole('button', { name: 'Начать тренировку' }).click();
 await C.p.waitForTimeout(1500);
+let seenAfter = 0;
+for (let t = 0; t < 40; t++) {
+  if (await T.p.locator('.gym-tab', { hasText: 'Ольга' }).count()) {
+    seenAfter = t + 1;
+    break;
+  }
+  await sleep(1000);
+}
+expect(seenAfter > 0, `the trainer sees Ольга in the gym without touching the app (after ${seenAfter} s)`);
 
 console.log('1. Отмечают одновременно разные подходы');
 await Promise.all([tick(T.p, 0, 0, 100), tick(C.p, 0, 1, 100)]);

@@ -47,16 +47,23 @@ export function useTrainerData(): TrainerData {
 
   useEffect(() => {
     void reload();
-    const refresh = () => document.visibilityState === 'visible' && void reload();
-    const timer = window.setInterval(refresh, 30000);
+    // Clients who came in and marked themselves (or started a workout) show up in the gym within seconds:
+    // the client list every 15 s, everything every minute and when the app comes back on screen.
+    const visible = () => document.visibilityState === 'visible';
+    const refresh = () => visible() && void reload();
+    const timer = window.setInterval(refresh, 60000);
+    const quick = window.setInterval(() => visible() && void reloadClients(), 15000);
     window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
     const off = isLocal() ? onRemoteChange(() => void reload()) : () => undefined;
     return () => {
       clearInterval(timer);
+      clearInterval(quick);
       window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
       off();
     };
-  }, [reload]);
+  }, [reload, reloadClients]);
 
   const setPresence = useCallback(async (client: ClientItem, present: boolean) => {
     try {

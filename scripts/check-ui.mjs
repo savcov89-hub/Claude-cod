@@ -506,6 +506,34 @@ await scenario('15. Двойное касание ✓, вес с запятой,
   expect(first?.weight === 102.5, 'the weight «102,5» is recorded as 102.5', first);
 });
 
+await scenario('18. Клиентка сама начала тренировку — у тренера она в зале', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
+  await p.waitForTimeout(1500);
+  const select = p.locator('#demo-client');
+  const options = await select.locator('option').allInnerTexts();
+  // Someone not in the gym yet.
+  const inGymNow = new Set((await call('get', '/api/clients').catch(() => ({ clients: [] }))).clients?.filter?.((c) => c.checkedInAt).map((c) => c.clientName) || []);
+  const who = options.find((o) => !inGymNow.has(o.trim()) && !['Анна', 'Павел', 'Мария', 'Дмитрий', 'Сергей', 'Екатерина', 'Иван', 'Ольга', 'Юлия'].includes(o.trim())) || options[options.length - 1];
+  await select.selectOption({ label: who });
+  await p.waitForTimeout(1500);
+  await p.getByRole('button', { name: 'Начать тренировку' }).click();
+  await p.waitForTimeout(1200);
+  const j = p.locator('.main .journal').first();
+  await tickNext(j, 30);
+  await p.waitForTimeout(1500);
+  await p.getByRole('button', { name: 'Назад' }).first().click();
+  await p.waitForTimeout(500);
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(2000);
+  await goGym();
+  const tab = p.locator('.gym-tab', { hasText: who.trim() });
+  expect((await tab.count()) > 0, '«' + who.trim() + '» is in the gym without the trainer marking her');
+  await tab.first().click();
+  await p.waitForTimeout(800);
+  const cnt = (await pane().innerText()).match(/(\d+)\/(\d+)/)?.[1];
+  expect(cnt === '1', 'her workout with her set is open in the gym', cnt);
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

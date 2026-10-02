@@ -80,6 +80,17 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
     }
   };
   const here = coaches.some((c) => inGym(c.checkedInAt));
+  /** Opening a workout to do it: the trainer sees the client in the gym (marked here unless already there). */
+  const startWorkout = (program: Program, dayId: string) => {
+    setJustDone(null);
+    setJournal({ program, dayId });
+    const coach = coaches.find((c) => c.trainerId === program.trainerId);
+    if (coach && !inGym(coach.checkedInAt))
+      void api
+        .post('/api/attendance', { trainerId: program.trainerId, present: true, localDate: localDate(), at: new Date().toISOString() })
+        .then(() => load())
+        .catch(() => undefined);
+  };
   const toggleGym = async () => {
     setBusy(true);
     try {
@@ -134,7 +145,7 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
         </div>
         {err && <div className="alert">{err}</div>}
         {live && liveProgram && (
-          <button className="live-banner" onClick={() => setJournal({ program: liveProgram, dayId: live.dayId })}>
+          <button className="live-banner" onClick={() => startWorkout(liveProgram, live.dayId)}>
             <span className="live-dot" />
             <span className="grow">
               <strong>Тренировка идёт · {live.dayName}</strong>
@@ -203,12 +214,12 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
                           {next.exercises.length} упражнений · {next.exercises.reduce((n, e) => n + e.sets, 0)} подходов
                           {p.lastCompletedAt ? ' · прошлая ' + fmtDate(p.lastCompletedAt) : ''}
                         </p>
-                        <button className="btn btn-primary btn-block btn-lg" onClick={() => { setJustDone(null); setJournal({ program: p, dayId: next.id }); }}>
+                        <button className="btn btn-primary btn-block btn-lg" onClick={() => startWorkout(p, next.id)}>
                           <Play size={18} /> Начать тренировку
                         </button>
                         <div className="day-links">
                           {p.days.map((d) => (
-                            <button key={d.id} className="day-link" onClick={() => setJournal({ program: p, dayId: d.id })}>
+                            <button key={d.id} className="day-link" onClick={() => startWorkout(p, d.id)}>
                               <span className="grow">
                                 <strong>{d.name}</strong>
                                 <span className="muted small">{d.exercises.map((e) => e.exerciseName).slice(0, 3).join(', ')}…</span>
