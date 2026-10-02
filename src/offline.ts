@@ -129,6 +129,19 @@ export function queueIfPossible(userId: string, path: string, body: unknown) {
   return { ...rule[1](body), queued: true };
 }
 
+/** True when a request matching `match` still waits in an outbox on this device (any account). */
+export function isQueued(match: (item: OutboxItem) => boolean) {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(OUTBOX_PREFIX) && read<OutboxItem[]>(k, []).some(match)) return true;
+    }
+  } catch {
+    /* no storage */
+  }
+  return false;
+}
+
 let flushing: Promise<void> | null = null;
 /**
  * Sends the outbox in order. A request the server refuses is dropped and reported; a network failure stops

@@ -3,7 +3,7 @@ import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, Check, ChevronDown, List
 import { api, inGym, isLocal, readError, safeStorage } from '../transport';
 import { equipmentOf, fmtKg, isStack, suggestNext, weightUnit, type PersonalRecord, type Suggestion } from '../analytics';
 import { localDate } from '../clock';
-import { isNetworkError } from '../offline';
+import { isNetworkError, isQueued } from '../offline';
 import type { Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
 import { Confirm, Sheet, clock, elapsed, fmtDate, fmtSets, useNow } from './common';
 import { ExercisePicker } from './ProgramBuilder';
@@ -220,11 +220,19 @@ function JournalBody({
 }) {
   const cacheKey = cacheKeyOf(workout);
   // A workout finished offline waits in the outbox; until the server has it, its old draft is not reopened.
+  // Only while it is really still waiting: once sent (or refused), the server's draft is what counts.
   const doneKey = 'tl-done:' + cacheKey;
   const finishedOffline = useMemo(() => {
     const at = Number(safeStorage.get(doneKey) || 0);
     if (!at) return false;
-    if (!workout.draft || Date.parse(workout.draft.updatedAt) > at) {
+    const waiting = isQueued(
+      (x) =>
+        x.path === '/api/sessions' &&
+        (x.body as any)?.trainerId === workout.trainerId &&
+        (x.body as any)?.programId === workout.programId &&
+        (x.body as any)?.dayId === workout.day.id,
+    );
+    if (!waiting || !workout.draft || Date.parse(workout.draft.updatedAt) > at) {
       safeStorage.remove(doneKey);
       return false;
     }
