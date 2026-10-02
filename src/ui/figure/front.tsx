@@ -1,6 +1,6 @@
 // A person seen from the front, for movements out to the sides (lateral raises, hip abduction and adduction),
 // which the side view cannot show. Same scale as figure/rig.ts; both sides mirror each other.
-import { G, type Gear, type Muscle } from './draw';
+import { G, capsule, type Gear, type Muscle } from './draw';
 import { FLOOR, add, lerp, type V } from './rig';
 
 const ANKLE_Y = FLOOR - 3;
@@ -61,18 +61,7 @@ export function mixFront(a: FrontPose, b: FrontPose, t: number): FrontPose {
 
 const f = (n: number) => n.toFixed(2);
 function Seg({ a, b, ra, rb, cls }: { a: V; b: V; ra: number; rb: number; cls: string }) {
-  const dx = b[0] - a[0];
-  const dy = b[1] - a[1];
-  const l = Math.hypot(dx, dy) || 1;
-  const n: V = [-dy / l, dx / l];
-  const p = [add(a, n, ra), add(b, n, rb), add(b, n, -rb), add(a, n, -ra)];
-  return (
-    <g className={cls}>
-      <circle cx={f(a[0])} cy={f(a[1])} r={ra} />
-      <circle cx={f(b[0])} cy={f(b[1])} r={rb} />
-      <polygon points={p.map((q) => f(q[0]) + ',' + f(q[1])).join(' ')} />
-    </g>
-  );
+  return <path d={capsule(a, b, ra, rb)} className={cls} />;
 }
 
 /** The person from the front with the working muscles lit (delts, adductors, abductors). */

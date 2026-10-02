@@ -31,18 +31,20 @@ const unit = (v: V): V => {
   return [v[0] / l, v[1] / l];
 };
 
-/** A tapered limb part: two round ends joined smoothly. */
-function Segment({ a, b, ra, rb, cls }: { a: V; b: V; ra: number; rb: number; cls: string }) {
+/** Outline of a tapered limb part: two round ends joined by straight sides, as one path. */
+export function capsule(a: V, b: V, ra: number, rb: number) {
   const d = unit(sub(b, a));
   const n: V = [-d[1], d[0]];
-  const p = [add(a, n, ra), add(b, n, rb), add(b, n, -rb), add(a, n, -ra)];
-  return (
-    <g className={cls}>
-      <circle cx={f(a[0])} cy={f(a[1])} r={ra} />
-      <circle cx={f(b[0])} cy={f(b[1])} r={rb} />
-      <polygon points={p.map((q) => f(q[0]) + ',' + f(q[1])).join(' ')} />
-    </g>
-  );
+  const p1 = add(a, n, ra);
+  const p2 = add(b, n, rb);
+  const p3 = add(b, n, -rb);
+  const p4 = add(a, n, -ra);
+  return `M${f(p1[0])} ${f(p1[1])}L${f(p2[0])} ${f(p2[1])}A${rb} ${rb} 0 0 0 ${f(p3[0])} ${f(p3[1])}L${f(p4[0])} ${f(p4[1])}A${ra} ${ra} 0 0 0 ${f(p1[0])} ${f(p1[1])}Z`;
+}
+
+/** A tapered limb part: two round ends joined smoothly. */
+function Segment({ a, b, ra, rb, cls }: { a: V; b: V; ra: number; rb: number; cls: string }) {
+  return <path d={capsule(a, b, ra, rb)} className={cls} />;
 }
 
 /** A closed smooth outline through the points (Catmull-Rom). */

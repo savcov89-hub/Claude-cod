@@ -543,7 +543,7 @@ await scenario('17. Картинка упражнения: начало, кон�
   await p.waitForTimeout(700);
   const sheet = p.locator('.sheet').last();
   const text = await sheet.innerText();
-  const svgs = await sheet.locator('svg.xa').count();
+  const svgs = await sheet.locator('svg.fg').count();
   expect(text.includes(name) && /Начало/.test(text) && /Конец/.test(text) && svgs >= 3, 'the sheet shows the movement, the start and the end', [name, svgs]);
   const m1 = await sheet.locator('.xa-motion svg').innerHTML();
   await p.waitForTimeout(500);

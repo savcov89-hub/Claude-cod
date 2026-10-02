@@ -3148,85 +3148,29 @@ h2 {
   }
 }
 
-/* Exercise pictures (src/ui/exerciseArt.tsx): a figure in the theme's ink, the working muscles in the accent colour. */
-.xa {
+/* Exercise pictures (src/ui/figure): the person in the theme's ink, the working muscles in the accent colour,
+   the equipment in soft greys behind. */
+.fg {
+  --fg-body: var(--ink);
+  --fg-far: color-mix(in srgb, var(--ink) 42%, var(--surface));
+  --fg-gear: color-mix(in srgb, var(--ink-2) 55%, var(--surface));
+  --fg-gear-soft: color-mix(in srgb, var(--ink-2) 22%, var(--surface));
   display: block;
-  overflow: visible;
-  --xa-ghost: color-mix(in srgb, var(--ink) 13%, transparent);
-  --xa-gear: color-mix(in srgb, var(--ink-2) 70%, var(--surface));
-  --xa-pad: color-mix(in srgb, var(--ink-2) 42%, var(--surface));
-  --xa-load: color-mix(in srgb, var(--ink) 72%, var(--surface));
 }
-.xa line,
-.xa path {
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  fill: none;
-}
-.xa circle,
-.xa rect {
-  stroke: none;
-}
-.xa .xa-body {
-  stroke: var(--ink);
-}
-.xa .xa-work {
-  stroke: var(--accent);
-}
-.xa .xa-far {
-  stroke: color-mix(in srgb, var(--ink) 42%, var(--surface));
-}
-.xa .xa-ghost {
-  stroke: var(--xa-ghost);
-}
-.xa circle.xa-body,
-.xa path.xa-fill.xa-body {
-  fill: var(--ink);
-}
-.xa circle.xa-work,
-.xa path.xa-fill.xa-work {
-  fill: var(--accent);
-}
-.xa circle.xa-ghost,
-.xa path.xa-fill.xa-ghost {
-  fill: var(--xa-ghost);
-}
-.xa .xg-floor {
-  stroke: var(--line);
-}
-.xa .xg-gear {
-  stroke: var(--xa-gear);
-}
-.xa circle.xg-gear,
-.xa rect.xg-gear {
-  fill: var(--xa-gear);
-}
-.xa .xg-pad {
-  stroke: var(--xa-pad);
-}
-.xa circle.xg-pad,
-.xa rect.xg-pad {
-  fill: var(--xa-pad);
-}
-.xa .xg-cable {
-  stroke: var(--ink-2);
-}
-.xa .xg-load {
-  stroke: var(--xa-load);
-}
-.xa circle.xg-load,
-.xa rect.xg-load {
-  fill: var(--xa-load);
-}
-.xa circle.xg-loadHub {
-  fill: var(--surface);
-}
-.xa rect.xg-stack {
-  fill: color-mix(in srgb, var(--ink-2) 55%, var(--surface));
-}
-.xa .xg-stackLine {
-  stroke: var(--surface);
-}
+.fg .fg-body { fill: var(--fg-body); }
+.fg .fg-far { fill: var(--fg-far); }
+.fg .fg-halo { fill: var(--surface); }
+.fg .fg-work { fill: var(--accent); }
+.fg .fg-floor { stroke: var(--line); stroke-width: 1.4; stroke-linecap: round; }
+.fg .fg-frame { stroke: var(--fg-gear); stroke-linecap: round; fill: none; }
+.fg .fg-cable { stroke: var(--fg-gear); stroke-width: 0.6; fill: none; }
+.fg .fg-wheel { fill: var(--surface); stroke: var(--fg-gear); stroke-width: 1; }
+.fg .fg-pad { fill: var(--fg-gear); stroke: var(--fg-gear); stroke-width: 1.2; }
+.fg .fg-plate { fill: var(--fg-gear-soft); stroke: var(--fg-gear); stroke-width: 1.1; }
+.fg .fg-plate-in { fill: none; stroke: var(--fg-gear); stroke-width: 0.5; opacity: 0.7; }
+.fg .fg-metal { fill: var(--fg-gear); }
+.fg .fg-stack { fill: var(--fg-gear); }
+
 .xa-thumb {
   flex: none;
   display: inline-grid;

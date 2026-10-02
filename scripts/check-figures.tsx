@@ -57,7 +57,7 @@ for (const [id, m] of Object.entries(MOVES)) {
   }
 }
 if (out) {
-  const css = readFileSync('src/app.css', 'utf8') + readFileSync('src/ui/figure/figure.css', 'utf8');
+  const css = readFileSync('src/app.css', 'utf8');
   writeFileSync(
     out,
     `<!doctype html><meta charset=utf-8><style>${css}</style><style>body{background:var(--bg);padding:10px;font:13px sans-serif}.row{background:var(--surface);border-radius:10px;padding:8px;margin-bottom:8px;display:grid;gap:6px}.pics{display:flex;gap:6px;align-items:center}svg{background:var(--surface)}</style>${rows.join('')}`,
