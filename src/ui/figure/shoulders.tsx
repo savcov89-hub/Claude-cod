@@ -1,13 +1,22 @@
 // Shoulders (side view): overhead presses, rear-delt flies, face pull. Lateral raises are in figure/front.tsx.
 import { ANKLE_Y, FLOOR, G, add, at, feetAt, lever, onTrunk, seat, SEAT_HIP_Y, tower, type Move, type Pose, type V } from './kit';
 
+/**
+ * An arm seen from the side with the hand at `hand` and the elbow at `elbow` (from the shoulder, in the trunk's frame).
+ * In presses overhead the forearm stays upright under the weight and the elbow rises with it: the work is at the
+ * shoulder, not a triceps extension around a fixed elbow.
+ */
+const pressArm = (hand: V, elbow: V) => ({ reach: { from: 'shoulder' as const, to: hand, bend: [0, 1] as V, bendTrunk: true, elbow } });
+
 /** Standing barbell overhead press: from the front of the shoulders to straight arms over the head. */
 export const overheadPress: Move = (() => {
   const base = { anchor: { at: 'ankle' as const, to: [46, ANKLE_Y] as V }, trunk: 0, leg: { a: 0, b: 0, foot: 90 } };
   return {
     frames: [
-      { ...base, head: -14, arm: { reach: { from: 'shoulder', to: [1.5, 4.4], bend: [0.6, 1], shorten: 0.86 } } },
-      { ...base, head: 4, arm: { reach: { from: 'shoulder', to: [21.6, 1.2], bend: [0.6, 1], shorten: 0.92 } } },
+      // The bar on the front of the shoulders, the elbows under it in front of the body, forearms upright.
+      { ...base, head: -14, arm: pressArm([2, 5], [-8.5, 5.5]) },
+      { ...base, head: -6, arm: pressArm([12.5, 3], [1.5, 3.5]) },
+      { ...base, head: 4, arm: pressArm([22.5, 1.2], [11, 1.2]) },
     ],
     work: ['delts', 'triceps'],
     wideArms: true,
@@ -30,13 +39,15 @@ function seatedPress(kind: 'dumbbells' | 'stack' | 'plates'): Move {
   const trunk = -6;
   const base = { anchor: { at: 'hip' as const, to: hip }, trunk, head: -2, leg: feetAt(hip[0] + 19) };
   const j0 = at({ ...base, arm: { a: 0 } } as Pose);
-  const low: V = kind === 'dumbbells' ? [3.2, 1.6] : [2.6, 4.2];
+  // Forearms upright under the dumbbells / handles at the bottom: the elbows below them, a little below the shoulders.
+  const low: V = kind === 'dumbbells' ? [6.5, 1.5] : [2.6, 4.2];
+  const lowElbow: V = kind === 'dumbbells' ? [-4, 1.2] : [-8, 4];
   const high: V = kind === 'dumbbells' ? [21.5, 1] : [21, 4.8];
   const pivot: V = [j0.shoulder[0] - 12, j0.shoulder[1] - 4];
   return {
     frames: [
-      { ...base, arm: { reach: { from: 'shoulder', to: low, bend: [0.2, 1], shorten: 0.6 } } },
-      { ...base, arm: { reach: { from: 'shoulder', to: high, bend: [0.4, 1], shorten: 0.9 } } },
+      { ...base, arm: pressArm(low, lowElbow) },
+      { ...base, arm: pressArm(high, [high[0] / 2 - 0.5, high[1]]) },
     ],
     work: ['delts', 'triceps'],
     wideArms: true,
