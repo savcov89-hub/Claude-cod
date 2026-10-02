@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, IdCard, LogOut, Plus, Search } from 'lucide-react';
-import type { ClientItem, Program } from '../types';
+import type { ClientItem, OpenWorkout, Program } from '../types';
 import { api, readError } from '../transport';
 import { AUTO_FINISH_IDLE_MS, Journal, type JournalActivity, type JournalFinisher } from './Journal';
 import { activeClients, lastVisit, presentClients, programsOf, type TrainerData } from './data';
@@ -57,12 +57,28 @@ export function Gym({
   const activeId = shown.some((c) => c.clientId === active) ? active : shown[0]?.clientId || null;
   const presentKey = present.map((c) => c.clientId).join(',');
 
-  const liveOf = (clientId: string): Source | null => {
-    const live = data.clients.find((c) => c.clientId === clientId)?.live;
+  const asSource = (live: OpenWorkout | undefined, clientId: string): Source | null => {
     if (!live) return null;
     if (live.free) return { programId: live.programId, dayId: live.dayId, trainerId: live.trainerId, free: true };
     const p = programsOf(data.programs, clientId).find((x) => x.id === live.programId);
     return p?.days.some((d) => d.id === live.dayId) ? { programId: p.id, dayId: live.dayId } : null;
+  };
+  const liveOf = (clientId: string) => asSource(data.clients.find((c) => c.clientId === clientId)?.live, clientId);
+  /**
+   * Before a client leaves with nothing done in the shown journal: a workout with sets still open on the server
+   * (a free one, another day — asked fresh, the list may be old) is shown instead, so it is not left behind.
+   */
+  const openElsewhere = async (clientId: string): Promise<Source | null> => {
+    let list: OpenWorkout[] | null = null;
+    try {
+      list = (await api.get('/api/client/' + encodeURIComponent(clientId) + '/history')).data.open || [];
+    } catch {
+      /* offline: what was loaded */
+    }
+    const live = list ? list.find((w) => Date.now() - Date.parse(w.updatedAt) < 12 * 3600000) : undefined;
+    const found = list ? asSource(live, clientId) : liveOf(clientId);
+    const src = sourceOf(clientId);
+    return found && (!src || found.programId !== src.programId || found.dayId !== src.dayId) ? found : null;
   };
   const sourceOf = (clientId: string): Source | null => {
     const list = programsOf(data.programs, clientId);
@@ -134,6 +150,17 @@ export function Gym({
   const checkOut = async (c: ClientItem) => {
     setLeaving(c.clientId);
     try {
+      // Nothing done in the shown workout, but another one with sets is open: shown first, not left behind.
+      const other = finished[c.clientId] === undefined && !(activity[c.clientId]?.done || 0) ? await openElsewhere(c.clientId) : null;
+      if (other) {
+        setSources((s) => ({ ...s, [c.clientId]: other }));
+        setActive(c.clientId);
+        setAutoClosed((list) => [
+          ...list.filter((x) => x.id !== c.clientId),
+          { id: c.clientId, name: c.clientName, text: 'есть незавершённая тренировка с подходами — она открыта, «Ушёл» ещё раз запишет её' },
+        ]);
+        return;
+      }
       const finish = finishers.current[c.clientId];
       if (finish && finished[c.clientId] === undefined) {
         const saved = await finish();
@@ -145,6 +172,7 @@ export function Gym({
         }
       }
       await data.setPresence(c, false);
+      setAutoClosed((list) => list.filter((x) => x.id !== c.clientId));
       setFinished((f) => {
         const { [c.clientId]: _drop, ...rest } = f;
         return rest;
@@ -198,15 +226,15 @@ export function Gym({
       const idle = a?.lastSetAt && a.done > 0 && now - a.lastSetAt > IDLE_MS;
       const empty = !a?.done && !!c.checkedInAt && now - new Date(c.checkedInAt).getTime() > EMPTY_MS;
       if (!idle && !empty) continue;
-      // Nothing done here, but a workout with sets is open elsewhere (another day, a free one): it is shown instead.
-      const live = empty ? liveOf(id) : null;
-      const src = sourceOf(id);
-      if (live && src && (live.programId !== src.programId || live.dayId !== src.dayId)) {
-        setSources((s) => ({ ...s, [id]: live }));
-        continue;
-      }
       autoTried.current.add(id);
       void (async () => {
+        // Nothing done here, but a workout with sets is open elsewhere: it is shown (and finished in its turn).
+        const other = empty ? await openElsewhere(id) : null;
+        if (other) {
+          setSources((s) => ({ ...s, [id]: other }));
+          autoTried.current.delete(id);
+          return;
+        }
         const finish = finishers.current[id];
         let recorded = false;
         if (idle && finish && finished[id] === undefined) {
