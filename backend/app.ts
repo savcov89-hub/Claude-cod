@@ -3,6 +3,7 @@ import { groupMuscles, exerciseRules, programIssue } from '../src/trainingRules'
 import { clientInsights, sessionRecords, type ClientInsights } from '../src/analytics';
 import { nowIso } from '../src/clock';
 import type { OpenWorkout } from '../src/types';
+import { doneDiffers, fitPlan, mergeEntries, mergeText } from '../src/draftMerge';
 
 // The request logic is written against this small surface so the same code runs
 // on Supabase (backend/server.ts) and in the demo build (in-browser database).
@@ -12,9 +13,15 @@ export interface Db {
     opts?: { limit?: number; nextToken?: string },
   ): Promise<{ items: Array<T & { id: string }>; nextToken?: string | null }>;
   get<T>(table: string, ids: string[]): Promise<Array<T | null | undefined>>;
-  add<T>(table: string, records: T[]): Promise<Array<string | null | undefined>>;
+  /** `ids`: the new rows' ids when known in advance (otherwise made up). */
+  add<T>(table: string, records: T[], ids?: string[]): Promise<Array<string | null | undefined>>;
   update<T>(table: string, rows: Array<{ id: string; record: T }>): Promise<boolean[]>;
   remove(table: string, ids: string[]): Promise<void>;
+  /**
+   * Writes the one row of a one-row table only if nobody wrote it meanwhile: the row `rowId` still has revision
+   * `expected` (`rowId` null: there is no row yet). False when another request was first.
+   */
+  swap<T>(table: string, rowId: string | null, record: T, expected: string | null): Promise<boolean>;
 }
 export interface Ctx {
   user?: { userId: string; name?: string; email?: string } | null;
@@ -194,6 +201,9 @@ interface DraftRecord {
   updatedByRole?: Role;
   exercises: SessionExercise[];
   updatedAt: string;
+  /** A finished workout: its record, and when it was finished (entries from the other phone may still come in). */
+  sessionId?: string;
+  closedAt?: string;
 }
 
 const tableKey = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -421,6 +431,107 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           });
       }
     return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  /**
+   * Writes a workout's draft only if it is still the version that was read (`current`): two phones saving in the
+   * same moment cannot overwrite each other. False when the other one was first (read again and merge).
+   */
+  const writeDraft = (table: string, current: (DraftRecord & { id: string }) | undefined, record: DraftRecord) =>
+    db.swap(table, current?.id ?? null, record, current ? current.revision ?? null : null);
+
+  /** Changes an open draft's entries after a program change; done again on top of a save that came in meanwhile. */
+  async function rewriteDraft(table: string, draft: (DraftRecord & { id: string }) | undefined, change: (list: SessionExercise[]) => SessionExercise[]) {
+    let d = draft;
+    for (let attempt = 0; d && !d.closed && attempt < 5; attempt++) {
+      const revision = randomId();
+      const { id: _id, ...record } = d;
+      if (await writeDraft(table, d, { ...record, exercises: change(d.exercises), revision })) return revision;
+      d = await first<DraftRecord & { id: string }>(table);
+    }
+    return d?.revision || null;
+  }
+
+  /** Done sets of a workout as its record keeps them, with the muscles of own exercises. */
+  async function performedOf(trainerId: string, day: ProgramDay | undefined, entries: SessionExercise[]) {
+    const performed = entries
+      .map(({ skipped: _skipped, extra: _extra, ...e }) => ({ ...e, sets: e.sets.filter((s) => s.reps > 0).map(cleanSet) }))
+      .filter((e) => e.sets.length > 0);
+    const findKnown = knownExercises(trainerId);
+    for (const e of performed) {
+      if (exerciseRules[e.exerciseId]) continue;
+      const planned = day?.exercises.find((p) => p.exerciseId === e.exerciseId)?.muscles;
+      const known = planned?.length ? null : await findKnown(e.exerciseId);
+      const muscles = planned?.length ? planned : known?.muscles?.length ? known.muscles : groupMuscles(known?.muscleGroup);
+      if (muscles.length) (e as SessionExercise).muscles = muscles.slice(0, 6);
+    }
+    return performed;
+  }
+
+  /** The entries a phone started from (sent with each save, so a save made from an older version is merged); null when unusable. */
+  const baseOf = (x: unknown): SessionExercise[] | null =>
+    Array.isArray(x) &&
+    x.length <= 60 &&
+    x.every((e) => e && typeof e.exerciseId === 'string' && Array.isArray(e.sets) && e.sets.length <= 10 && e.sets.every(validSet))
+      ? (x as SessionExercise[])
+      : null;
+
+  /**
+   * Entries from a phone that was still recording when the other phone finished the workout: they go into that
+   * workout's record (up to 12 hours after it was finished). Null when there is no such record.
+   */
+  async function addToFinished(
+    access: { program: ProgramRecord; ownerId: string; role: Role },
+    table: string,
+    first0: DraftRecord & { id: string },
+    base: SessionExercise[] | null,
+    submitted: SessionExercise[],
+    feedbackIn: string,
+    baseFeedback: unknown,
+  ) {
+    let current: (DraftRecord & { id: string }) | undefined = first0;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      if (attempt) current = await first<DraftRecord & { id: string }>(table);
+      if (!current?.closed || !current.sessionId) return null;
+      const finishedAt = Date.parse(current.closedAt || current.updatedAt);
+      if (!(Date.parse(nowIso()) - finishedAt <= 12 * 3600000)) return null;
+      const sessionsT = sessionsTable(access.ownerId);
+      let [session] = await db.get<SessionRecord>(sessionsT, [current.sessionId]);
+      // Finished this very moment: its record is being written.
+      for (let wait = 0; !session && wait < 6 && Date.parse(nowIso()) - finishedAt < 15000; wait++) {
+        await new Promise((r) => setTimeout(r, 400));
+        [session] = await db.get<SessionRecord>(sessionsT, [current.sessionId]);
+      }
+      if (!session) return null;
+      const before = current.exercises || [];
+      const findKnown = knownExercises(session.trainerId);
+      const merged: SessionExercise[] = [];
+      for (const e of mergeEntries(base, submitted, before)) {
+        const known = await findKnown(e.exerciseId);
+        if (known) merged.push({ ...e, exerciseName: known.name, sets: e.sets.map(cleanSet) });
+        else if (before.some((x) => x.exerciseId === e.exerciseId)) merged.push({ ...e, sets: e.sets.map(cleanSet) });
+      }
+      const feedback = text(mergeText(typeof baseFeedback === 'string' ? baseFeedback : null, feedbackIn, current.feedback || ''), 500);
+      if (!doneDiffers(before, merged) && feedback === (current.feedback || ''))
+        return { revision: current.revision || null, merged: before, amended: false };
+      const day = access.program.days.find((d) => d.id === session.dayId);
+      const performed = await performedOf(session.trainerId, day, merged);
+      if (!performed.length) return { revision: current.revision || null, merged: before, amended: false };
+      const revision = randomId();
+      const { id: _draftId, ...draftRest } = current;
+      if (!(await writeDraft(table, current, { ...draftRest, exercises: merged, feedback, revision }))) continue;
+      const { id: _sid, ...sessionRest } = session as SessionRecord & { id?: string };
+      await db.update(sessionsT, [{ id: current.sessionId, record: { ...sessionRest, exercises: performed, feedback } }]);
+      for (const e of performed) {
+        const lastT = lastResultTable(access.ownerId, e.exerciseId);
+        const last = await first<{ completedAt: string }>(lastT);
+        if (!last || last.completedAt <= session.completedAt)
+          await upsertSingle(lastT, { sets: e.sets, completedAt: session.completedAt, ...(e.note ? { note: e.note } : {}) });
+      }
+      await refreshInsights(session.trainerId, access.ownerId, access.role === 'client' ? { needsReview: true } : {});
+      return { revision, merged, amended: true };
+    }
+    return null;
   }
 
   /** Finds a catalog exercise or one of the trainer's own; own exercises are read once per call site. */
@@ -912,6 +1023,13 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const [session] = await db.get<SessionRecord>(table, [sessionId]);
         if (!session || session.trainerId !== trainerId) return error('Тренировка не найдена.', 404);
         await db.remove(table, [sessionId]);
+        // A finished workout pointing at this record no longer takes late entries.
+        const draftT = draftTable(clientId, session.programId, session.dayId);
+        const draft = await first<DraftRecord & { id: string }>(draftT);
+        if (draft?.closed && draft.sessionId === sessionId) {
+          const { id: draftId, sessionId: _gone, ...record } = draft;
+          await db.update(draftT, [{ id: draftId, record }]);
+        }
         const rest = (await listAll<SessionRecord>(table, 400)).sort((a, b) => b.completedAt.localeCompare(a.completedAt));
         for (const e of session.exercises) {
           const resultT = lastResultTable(clientId, e.exerciseId);
@@ -1189,7 +1307,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           return error('Упражнения не совпадают с программой. Обновите журнал.', 400);
         if (ids.length > 30) return error('Не больше 30 упражнений в тренировке.', 400);
         const draftT = draftTable(program.clientId, programId, dayId);
-        const draft = await first<DraftRecord>(draftT);
+        const draft = await first<DraftRecord & { id: string }>(draftT);
         if (draft && !draft.closed && (draft.revision || null) !== (ctx.body?.baseRevision || null))
           return error('Запись уже изменена на другом устройстве. Обновите журнал перед продолжением.', 409);
         const exercises = ids.map((id) => day.exercises.find((e) => e.exerciseId === id) || added.get(id)!);
@@ -1197,26 +1315,22 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
         const [ok] = await db.update(programsTable(trainerId), [{ id: programId, record: { ...rest, days, updatedAt: nowIso() } }]);
         if (!ok) return error('Не удалось сохранить программу.', 500);
-        let revision = draft?.revision || null;
-        if (draft && !draft.closed) {
-          const { id: draftId, ...record } = draft;
-          const slot = (e: SessionExercise) => e.replaces || e.exerciseId;
-          // Planned entries still in the program stay, added ones that joined it lose their "extra" mark,
-          // other added ones stay added; the journal's own order is kept when sent.
-          const kept = draft.exercises
+        const slot = (e: SessionExercise) => e.replaces || e.exerciseId;
+        const order: string[] = Array.isArray(ctx.body?.order) ? ctx.body.order.map(String) : [];
+        const rank = (e: SessionExercise) => {
+          const i = order.indexOf(e.exerciseId);
+          if (i >= 0) return i;
+          const j = ids.indexOf(slot(e));
+          return order.length + (j >= 0 ? j : ids.length);
+        };
+        // Planned entries still in the program stay, added ones that joined it lose their "extra" mark,
+        // other added ones stay added; the journal's own order is kept when sent.
+        const revision = await rewriteDraft(draftT, draft, (list) =>
+          list
             .filter((e) => (e.extra ? true : ids.includes(slot(e))))
-            .map(({ extra, ...e }) => (extra && !added.has(e.exerciseId) ? { ...e, extra } : e));
-          const order: string[] = Array.isArray(ctx.body?.order) ? ctx.body.order.map(String) : [];
-          const rank = (e: SessionExercise) => {
-            const i = order.indexOf(e.exerciseId);
-            if (i >= 0) return i;
-            const j = ids.indexOf(slot(e));
-            return order.length + (j >= 0 ? j : ids.length);
-          };
-          kept.sort((a, b) => rank(a) - rank(b));
-          revision = randomId();
-          await db.update(draftT, [{ id: draftId, record: { ...record, exercises: kept, revision } }]);
-        }
+            .map(({ extra, ...e }) => (extra && !added.has(e.exerciseId) ? { ...e, extra } : e))
+            .sort((a, b) => rank(a) - rank(b)),
+        );
         return json({ saved: true, revision });
       },
     ],
@@ -1253,7 +1367,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           next = toProgramExercise({ sets, repMin, repMax, targetRir }, known);
         }
         const draftT = draftTable(program.clientId, programId, dayId);
-        const draft = await first<DraftRecord>(draftT);
+        const draft = await first<DraftRecord & { id: string }>(draftT);
         if (draft && !draft.closed && (draft.revision || null) !== (b.baseRevision || null))
           return error('Запись уже изменена на другом устройстве. Обновите журнал перед продолжением.', 409);
         const days = program.days.map((d) =>
@@ -1262,18 +1376,17 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
         const [ok] = await db.update(programsTable(trainerId), [{ id: programId, record: { ...rest, days, updatedAt: nowIso() } }]);
         if (!ok) return error('Не удалось сохранить программу.', 500);
-        let revision = draft?.revision || null;
-        if (draft && !draft.closed && next.exerciseId !== current.exerciseId) {
-          const { id: draftId, ...record } = draft;
-          const exercises = draft.exercises.map((e) => {
-            if ((e.replaces || e.exerciseId) !== current.exerciseId) return e;
-            // Already swapped in today: now it is the planned one. Still the old one: it becomes the new one, sets kept.
-            const { replaces: _r, ...plain } = e;
-            return { ...plain, exerciseId: next.exerciseId, exerciseName: next.exerciseName };
-          });
-          revision = randomId();
-          await db.update(draftT, [{ id: draftId, record: { ...record, exercises, revision } }]);
-        }
+        const revision =
+          next.exerciseId === current.exerciseId
+            ? draft?.revision || null
+            : await rewriteDraft(draftT, draft, (list) =>
+                list.map((e) => {
+                  if ((e.replaces || e.exerciseId) !== current.exerciseId) return e;
+                  // Already swapped in today: now it is the planned one. Still the old one: it becomes the new one, sets kept.
+                  const { replaces: _r, ...plain } = e;
+                  return { ...plain, exerciseId: next.exerciseId, exerciseName: next.exerciseName };
+                }),
+              );
         return json({ saved: true, revision, exercise: next });
       },
     ],
@@ -1513,27 +1626,47 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         if (!day) return error('Тренировка не найдена', 404);
         const submitted = b.exercises as SessionExercise[];
         if (
-          JSON.stringify(b).length > 100000 ||
+          JSON.stringify(b).length > 200000 ||
           submitted.some((e) => !Array.isArray(e?.sets) || e.sets.length > 10 || !e.sets.every(validSet))
         )
           return error('Проверьте вес, повторы и RIR', 400);
-        const exercises = await matchPlan(b.trainerId, day, submitted);
-        if (!exercises) return error('Состав тренировки не совпадает с программой.', 400);
         const table = draftTable(access.ownerId, b.programId, b.dayId);
-        const current = await first<DraftRecord>(table);
-        if ((current?.revision || null) !== (b.baseRevision || null))
-          return error('Запись уже изменена на другом устройстве. Обновите журнал перед продолжением.', 409);
-        const updatedAt = nowIso();
-        const revision = randomId();
-        await upsertSingle<DraftRecord>(table, {
-          exercises: exercises.map((e) => ({ ...e, sets: e.sets.map(cleanSet) })),
-          updatedAt,
-          revision,
-          closed: false,
-          feedback: text(b.feedback, 500),
-          updatedByRole: access.role,
-        });
-        return json({ saved: true, updatedAt, revision });
+        for (let attempt = 0; ; attempt++) {
+          const current = await first<DraftRecord & { id: string }>(table);
+          let entries = submitted;
+          let feedback = text(b.feedback, 500);
+          let merged = false;
+          if (current && (current.revision || null) !== (b.baseRevision || null)) {
+            // Saved meanwhile on the other phone. Old apps (no base sent) are asked to reload, as before.
+            if (!Array.isArray(b.base))
+              return error('Запись уже изменена на другом устройстве. Обновите журнал перед продолжением.', 409);
+            const base = baseOf(b.base);
+            if (current.closed) {
+              const late = await addToFinished(access, table, current, base, submitted, feedback, b.baseFeedback);
+              if (!late) return error('Эту тренировку уже завершили. Обновите журнал.', 409);
+              return json({ saved: true, closed: true, amended: late.amended, revision: late.revision, exercises: late.merged, updatedByRole: current.updatedByRole });
+            }
+            entries = mergeEntries(base, submitted, current.exercises || []);
+            feedback = text(mergeText(typeof b.baseFeedback === 'string' ? b.baseFeedback : null, feedback, current.feedback || ''), 500);
+            merged = true;
+          }
+          // The program may have changed under the journal: entries fit the day as it is now.
+          const fitted = fitPlan(day.exercises, entries);
+          const exercises = await matchPlan(b.trainerId, day, fitted);
+          if (!exercises) return error('Состав тренировки не совпадает с программой.', 400);
+          const updatedAt = nowIso();
+          const revision = randomId();
+          const saved = exercises.map((e) => ({ ...e, sets: e.sets.map(cleanSet) }));
+          const record: DraftRecord = { exercises: saved, updatedAt, revision, closed: false, feedback, updatedByRole: access.role };
+          if (!(await writeDraft(table, current, record))) {
+            // The other phone saved in the same moment: read again and merge with it.
+            if (attempt < 5) continue;
+            return error('Не удалось сохранить: телефоны сохраняют одновременно. Повторите.', 503);
+          }
+          // Merged with the other phone's entries or fitted to the program: the journal takes this version.
+          const changed = merged || JSON.stringify(fitted) !== JSON.stringify(submitted);
+          return json({ saved: true, updatedAt, revision, ...(changed ? { exercises: saved, feedback, merged } : {}) });
+        }
       },
     ],
 
@@ -1550,28 +1683,11 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         if (!access) return error('Нет доступа к тренировке.', 403);
         const { program, ownerId } = access;
         const table = draftTable(ownerId, programId, dayId);
-        const current = await first<DraftRecord>(table);
-        if (current?.closed || (current?.revision || null) !== (b.baseRevision || null))
-          return error('Журнал изменён или уже завершён. Обновите его перед продолжением.', 409);
         const day = program.days.find((d) => d.id === dayId);
         if (!day) return error('Тренировка не найдена.', 404);
         const submitted = b.exercises as SessionExercise[];
         if (submitted.some((e) => !Array.isArray(e?.sets) || e.sets.length > 10 || !e.sets.every(validSet)))
           return error('Заполните корректно вес, повторы и RIR.', 400);
-        const matched = await matchPlan(trainerId, day, submitted);
-        if (!matched) return error('Состав тренировки не совпадает с программой.', 400);
-        const performed = matched
-          .map(({ skipped: _skipped, extra: _extra, ...e }) => ({ ...e, sets: e.sets.filter((s) => s.reps > 0).map(cleanSet) }))
-          .filter((e) => e.sets.length > 0);
-        if (!performed.length) return error('Нет выполненных подходов. Черновик сохранён — продолжите позже.', 400);
-        const findKnown = knownExercises(trainerId);
-        for (const e of performed) {
-          if (exerciseRules[e.exerciseId]) continue;
-          const planned = day.exercises.find((p) => p.exerciseId === e.exerciseId)?.muscles;
-          const known = planned?.length ? null : await findKnown(e.exerciseId);
-          const muscles = planned?.length ? planned : known?.muscles?.length ? known.muscles : groupMuscles(known?.muscleGroup);
-          if (muscles.length) (e as SessionExercise).muscles = muscles.slice(0, 6);
-        }
         // A workout left unfinished on an earlier day can be recorded with its own date (up to 14 days back).
         const nowMs = new Date(nowIso()).getTime();
         const requested = typeof b.completedAt === 'string' ? Date.parse(b.completedAt) : NaN;
@@ -1579,10 +1695,56 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           Number.isFinite(requested) && requested <= nowMs + 60000 && requested >= nowMs - 14 * 86400000
             ? new Date(requested).toISOString()
             : nowIso();
+        // The record's id is known before the draft is closed, so late entries from the other phone find it.
+        const sessionId = randomId();
+        let matched: SessionExercise[] | null = null;
+        let performed: SessionExercise[] = [];
+        let feedback = text(b.feedback, 500);
+        let before: (DraftRecord & { id: string }) | undefined;
+        for (let attempt = 0; ; attempt++) {
+          const current = await first<DraftRecord & { id: string }>(table);
+          let entries = submitted;
+          feedback = text(b.feedback, 500);
+          if (current && (current.revision || null) !== (b.baseRevision || null)) {
+            if (!Array.isArray(b.base)) return error('Журнал изменён или уже завершён. Обновите его перед продолжением.', 409);
+            const base = baseOf(b.base);
+            if (current.closed) {
+              // Finished on the other phone meanwhile (or this one's answer was lost and it is sent again):
+              // this phone's entries go into that record, nothing is recorded twice.
+              const late = await addToFinished(access, table, current, base, submitted, feedback, b.baseFeedback);
+              if (!late) return error('Журнал изменён или уже завершён. Обновите его перед продолжением.', 409);
+              return json({ saved: true, sessionId: current.sessionId, amended: late.amended, records: [] });
+            }
+            // Saved meanwhile on the other phone: both phones' entries are recorded.
+            entries = mergeEntries(base, submitted, current.exercises || []);
+            feedback = text(mergeText(typeof b.baseFeedback === 'string' ? b.baseFeedback : null, feedback, current.feedback || ''), 500);
+          }
+          matched = await matchPlan(trainerId, day, fitPlan(day.exercises, entries));
+          if (!matched) return error('Состав тренировки не совпадает с программой.', 400);
+          performed = await performedOf(trainerId, day, matched);
+          if (!performed.length) return error('Нет выполненных подходов. Черновик сохранён — продолжите позже.', 400);
+          // The finished workout keeps its entries: the other phone's late entries are merged into its record.
+          const closed: DraftRecord = {
+            exercises: matched.map((e) => ({ ...e, sets: e.sets.map(cleanSet) })),
+            updatedAt: completedAt,
+            closed: true,
+            revision: randomId(),
+            sessionId,
+            closedAt: nowIso(),
+            feedback,
+            updatedByRole: access.role,
+          };
+          if (await writeDraft(table, current, closed)) {
+            before = current;
+            break;
+          }
+          // The other phone saved (or finished) in the same moment: read again.
+          if (attempt >= 5) return error('Не удалось сохранить: телефоны сохраняют одновременно. Повторите.', 503);
+        }
         const session: SessionRecord = {
           recordedByRole: access.role,
           recordedByName: access.name,
-          feedback: text(b.feedback, 500),
+          feedback,
           trainerId,
           programId,
           programName: program.name,
@@ -1596,11 +1758,18 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const equipmentOf = equipmentLookup(trainerId);
         const withEquipment = await Promise.all(performed.map(async (e) => ({ ...e, equipment: await equipmentOf(e.exerciseId) })));
         const records = sessionRecords(earlier, { exercises: withEquipment });
-        const [sessionId] = await db.add(sessionsTable(ownerId), [session]);
-        if (!sessionId) return error('Не удалось сохранить тренировку.', 500);
+        const [added] = await db.add(sessionsTable(ownerId), [session], [sessionId]).catch(() => [null]);
+        if (!added) {
+          // Not recorded: the workout is opened again as it was.
+          const now = await first<DraftRecord & { id: string }>(table);
+          if (now?.sessionId === sessionId) {
+            const { id: _id, ...restored } = before || ({ exercises: matched!, updatedAt: nowIso() } as DraftRecord & { id: string });
+            await writeDraft(table, now, { ...restored, closed: false, revision: randomId() });
+          }
+          return error('Не удалось сохранить тренировку.', 500);
+        }
         for (const e of performed)
           await upsertSingle(lastResultTable(ownerId, e.exerciseId), { sets: e.sets, completedAt, ...(e.note ? { note: e.note } : {}) });
-        await upsertSingle<DraftRecord>(table, { exercises: [], updatedAt: completedAt, closed: true, revision: randomId() });
         const client = await findClient(trainerId, ownerId);
         const date = DATE_RE.test(b.localDate || '') ? b.localDate : completedAt.slice(0, 10);
         await refreshInsights(trainerId, ownerId, {
@@ -1613,13 +1782,13 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const nextDayId = program.days[(idx + 1) % program.days.length].id;
         // Exercises the trainer added in the gym and did join the program day, each after the planned
         // exercise it followed in the journal; the planned ones keep their order.
-        const joined = program.free || access.role !== 'trainer' ? [] : matched.filter((e) => e.extra && !e.extra.once && performed.some((p) => p.exerciseId === e.exerciseId));
+        const joined = program.free || access.role !== 'trainer' ? [] : matched!.filter((e) => e.extra && !e.extra.once && performed.some((p) => p.exerciseId === e.exerciseId));
         let days = program.days;
         if (joined.length && day.exercises.length + joined.length <= 30) {
           const findKnown = knownExercises(trainerId);
           const after = new Map<string, ProgramExercise[]>();
           let prev = '';
-          for (const e of matched) {
+          for (const e of matched!) {
             if (!e.extra) prev = String(e.replaces || e.exerciseId);
             else if (joined.includes(e)) {
               const known = await findKnown(e.exerciseId);
@@ -1642,7 +1811,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
               // A free workout is remembered as the starting point of the next one.
               ...(program.free
                 ? {
-                    lastFree: matched
+                    lastFree: matched!
                       .filter((e) => e.extra)
                       .map((e) => ({
                         exerciseId: e.exerciseId,

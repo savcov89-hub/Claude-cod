@@ -40,11 +40,11 @@ export const db: Db = {
       return row ? ({ ...clone(row.r), id } as T) : null;
     });
   },
-  async add<T>(name: string, records: T[]) {
+  async add<T>(name: string, records: T[], ids?: string[]) {
     const t = table(name);
     dirty.add(name);
-    return records.map((r) => {
-      const id = newId();
+    return records.map((r, i) => {
+      const id = ids?.[i] || newId();
       const { id: _ignored, ...rest } = clone(r) as any;
       t.push({ id, r: rest });
       return id;
@@ -66,6 +66,21 @@ export const db: Db = {
     if (!t) return;
     tables.set(name, t.filter((r) => !ids.includes(r.id)));
     dirty.add(name);
+  },
+  async swap<T>(name: string, rowId: string | null, record: T, expected: string | null) {
+    const t = table(name);
+    const { id: _ignored, ...rest } = clone(record) as any;
+    if (rowId === null) {
+      if (t.length) return false;
+      t.push({ id: 'one', r: rest });
+      dirty.add(name);
+      return true;
+    }
+    const row = t.find((r) => r.id === rowId);
+    if (!row || (row.r?.revision ?? null) !== expected) return false;
+    row.r = rest;
+    dirty.add(name);
+    return true;
   },
 };
 

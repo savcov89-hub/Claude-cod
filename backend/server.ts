@@ -38,10 +38,10 @@ export function supabaseDb(sb: SupabaseClient): Db {
         return row ? ({ ...row.data, id } as T) : null;
       });
     },
-    async add<T>(table: string, records: T[]) {
+    async add<T>(table: string, records: T[], ids?: string[]) {
       if (!records.length) return [];
       // Ids are made here so the returned order always matches the input order.
-      const rows = records.map((r) => ({ tbl: table, id: crypto.randomUUID(), data: withoutId(r) }));
+      const rows = records.map((r, i) => ({ tbl: table, id: ids?.[i] || crypto.randomUUID(), data: withoutId(r) }));
       check('add', await sb.from(ROWS).insert(rows));
       return rows.map((r) => r.id);
     },
@@ -56,6 +56,20 @@ export function supabaseDb(sb: SupabaseClient): Db {
     async remove(table: string, ids: string[]) {
       if (!ids.length) return;
       check('remove', await sb.from(ROWS).delete().eq('tbl', table).in('id', ids));
+    },
+    async swap<T>(table: string, rowId: string | null, record: T, expected: string | null) {
+      const data = withoutId(record);
+      if (rowId === null) {
+        // The first row of the table has a fixed id, so of two first writes only one gets in.
+        const res = await sb.from(ROWS).insert({ tbl: table, id: 'one', data });
+        if (res.error && (res.error as { code?: string }).code === '23505') return false;
+        check('swap', res);
+        return true;
+      }
+      // One statement: the row is changed only if it still has the expected revision.
+      const q = sb.from(ROWS).update({ data }).eq('tbl', table).eq('id', rowId);
+      const res = await (expected === null ? q.is('data->>revision', null) : q.eq('data->>revision', expected)).select('id');
+      return (check<Array<{ id: string }>>('swap', res) ?? []).length > 0;
     },
   };
 }

@@ -24,7 +24,7 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>('workout');
   const [journal, setJournal] = useState<{ program: Program; dayId: string } | null>(null);
-  const [justDone, setJustDone] = useState(false);
+  const [justDone, setJustDone] = useState<string | null>(null);
   const [newRecords, setNewRecords] = useState<PersonalRecord[] | null>(null);
   // A workout the trainer is recording right now.
   const [live, setLive] = useState<{ programId: string; dayId: string; dayName: string; updatedAt: string; updatedByRole?: string } | null>(null);
@@ -100,9 +100,9 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
             source={{ trainerId: journal.program.trainerId, programId: journal.program.id, dayId: journal.dayId }}
             onBack={() => setJournal(null)}
             onDayChange={(dayId) => setJournal({ ...journal, dayId })}
-            onCompleted={async ({ records }) => {
+            onCompleted={async ({ records, by }) => {
               setJournal(null);
-              setJustDone(true);
+              setJustDone(by === 'trainer' ? 'Тренер завершил тренировку — ваши подходы в ней.' : 'Тренировка записана. Тренер увидит результат.');
               if (records?.length) setNewRecords(records);
               await load();
             }}
@@ -187,7 +187,7 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
             </nav>
             {tab === 'workout' && (
               <>
-                {justDone && <div className="success">Тренировка записана. Тренер увидит результат.</div>}
+                {justDone && <div className="success">{justDone}</div>}
                 {programs.length === 0 ? (
                   <Empty title="Программа ещё не назначена" text={'Тренер: ' + coaches.map((c) => c.trainerName).join(', ')} />
                 ) : (
@@ -203,7 +203,7 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
                           {next.exercises.length} упражнений · {next.exercises.reduce((n, e) => n + e.sets, 0)} подходов
                           {p.lastCompletedAt ? ' · прошлая ' + fmtDate(p.lastCompletedAt) : ''}
                         </p>
-                        <button className="btn btn-primary btn-block btn-lg" onClick={() => { setJustDone(false); setJournal({ program: p, dayId: next.id }); }}>
+                        <button className="btn btn-primary btn-block btn-lg" onClick={() => { setJustDone(null); setJournal({ program: p, dayId: next.id }); }}>
                           <Play size={18} /> Начать тренировку
                         </button>
                         <div className="day-links">

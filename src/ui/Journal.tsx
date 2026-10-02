@@ -4,6 +4,7 @@ import { api, inGym, isLocal, readError, safeStorage } from '../transport';
 import { equipmentOf, fmtKg, isStack, suggestNext, weightUnit, type PersonalRecord, type Suggestion } from '../analytics';
 import { localDate } from '../clock';
 import { isNetworkError, isQueued } from '../offline';
+import { mergeEntries, mergeText } from '../draftMerge';
 import type { Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
 import { Confirm, Sheet, clock, elapsed, fmtDate, fmtSets, useNow } from './common';
 import { ExercisePicker } from './ProgramBuilder';
@@ -65,7 +66,7 @@ export function Journal({
   onProgramChanged?: () => void;
   source: JournalSource;
   onBack?: () => void;
-  onCompleted: (summary: { sets: number; records?: PersonalRecord[] }) => void;
+  onCompleted: (summary: { sets: number; records?: PersonalRecord[]; by?: string }) => void;
   onActivity?: (a: JournalActivity) => void;
   onDayChange?: (dayId: string) => void;
   embedded?: boolean;
@@ -187,6 +188,9 @@ interface Cache {
   pending: boolean;
   baseRevision: string | null;
   feedback: string;
+  /** The server's entries at baseRevision (what this phone started from), for merging with the other phone. */
+  base?: SessionExercise[] | null;
+  baseFeedback?: string | null;
 }
 function readCache(w: WorkoutPayload): Cache | null {
   try {
@@ -213,7 +217,7 @@ function JournalBody({
   workout: WorkoutPayload;
   embedded: boolean;
   onBack?: () => void;
-  onCompleted: (summary: { sets: number; records?: PersonalRecord[] }) => void;
+  onCompleted: (summary: { sets: number; records?: PersonalRecord[]; by?: string }) => void;
   onActivity?: (a: JournalActivity) => void;
   onDayChange?: (dayId: string) => void;
   onReload: () => void;
@@ -256,10 +260,9 @@ function JournalBody({
       fromPlan.every((e) => workout.day.exercises.some((p) => p.exerciseId === slotOf(e)))
     );
   };
-  const cacheUsable =
-    !!initialCache?.pending &&
-    (initialCache.baseRevision || null) === (workout.revision || null) &&
-    matchesPlan(initialCache.results);
+  // Entries typed here and not saved yet are resumed whatever the server got meanwhile: the save merges them.
+  const localPending = initialCache?.pending ? initialCache : null;
+  const cacheUsable = !!localPending && matchesPlan(localPending.results);
   // The program was edited after this workout was started: its set counts apply (done sets stay).
   const programChanged =
     !!draftOf && !!workout.programUpdatedAt && Date.parse(workout.programUpdatedAt) > Date.parse(draftOf.updatedAt);
@@ -281,8 +284,7 @@ function JournalBody({
   // put into the current plan instead of being dropped, and saved right away.
   const doneIn = (list?: SessionExercise[]) => (list || []).some((e) => e.sets.some((s) => s.reps > 0));
   const unplanned = useMemo(() => {
-    const local =
-      initialCache?.pending && (initialCache.baseRevision || null) === (workout.revision || null) ? initialCache.results : null;
+    const local = localPending ? localPending.results : null;
     const list = local && !matchesPlan(local) ? local : !local && draftOf && !matchesPlan(draftOf.exercises) ? draftOf.exercises : null;
     return list && doneIn(list) ? list : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -304,9 +306,8 @@ function JournalBody({
   const [feedback, setFeedback] = useState(() => (cacheUsable ? initialCache!.feedback || '' : draftOf?.feedback || ''));
   const [status, setStatus] = useState<SaveStatus>(draftOf ? 'saved' : 'idle');
   const [errorText, setErrorText] = useState('');
-  const [conflict, setConflict] = useState(
-    () => !!initialCache?.pending && (initialCache.baseRevision || null) !== (workout.revision || null),
-  );
+  // Only when the server cannot take this phone's entries (e.g. the workout was finished long ago).
+  const [conflict, setConflict] = useState(false);
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [finishing, setFinishing] = useState(false);
@@ -425,8 +426,16 @@ function JournalBody({
 
   const latest = useRef(results);
   const feedbackRef = useRef(feedback);
-  const baseRevision = useRef<string | null>(workout.revision || null);
+  const baseRevision = useRef<string | null>(localPending ? localPending.baseRevision || null : workout.revision || null);
+  // The server's entries at baseRevision: a save made from them is merged with what the other phone saved meanwhile.
+  const baseRef = useRef<{ exercises: SessionExercise[] | null; feedback: string | null }>(
+    localPending
+      ? { exercises: localPending.base ?? null, feedback: localPending.baseFeedback ?? null }
+      : { exercises: draftOf?.exercises ?? null, feedback: draftOf ? draftOf.feedback || '' : null },
+  );
   const pending = useRef(cacheUsable);
+  const onCompletedRef = useRef(onCompleted);
+  onCompletedRef.current = onCompleted;
   const completed = useRef(false);
   const conflictRef = useRef(conflict);
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -435,7 +444,14 @@ function JournalBody({
   const writeCache = (isPending: boolean) =>
     safeStorage.set(
       cacheKey,
-      JSON.stringify({ results: latest.current, pending: isPending, baseRevision: baseRevision.current, feedback: feedbackRef.current }),
+      JSON.stringify({
+        results: latest.current,
+        pending: isPending,
+        baseRevision: baseRevision.current,
+        feedback: feedbackRef.current,
+        base: baseRef.current.exercises,
+        baseFeedback: baseRef.current.feedback,
+      } satisfies Cache),
     );
 
   const body = (exercises: SessionExercise[], fb: string, at?: string) => ({
@@ -443,6 +459,9 @@ function JournalBody({
     programId: workout.programId,
     dayId: workout.day.id,
     baseRevision: baseRevision.current,
+    // What this phone started from: when the other phone saved meanwhile, the server merges instead of refusing.
+    base: baseRef.current.exercises || [],
+    baseFeedback: baseRef.current.feedback,
     feedback: fb,
     exercises,
     localDate: localDate(at ? new Date(at) : new Date()),
@@ -459,9 +478,32 @@ function JournalBody({
       .then(async () => {
         setStatus('saving');
         try {
-          const saved = await api.post('/api/draft', body(snapshot, fb));
-          baseRevision.current = saved.data.revision;
+          const d = (await api.post('/api/draft', body(snapshot, fb))).data;
+          // Finished on the other phone meanwhile: this phone's entries went into that record.
+          if (d.closed) return finishedElsewhere(d.exercises, d.updatedByRole);
+          baseRevision.current = d.revision;
           const settled = snapshot === latest.current && fb === feedbackRef.current;
+          if (Array.isArray(d.exercises)) {
+            // Merged with the other phone's entries (or fitted to the program as it is now): that version is
+            // shown, with anything typed here meanwhile on top.
+            const server = d.exercises as SessionExercise[];
+            const serverFb = typeof d.feedback === 'string' ? d.feedback : fb;
+            baseRef.current = { exercises: server, feedback: serverFb };
+            const next = settled ? server : mergeEntries(snapshot, latest.current, server);
+            const nextFb = fb === feedbackRef.current ? serverFb : mergeText(fb, feedbackRef.current, serverFb);
+            latest.current = next;
+            feedbackRef.current = nextFb;
+            setResults(next);
+            setFeedback(nextFb);
+            if (d.merged) setLiveAt((cur) => ({ at: Date.now(), by: cur?.by }));
+            if (!matchesPlan(next)) {
+              // The program changed under the journal: loaded again, entries kept.
+              pending.current = !settled;
+              writeCache(!settled);
+              onReload();
+              return;
+            }
+          } else baseRef.current = { exercises: snapshot, feedback: fb };
           if (settled) pending.current = false;
           writeCache(!settled);
           setStatus(settled ? 'saved' : 'saving');
@@ -495,6 +537,7 @@ function JournalBody({
   /** Takes the server's entries (newer than this phone's, nothing waiting here). */
   const adopt = (d: DraftLike) => {
     baseRevision.current = d.revision;
+    baseRef.current = { exercises: d.exercises, feedback: d.feedback || '' };
     latest.current = d.exercises;
     setResults(d.exercises);
     feedbackRef.current = d.feedback || '';
@@ -502,6 +545,16 @@ function JournalBody({
     writeCache(false);
     setStatus('saved');
     if (doneIn(d.exercises)) setLastSetAt(Date.parse(d.updatedAt) || Date.now());
+  };
+
+  /** The other phone finished this workout: shown as recorded (its record has this phone's entries too). */
+  const finishedElsewhere = (entries: SessionExercise[] | null | undefined, by?: string) => {
+    completed.current = true;
+    pending.current = false;
+    if (timer.current) clearTimeout(timer.current);
+    safeStorage.remove(cacheKey);
+    const list = entries?.length ? entries : latest.current;
+    onCompletedRef.current({ sets: list.reduce((n, e) => n + e.sets.filter((x) => x.reps > 0).length, 0), records: [], by });
   };
 
   const schedule = () => {
@@ -532,8 +585,9 @@ function JournalBody({
         const d = await fetchDraft();
         if (baseRevision.current !== before || edits.current !== editsBefore) return;
         if (!d?.revision || d.revision === baseRevision.current || pending.current || editingRef.current || completed.current) return;
-        // Finished on the other phone, or the program changed under it: load the journal again.
-        if (d.closed || !matchesPlan(d.exercises)) return onReload();
+        // Finished on the other phone: shown as recorded. The program changed under it: loaded again.
+        if (d.closed) return finishedElsewhere(d.exercises, d.updatedByRole);
+        if (!matchesPlan(d.exercises)) return onReload();
         adopt(d);
         setLiveAt({ at: Date.now(), by: d.updatedByRole && d.updatedByRole !== workout.actorRole ? d.updatedByRole : undefined });
       } catch {
@@ -926,10 +980,11 @@ function JournalBody({
     }
     if (!d?.revision) return { state: 'ok' };
     if (d.closed) {
-      // Already recorded elsewhere.
-      completed.current = true;
-      safeStorage.remove(cacheKey);
-      onReload();
+      // Nothing saved since the last time this day was finished: this is a new workout.
+      if (d.revision === baseRevision.current) return { state: 'ok' };
+      // Finished on the other phone; entries waiting here are merged into that record by the save below.
+      if (pending.current) return { state: 'ok' };
+      finishedElsewhere(d.exercises, d.updatedByRole);
       return { state: 'done' };
     }
     if (d.revision !== baseRevision.current && !pending.current) {
@@ -970,11 +1025,13 @@ function JournalBody({
       await persist().catch((err) => {
         if (!isNetworkError(err)) throw err;
       });
+      // Finished on the other phone meanwhile: the save put this phone's entries into that record.
+      if (completed.current) return true;
       const r = await api.post('/api/sessions', body(latest.current, feedbackRef.current, at));
       completed.current = true;
       safeStorage.remove(cacheKey);
       if (r.data?.queued) safeStorage.set(doneKey, String(Date.now()));
-      onCompleted({ sets: performed, records: r.data?.records || [] });
+      onCompleted({ sets: countDone(latest.current), records: r.data?.records || [] });
       return true;
     } catch (err) {
       setErrorText(readError(err));
@@ -1555,7 +1612,11 @@ function JournalBody({
             )}
             {savedDay && <p className="tone-good small center-text">{savedDay}</p>}
             <p className="muted small center-text">
-              Каждый подход сохраняется сразу — переключайтесь между клиентами свободно. «Ушёл» тоже записывает тренировку в историю.
+              {workout.actorRole === 'trainer'
+                ? embedded
+                  ? 'Каждый подход сохраняется сразу — переключайтесь между клиентами свободно. «Ушёл» тоже записывает тренировку в историю.'
+                  : 'Каждый подход сохраняется сразу. Клиент видит записи у себя, может отмечать подходы одновременно с вами.'
+                : 'Каждый подход сохраняется сразу. Тренер видит записи у себя и может отмечать подходы одновременно с вами.'}
             </p>
           </>
         )}
