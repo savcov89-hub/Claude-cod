@@ -1,6 +1,6 @@
 // How to do each exercise of the base (src/catalog.ts): the start, the movement, what to watch, common mistakes.
 // Written to today's coaching standards (no "knees never past the toes" and the like); the free-exercise-db
-// instructions served as a starting point and were corrected. Not shown in the app yet.
+// instructions served as a starting point and were corrected. Shown under the pictures in «Как выполнять».
 //
 // Variants of one movement (cable / stack / plate-loaded) share the text and add a line on setting up their machine.
 

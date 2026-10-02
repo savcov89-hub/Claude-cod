@@ -2,6 +2,7 @@
 // the start and the end, the muscles). The drawings themselves are in src/ui/figure (checked by scripts/check-figures.tsx).
 import { memo, useEffect, useRef, useState } from 'react';
 import { exerciseRules, muscleNames } from '../trainingRules';
+import { TECHNIQUE } from '../exerciseTechnique';
 import { Sheet } from './common';
 import { FigureMotion, FigurePose, MOVES, type AnyMove } from './figure';
 
@@ -110,12 +111,51 @@ export function ExerciseFigures({ exercise }: { exercise: ArtSubject }) {
   );
 }
 
-/** How an exercise is done: the pictures, the body position and the muscles it works. */
+/** How to do it: the start always seen; the movement open; what to watch and the mistakes on a tap. */
+function TechniqueText({ id }: { id: string }) {
+  const tq = TECHNIQUE[id];
+  if (!tq) return null;
+  return (
+    <div className="tech">
+      <p className="small">
+        <b>Исходное положение.</b> {tq.setup}
+      </p>
+      <details open>
+        <summary>Выполнение</summary>
+        <ol className="small">
+          {tq.steps.map((x) => (
+            <li key={x}>{x}</li>
+          ))}
+        </ol>
+      </details>
+      <details>
+        <summary>На что обратить внимание</summary>
+        <ul className="small">
+          {tq.cues.map((x) => (
+            <li key={x}>{x}</li>
+          ))}
+        </ul>
+      </details>
+      <details>
+        <summary>Частые ошибки</summary>
+        <ul className="small">
+          {tq.mistakes.map((x) => (
+            <li key={x}>{x}</li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  );
+}
+
+/** How an exercise is done: the pictures, the technique, the body position and the muscles it works. */
 export function ExerciseInfoSheet({ exercise, name, onClose }: { exercise: ArtSubject; name: string; onClose: () => void }) {
-  const rule = exerciseRules[exercise.exerciseId || exercise.id || ''];
+  const id = exercise.exerciseId || exercise.id || '';
+  const rule = exerciseRules[id];
   return (
     <Sheet title={name} onClose={onClose}>
       <ExerciseFigures exercise={exercise} />
+      <TechniqueText id={id} />
       {rule ? (
         <p className="small xa-note">
           <b>{rule.position}.</b> {rule.note}

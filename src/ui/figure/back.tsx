@@ -320,7 +320,8 @@ export const dorianRow: Move = (() => {
     gear: (j) => [
       { layer: 'back', node: G.floor() },
       { layer: 'back', node: G.bar([pivot[0], FLOOR], pivot, 2.4) },
-      ...lever(pivot, j.hand, { plate: 0.55, plateR: 6.5 }),
+      // The plates are on the end the hands hold; the far end is fixed.
+      ...lever(pivot, j.hand, { plate: 0.9, plateR: 6.5 }),
       { layer: 'front', node: G.bar(add(j.hand, [-1.6, 0]), add(j.hand, [1.6, 0]), 1.6) },
     ],
   };
@@ -373,7 +374,8 @@ function deadlift(onLever?: boolean): Move {
   };
 }
 const leverHandle = (pivot: V, hand: V) => [
-  ...lever(pivot, hand, { plate: 0.55, plateR: 6.5 }),
+  // The plates sit next to the handles, on the end the hands lift.
+  ...lever(pivot, hand, { plate: 0.88, plateR: 6.5 }),
   { layer: 'front' as const, node: G.bar(add(hand, [-1.6, 0]), add(hand, [1.6, 0]), 1.6) },
 ];
 export const deadliftMove = deadlift();
