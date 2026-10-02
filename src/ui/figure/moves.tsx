@@ -7,6 +7,8 @@ import * as chest from './chest';
 import * as back from './back';
 import * as legs from './legs';
 import * as arms from './arms';
+import * as shoulders from './shoulders';
+import * as abs from './abs';
 
 export type { Move };
 export type AnyMove = Move | FrontMove;
@@ -83,8 +85,36 @@ export const MOVES: Record<string, AnyMove> = {
   'cable-lateral-raise': front.cableLateralRaise,
   'machine-lateral-raise': front.machineLateralRaise,
   'stack-lateral-raise': front.machineLateralRaise,
+  'overhead-press': shoulders.overheadPress,
+  'dumbbell-shoulder-press': shoulders.dumbbellShoulderPress,
+  'machine-shoulder-press': shoulders.machineShoulderPress,
+  'stack-shoulder-press': shoulders.machineShoulderPress,
+  'plate-shoulder-press': shoulders.plateShoulderPress,
+  'rear-delt-fly': shoulders.reverseFly,
+  'reverse-pec-deck': shoulders.reverseFly,
+  'stack-rear-delt': shoulders.reverseFly,
+  'face-pull': shoulders.facePull,
   'standing-calf-raise': legs.standingCalfRaise,
   'seated-calf-raise': legs.seatedCalfRaise,
   // arms
   'dumbbell-curl': arms.dumbbellCurl,
+  'barbell-curl': arms.barbellCurl,
+  'hammer-curl': arms.hammerCurl,
+  'cable-curl': arms.cableCurl,
+  'bayesian-curl': arms.bayesianCurl,
+  'incline-curl': arms.inclineCurl,
+  'preacher-curl': arms.preacherCurl,
+  'stack-biceps-curl': arms.machineCurl,
+  'triceps-pushdown': arms.tricepsPushdown,
+  'overhead-triceps': arms.overheadTriceps,
+  'lying-triceps-extension': arms.lyingTricepsExtension,
+  'stack-triceps-press': arms.stackTricepsPress,
+  'plate-triceps': arms.plateTriceps,
+  // abs
+  crunch: abs.crunch,
+  'reverse-crunch': abs.reverseCrunch,
+  'cable-crunch': abs.cableCrunch,
+  'hanging-leg-raise': abs.hangingLegRaise,
+  'stack-ab-crunch': abs.stackAbCrunch,
+  'plate-ab-crunch': abs.plateAbCrunch,
 };

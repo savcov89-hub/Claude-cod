@@ -267,6 +267,20 @@ export const G = {
       <circle cx={f(at[0])} cy={f(at[1])} r={1.1} className="fg-metal" />
     </g>
   ),
+  /** A dumbbell from the side (a neutral grip): the handle across the fist, a plate at each end. */
+  dumbbellSide: (at: V, along: V) => {
+    const d = unit(along);
+    const a = add(at, d, -3.6);
+    const b = add(at, d, 3.6);
+    return (
+      <g>
+        <line x1={f(a[0])} y1={f(a[1])} x2={f(b[0])} y2={f(b[1])} strokeWidth={1.2} className="fg-frame" />
+        {[a, b].map((p, i) => (
+          <line key={i} x1={f(p[0] - d[1] * 2.6)} y1={f(p[1] + d[0] * 2.6)} x2={f(p[0] + d[1] * 2.6)} y2={f(p[1] - d[0] * 2.6)} strokeWidth={2.6} className="fg-frame" />
+        ))}
+      </g>
+    );
+  },
   /** A padded board between two points (bench top, back rest), `t` thick, on the side `side` of the line. */
   pad: (a: V, b: V, t = 3.2) => {
     const d = unit(sub(b, a));
