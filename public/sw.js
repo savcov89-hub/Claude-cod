@@ -12,9 +12,11 @@ const assetsOf = (html) => Array.from(html.matchAll(/(?:src|href)="(\.\/assets\/
 async function storePage(response) {
   const cache = await caches.open(CACHE);
   const html = await response.clone().text();
-  await cache.put(PAGE, response.clone());
   const assets = assetsOf(html);
-  await Promise.all(assets.map((a) => cache.match(a, { ignoreVary: true }).then((hit) => hit || cache.add(a).catch(() => undefined))));
+  // The page is kept only together with all its files: a page without them would open blank offline.
+  const got = await Promise.all(assets.map((a) => cache.match(a, { ignoreVary: true }).then((hit) => !!hit || cache.add(a).then(() => true, () => false))));
+  if (got.includes(false)) return;
+  await cache.put(PAGE, response.clone());
   const keep = new Set(assets.map((a) => new URL(a, self.registration.scope).href));
   for (const req of await cache.keys()) if (req.url.includes('/assets/') && !keep.has(req.url)) await cache.delete(req);
 }

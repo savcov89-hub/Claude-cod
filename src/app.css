@@ -3295,3 +3295,16 @@ h2 {
 .lib-figures {
   padding: 4px 0 8px;
 }
+
+/* a screen that failed to draw (src/ui/Crash.tsx) */
+.crash h2 {
+  margin: 0;
+}
+.crash-detail {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  color: var(--ink-2);
+  max-height: 40vh;
+  overflow: auto;
+}

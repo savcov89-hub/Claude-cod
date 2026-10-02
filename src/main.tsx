@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { applyTheme } from "./theme";
+import { CrashScreen } from "./ui/Crash";
 
 applyTheme();
 
@@ -77,6 +78,8 @@ if (import.meta.env.PROD && import.meta.env.VITE_LOCAL_ONLY !== "1" && "serviceW
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <CrashScreen>
+      <App />
+    </CrashScreen>
   </StrictMode>,
 );
