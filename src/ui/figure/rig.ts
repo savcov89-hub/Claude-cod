@@ -51,7 +51,7 @@ export interface Limb {
 
 export interface Pose {
   /** Which point of the body stays where: the ankle (standing), the hip (sitting, lying) or the hands (hanging). */
-  anchor: { at: 'ankle' | 'hip' | 'shoulder' | 'hand'; to: V };
+  anchor: { at: 'ankle' | 'farAnkle' | 'toe' | 'hip' | 'shoulder' | 'hand'; to: V };
   trunk: number;
   /** Head nod relative to the trunk (+ chin down to the chest). */
   head?: number;
@@ -218,8 +218,14 @@ export function joints(p: Pose): Joints {
   };
   // Where the anchor point is with the hip at 0, then move everything so it lands on `to`.
   const probe = placeOnce([0, 0]);
-  const anchorAt =
-    p.anchor.at === 'hip' ? probe.hip : p.anchor.at === 'shoulder' ? probe.shoulder : p.anchor.at === 'hand' ? probe.hand : probe.ankle;
+  const anchorAt = {
+    hip: probe.hip,
+    shoulder: probe.shoulder,
+    hand: probe.hand,
+    ankle: probe.ankle,
+    farAnkle: probe.ankle2,
+    toe: probe.toe,
+  }[p.anchor.at];
   short.length = 0;
   const j = placeOnce(sub(p.anchor.to, anchorAt));
   j.short = [...new Set(short)];
