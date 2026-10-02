@@ -301,30 +301,27 @@ export const chestSupportedRow: Move = (() => {
   };
 })();
 
-/** One-arm landmine row (Dorian Yates): staggered stance, bent over, the bar's end to the hip. */
+/**
+ * Yates row in a lever machine: underhand grip with both hands, the trunk at about 45°, knees soft; the handles
+ * from long arms to the lower belly, elbows close to the body.
+ */
 export const dorianRow: Move = (() => {
-  const base = {
-    anchor: { at: 'ankle' as const, to: [46, ANKLE_Y] as V },
-    trunk: 62,
-    head: -28,
-    leg: { a: 26, b: -6, foot: 90 },
-    farLeg: { a: -14, b: -18, foot: 90 },
-  };
-  // The free arm hangs relaxed.
-  const onKnee = { a: 4, b: 16 };
-  const pivot: V = [12, FLOOR - 1];
+  const base = { anchor: { at: 'ankle' as const, to: [46, ANKLE_Y] as V }, trunk: 45, head: -18, leg: { a: 34, b: -4, foot: 90 } };
+  const pivot: V = [14, FLOOR - 2];
   return {
     frames: [
-      { ...base, farArm: onKnee, arm: { a: -2, b: -2 } },
-      { ...base, farArm: onKnee, arm: { reach: { from: 'shoulder', to: [-15, 4], bend: [-0.6, -1], bendTrunk: true, shorten: 0.95 } } },
+      { ...base, arm: { a: -14, b: -14 } },
+      { ...base, arm: { reach: { from: 'shoulder', to: [-17, 5.5], bend: [-0.6, -1], bendTrunk: true, shorten: 0.95 } } },
     ],
     work: ['lats', 'upperBack', 'biceps'],
-    wideArms: true,
+    standing: true,
+    balance: (j) => j.hand,
     show: [pivot],
     gear: (j) => [
       { layer: 'back', node: G.floor() },
-      { layer: 'back', node: G.bar(pivot, add(j.hand, [4, 0]), 2) },
-      { layer: 'back', node: G.plate(add(j.hand, [-6, 2]), 6.5) },
+      { layer: 'back', node: G.bar([pivot[0], FLOOR], pivot, 2.4) },
+      ...lever(pivot, j.hand, { plate: 0.55, plateR: 6.5 }),
+      { layer: 'front', node: G.bar(add(j.hand, [-1.6, 0]), add(j.hand, [1.6, 0]), 1.6) },
     ],
   };
 })();
