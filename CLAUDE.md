@@ -18,6 +18,7 @@
 - Изменения в `backend/`: локальный Supabase (`npx supabase start`, нужен Docker) и `scripts/supabase-parity.ts`.
 - Изменения сохранения тренировок: `npx tsx scripts/check-merge.ts`, `npx tsx scripts/check-saving.ts`
   и два браузера на локальном Supabase — `scripts/check-two-phones.mjs`.
+- Изменения интерфейса журнала и зала: `node scripts/check-ui.mjs` (сценарии записи с экранов и плавность).
 - Изменения прогрессии или журнала: `npx tsx scripts/simulate-month.ts отчёт.md` — 30 клиентов, месяц Пн/Ср/Пт;
   сравнить «в диапазоне / легко / тяжело» и число колебаний с прошлым прогоном.
   После `npm run build:api` перезапускать контейнер `supabase_edge_runtime_training-log`.

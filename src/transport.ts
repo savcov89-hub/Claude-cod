@@ -18,6 +18,9 @@ export const api = {
     isLocal() ? localApi.post(path, body) : remote.post(path, body),
 };
 
+// Test mode only: the sample data's API for the automatic checks (scripts/check-ui.mjs) in a production build.
+if (typeof window !== 'undefined' && isLocal()) (window as unknown as { __tlApi?: typeof api }).__tlApi = api;
+
 /** "In the gym" mark lasts 12 hours. */
 export const inGym = (at?: string | null) => !!at && Date.now() - new Date(at).getTime() < 12 * 3600000;
 

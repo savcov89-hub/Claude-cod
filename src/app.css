@@ -1756,6 +1756,9 @@ table {
   display: grid;
   gap: 6px;
 }
+.pick-other {
+  margin: 10px 4px 2px;
+}
 .pick,
 .lib-item {
   display: flex;
@@ -3046,5 +3049,46 @@ h2 {
 @media (prefers-reduced-motion: reduce) {
   .live-dot {
     animation: none;
+  }
+}
+
+/* Narrow phones (360 px Android, small iPhones): the hint goes under the name, so the card never gets wider than the screen. */
+@media (max-width: 389px) {
+  .ex-head {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) auto auto;
+    grid-template-areas: 'num name move menu' '. hint hint hint';
+    column-gap: 8px;
+    row-gap: 4px;
+  }
+  .ex-head .ex-num {
+    grid-area: num;
+  }
+  .ex-head .ex-name {
+    grid-area: name;
+  }
+  .ex-head .ex-name h3 {
+    overflow-wrap: anywhere;
+    hyphens: auto;
+  }
+  .ex-head .hint {
+    grid-area: hint;
+    justify-self: start;
+    margin-left: 0;
+  }
+  .ex-head .ex-move {
+    grid-area: move;
+  }
+  .ex-head .ex-menu-btn {
+    grid-area: menu;
+  }
+}
+@media (max-width: 359px) {
+  .gym-toolbar .select-sm {
+    min-width: 0;
+    max-width: 112px;
+  }
+  .gym-toolbar .btn-sm {
+    padding-inline: 8px;
   }
 }

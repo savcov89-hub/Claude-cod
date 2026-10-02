@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowLeft, ArrowUp, Plus, RefreshCw, Search, Trash2, Undo2 } from 'lucide-react';
 import { api, readError } from '../transport';
 import { DAY_FOCUS, focusDay, templateDays, templates } from '../templates';
@@ -550,12 +550,13 @@ export function ExercisePicker({
     filtersRef.current?.querySelector('.filter.on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
   }, []);
   const groups = Array.from(new Set(exercises.map((e) => e.muscleGroup.split(' / ')[0])));
-  const list = exercises.filter(
-    (e) =>
-      !exclude.includes(e.id) &&
-      (!group || e.muscleGroup.startsWith(group)) &&
-      searchKey(e.name + ' ' + e.muscleGroup + ' ' + e.equipment).includes(searchKey(q.trim())),
+  const found = exercises.filter(
+    (e) => !exclude.includes(e.id) && searchKey(e.name + ' ' + e.muscleGroup + ' ' + e.equipment).includes(searchKey(q.trim())),
   );
+  const inGroup = found.filter((e) => !group || e.muscleGroup.startsWith(group));
+  // A name typed while a muscle group is chosen is also looked for in the other groups.
+  const elsewhere = q.trim() && group ? found.filter((e) => !e.muscleGroup.startsWith(group)) : [];
+  const list = [...inGroup, ...elsewhere];
   if (creating)
     return (
       <AddExercise
@@ -586,8 +587,10 @@ export function ExercisePicker({
         ))}
       </div>
       <div className="pick-list">
-        {list.map((e) => (
-          <button key={e.id} className="pick" onClick={() => onPick(e)}>
+        {list.map((e, i) => (
+          <Fragment key={e.id}>
+          {i === inGroup.length && <p className="muted small pick-other">В других группах</p>}
+          <button className="pick" onClick={() => onPick(e)}>
             <span className="grow">
               <strong>{e.name}</strong>
               <span className="muted small">
@@ -597,6 +600,7 @@ export function ExercisePicker({
             </span>
             <Plus size={18} />
           </button>
+          </Fragment>
         ))}
         {!list.length && <p className="muted small center-text">Ничего не найдено.</p>}
         {allowCreate && (

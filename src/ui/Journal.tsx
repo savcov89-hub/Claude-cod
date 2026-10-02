@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, Check, ChevronDown, ListOrdered, Minus, MoreHorizontal, Pencil, Plus, SkipForward, Trash2, Undo2 } from 'lucide-react';
 import { api, inGym, isLocal, readError, safeStorage } from '../transport';
 import { equipmentOf, fmtKg, isStack, suggestNext, weightUnit, type PersonalRecord, type Suggestion } from '../analytics';
@@ -178,6 +178,15 @@ interface DraftLike {
   updatedAt: string;
 }
 
+/** The element that scrolls this one (on phones it is the app's main area, not the window). */
+function scrollerOf(el: HTMLElement): Element {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const o = getComputedStyle(p).overflowY;
+    if ((o === 'auto' || o === 'scroll') && p.scrollHeight > p.clientHeight) return p;
+  }
+  return document.scrollingElement || document.documentElement;
+}
+
 const cacheKeyOf = (w: WorkoutPayload) =>
   'tl-draft:' + (isLocal() ? 'local:' : '') + w.ownerId + ':' + (w.actorRole || 'client') + ':' + w.programId + ':' + w.day.id;
 const legacyKeyOf = (w: WorkoutPayload) =>
@@ -333,17 +342,76 @@ function JournalBody({
   };
   const stopEditing = () => {
     if (editTimer.current) clearTimeout(editTimer.current);
-    editTimer.current = setTimeout(() => setEditing(null), 400);
+    editTimer.current = setTimeout(() => {
+      prepareFlip();
+      setEditing(null);
+    }, 400);
   };
   // True when ✓ is pressed while a number in the same row is being typed.
   const confirmTap = useRef(false);
-  const toggleExpanded = (i: string) =>
+  // Smooth list: when exercises fold, open or move, the others slide to their new place instead of jumping.
+  const listRef = useRef<HTMLFieldSetElement>(null);
+  const flipFrom = useRef<Map<string, number> | null>(null);
+  const listItems = () => Array.from(listRef.current?.querySelectorAll<HTMLElement>(':scope > [data-slot]') || []);
+  const prepareFlip = () => {
+    const list = listRef.current;
+    if (!list || flipFrom.current) return;
+    const top = list.getBoundingClientRect().top;
+    flipFrom.current = new Map(listItems().map((el) => [el.dataset.slot!, el.getBoundingClientRect().top - top]));
+  };
+  // Entries from the other phone: the exercise at the top of the screen stays where it is (Safari has no scroll anchoring).
+  const anchor = useRef<{ slot: string; top: number } | null>(null);
+  const holdScroll = () => {
+    const active = document.activeElement?.closest?.('[data-slot]') as HTMLElement | null;
+    const items = listItems();
+    // The card being typed in; otherwise the first card that starts on screen (one above may fold).
+    const el =
+      active && listRef.current?.contains(active)
+        ? active
+        : items.find((x) => x.getBoundingClientRect().top >= 70) || items.filter((x) => x.getBoundingClientRect().top < 70).pop();
+    if (el) anchor.current = { slot: el.dataset.slot!, top: el.getBoundingClientRect().top };
+  };
+  useLayoutEffect(() => {
+    const a = anchor.current;
+    anchor.current = null;
+    if (a) {
+      const el = listItems().find((x) => x.dataset.slot === a.slot);
+      const dy = el ? el.getBoundingClientRect().top - a.top : 0;
+      if (el && Math.abs(dy) > 1) scrollerOf(el).scrollTop += dy;
+    }
+    const from = flipFrom.current;
+    flipFrom.current = null;
+    if (!from || !listRef.current || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const top = listRef.current.getBoundingClientRect().top;
+    for (const el of listItems()) {
+      const was = from.get(el.dataset.slot!);
+      if (was === undefined) continue;
+      const dy = was - (el.getBoundingClientRect().top - top);
+      if (Math.abs(dy) > 2) el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 280, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    }
+  });
+  // An exercise finished here stays open a moment (its last ✓ is seen), then folds.
+  const [holding, setHolding] = useState<Set<string>>(new Set());
+  const holdOpen = (slot: string) => {
+    setHolding((cur) => new Set(cur).add(slot));
+    setTimeout(() => {
+      prepareFlip();
+      setHolding((cur) => {
+        const next = new Set(cur);
+        next.delete(slot);
+        return next;
+      });
+    }, 900);
+  };
+  const toggleExpanded = (i: string) => {
+    prepareFlip();
     setExpanded((cur) => {
       const next = new Set(cur);
       if (next.has(i)) next.delete(i);
       else next.add(i);
       return next;
     });
+  };
 
   // Previous results of exercises swapped in for this workout, keyed by exercise id.
   const [swapInfo, setSwapInfo] = useState<Record<string, Previous>>({});
@@ -491,6 +559,7 @@ function JournalBody({
             baseRef.current = { exercises: server, feedback: serverFb };
             const next = settled ? server : mergeEntries(snapshot, latest.current, server);
             const nextFb = fb === feedbackRef.current ? serverFb : mergeText(fb, feedbackRef.current, serverFb);
+            holdScroll();
             latest.current = next;
             feedbackRef.current = nextFb;
             setResults(next);
@@ -536,6 +605,7 @@ function JournalBody({
       .data as (DraftLike & { closed?: boolean; updatedByRole?: string }) | null;
   /** Takes the server's entries (newer than this phone's, nothing waiting here). */
   const adopt = (d: DraftLike) => {
+    holdScroll();
     baseRevision.current = d.revision;
     baseRef.current = { exercises: d.exercises, feedback: d.feedback || '' };
     latest.current = d.exercises;
@@ -724,10 +794,19 @@ function JournalBody({
           }
         : e,
     );
-    if (!wasDone && next[ei].sets[si].reps > 0) setLastSetAt(Date.now());
+    if (!wasDone && next[ei].sets[si].reps > 0) {
+      setLastSetAt(Date.now());
+      if (next[ei].sets.every((x) => x.reps > 0)) holdOpen(slotOf(next[ei]));
+    }
     update(next);
   };
+  // A double tap on ✓ (wet fingers, a laggy phone) marks the set once instead of marking and clearing it.
+  const lastToggle = useRef<{ key: string; at: number } | null>(null);
   const toggleDone = (ei: number, si: number, confirm = false) => {
+    const key = slotOf(latest.current[ei]) + ':' + si;
+    const at = Date.now();
+    if (lastToggle.current?.key === key && at - lastToggle.current.at < 450) return;
+    lastToggle.current = { key, at };
     const set = latest.current[ei].sets[si];
     if (set.reps > 0) {
       // ✓ right after typing the reps confirms them instead of clearing the set.
@@ -877,10 +956,14 @@ function JournalBody({
   };
   const setSkipped = (ei: number, skipped: boolean) => {
     closeMenu();
+    prepareFlip();
     update(latest.current.map((x, i) => (i === ei ? { ...x, skipped } : x)));
   };
   /** Arrows on the card: the order of this workout; the trainer can then keep it in the program. */
-  const move = (ei: number, step: -1 | 1) => update(moveBy(latest.current, ei, step));
+  const move = (ei: number, step: -1 | 1) => {
+    prepareFlip();
+    update(moveBy(latest.current, ei, step));
+  };
   const moveBy = (list: SessionExercise[], ei: number, step: -1 | 1) => {
     const to = ei + step;
     if (to < 0 || to >= list.length) return list;
@@ -1191,7 +1274,7 @@ function JournalBody({
           </button>
         </div>
       )}
-      <fieldset className={'exercise-list' + (showRir ? ' with-rir' : '')} disabled={finishing || conflict}>
+      <fieldset ref={listRef} className={'exercise-list' + (showRir ? ' with-rir' : '')} disabled={finishing || conflict}>
         {plan.map((e, ei) => {
           const sug = planSuggestions[ei];
           const r = results[ei];
@@ -1201,7 +1284,7 @@ function JournalBody({
           const complete = exDone === r.sets.length;
           if (r.skipped)
             return (
-              <button key={e.exerciseId} className="ex ex-collapsed ex-skipped" onClick={() => setSkipped(ei, false)}>
+              <button key={e.exerciseId} data-slot={slot} className="ex ex-collapsed ex-skipped" onClick={() => setSkipped(ei, false)}>
                 <span className="ex-num num">
                   <SkipForward size={13} />
                 </span>
@@ -1211,9 +1294,9 @@ function JournalBody({
                 </span>
               </button>
             );
-          if (complete && !expanded.has(slot) && editing !== slot)
+          if (complete && !expanded.has(slot) && editing !== slot && !holding.has(slot))
             return (
-              <button key={e.exerciseId} className="ex ex-collapsed" onClick={() => toggleExpanded(slot)}>
+              <button key={e.exerciseId} data-slot={slot} className="ex ex-collapsed" onClick={() => toggleExpanded(slot)}>
                 <span className="ex-num num">
                   <Check size={13} strokeWidth={3} />
                 </span>
@@ -1225,6 +1308,7 @@ function JournalBody({
             <section
               className={'ex' + (complete ? ' ex-done' : '')}
               key={e.exerciseId}
+              data-slot={slot}
               onFocus={(ev) => ev.target instanceof HTMLInputElement && startEditing(slot)}
               onBlur={(ev) => ev.target instanceof HTMLInputElement && stopEditing()}
             >
@@ -1357,19 +1441,19 @@ function JournalBody({
         })}
 
         {isFree && !results.length && (
-          <p className="muted small center-text">Тренировка без программы: набирайте упражнения по ходу — они попадут в историю, прогрессия у каждого своя.</p>
+          <p data-slot="__free" className="muted small center-text">Тренировка без программы: набирайте упражнения по ходу — они попадут в историю, прогрессия у каждого своя.</p>
         )}
         {isFree && !results.length && !!workout.lastFree?.length && (
-          <button className="btn btn-primary btn-block" disabled={repeating} onClick={() => void repeatLast()}>
+          <button data-slot="__repeat" className="btn btn-primary btn-block" disabled={repeating} onClick={() => void repeatLast()}>
             <Undo2 size={16} /> {repeating ? 'Загружаем…' : `Как в прошлый раз · ${workout.lastFree.length} упр.`}
           </button>
         )}
-        <button className={'btn btn-block add-ex' + (isFree && !results.length ? ' btn-primary' : '')} onClick={() => void openAdd()}>
+        <button data-slot="__add" className={'btn btn-block add-ex' + (isFree && !results.length ? ' btn-primary' : '')} onClick={() => void openAdd()}>
           <Plus size={16} /> Упражнение
         </button>
 
         {showNote ? (
-          <label className="field">
+          <label data-slot="__note" className="field">
             <span>Комментарий к тренировке</span>
             <textarea
               id={'note-' + workout.programId + '-' + workout.day.id}
@@ -1385,7 +1469,7 @@ function JournalBody({
             />
           </label>
         ) : (
-          <button className="link-btn" onClick={() => setShowNote(true)}>
+          <button data-slot="__note" className="link-btn" onClick={() => setShowNote(true)}>
             <Plus size={14} /> комментарий
           </button>
         )}
@@ -2026,7 +2110,9 @@ function NumberInput({
         const raw = e.target.value.replace(',', '.');
         if (!(decimal ? /^\d{0,4}(\.\d{0,2})?$/ : /^\d{0,4}$/).test(raw)) return;
         setText(e.target.value);
-        onChange(raw === '' ? null : Number(raw));
+        // The digit shows at once; the rest of the journal follows without holding up the next key.
+        const n = raw === '' ? null : Number(raw);
+        startTransition(() => onChange(n));
       }}
     />
   );
