@@ -1,0 +1,21 @@
+/* exercise pictures (src/ui/figure) */
+.fg {
+  --fg-body: var(--ink);
+  --fg-far: color-mix(in srgb, var(--ink) 42%, var(--surface));
+  --fg-gear: color-mix(in srgb, var(--ink-2) 55%, var(--surface));
+  --fg-gear-soft: color-mix(in srgb, var(--ink-2) 22%, var(--surface));
+  display: block;
+}
+.fg .fg-body { fill: var(--fg-body); }
+.fg .fg-far { fill: var(--fg-far); }
+.fg .fg-halo { fill: var(--surface); }
+.fg .fg-work { fill: var(--accent); }
+.fg .fg-floor { stroke: var(--line); stroke-width: 1.4; stroke-linecap: round; }
+.fg .fg-frame { stroke: var(--fg-gear); stroke-linecap: round; fill: none; }
+.fg .fg-cable { stroke: var(--fg-gear); stroke-width: 0.6; fill: none; }
+.fg .fg-wheel { fill: var(--surface); stroke: var(--fg-gear); stroke-width: 1; }
+.fg .fg-pad { fill: var(--fg-gear); stroke: var(--fg-gear); stroke-width: 1.2; }
+.fg .fg-plate { fill: var(--fg-gear-soft); stroke: var(--fg-gear); stroke-width: 1.1; }
+.fg .fg-plate-in { fill: none; stroke: var(--fg-gear); stroke-width: 0.5; opacity: 0.7; }
+.fg .fg-metal { fill: var(--fg-gear); }
+.fg .fg-stack { fill: var(--fg-gear); }
