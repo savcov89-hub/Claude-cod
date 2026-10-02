@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, IdCard, LogOut, Plus, Search } from 'lucide-react';
 import type { ClientItem, Program } from '../types';
 import { api, readError } from '../transport';
-import { Journal, type JournalActivity } from './Journal';
+import { AUTO_FINISH_IDLE_MS, Journal, type JournalActivity, type JournalFinisher } from './Journal';
 import { activeClients, lastVisit, presentClients, programsOf, type TrainerData } from './data';
 import { Confetti, RecordList } from './Records';
 import type { PersonalRecord } from '../analytics';
@@ -15,11 +15,11 @@ interface Source {
   free?: boolean;
   trainerId?: string;
 }
-type Finisher = (at?: string) => Promise<boolean>;
+type Finisher = JournalFinisher;
 const UNDO_MS = 5000;
 const FREE = '__free';
 /** A workout with no new set for this long is recorded by itself (dated to its last set) and the client leaves. */
-const IDLE_MS = 60 * 60000;
+const IDLE_MS = AUTO_FINISH_IDLE_MS;
 /** Someone checked in who has not done a single set leaves the gym list after this long. */
 const EMPTY_MS = 2 * 3600000;
 
@@ -125,7 +125,15 @@ export function Gym({
     setLeaving(c.clientId);
     try {
       const finish = finishers.current[c.clientId];
-      if (finish && finished[c.clientId] === undefined) await finish();
+      if (finish && finished[c.clientId] === undefined) {
+        const saved = await finish();
+        // Sets done but the workout was not recorded (e.g. changed on another phone): the client stays, the journal says why.
+        if (saved !== true && (activity[c.clientId]?.done || 0) > 0) {
+          setActive(c.clientId);
+          setAutoClosed((list) => [...list.filter((x) => x.id !== c.clientId), { id: c.clientId, name: c.clientName, text: 'тренировка не записалась — клиент остался в зале, проверьте журнал' }]);
+          return;
+        }
+      }
       await data.setPresence(c, false);
       setFinished((f) => {
         const { [c.clientId]: _drop, ...rest } = f;
@@ -186,7 +194,10 @@ export function Gym({
         let recorded = false;
         if (idle && finish && finished[id] === undefined) {
           // Not saved (e.g. changed on another device): leave the client in the gym for the trainer to decide.
-          if (!(await finish(new Date(a!.lastSetAt!).toISOString()))) return;
+          const r = await finish(new Date(a!.lastSetAt!).toISOString(), true);
+          // Entries keep coming in on another phone or in the client card: checked again later.
+          if (r === 'active') return void autoTried.current.delete(id);
+          if (!r) return;
           recorded = true;
         }
         await data.setPresence(c, false);

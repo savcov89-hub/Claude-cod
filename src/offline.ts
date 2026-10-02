@@ -80,6 +80,16 @@ export function clearCached(userId?: string) {
  * without network still shows who is in the gym.
  */
 export function afterPost(userId: string, path: string, body: any, data: any) {
+  // A saved draft: the saved workout answer gets it too, so a reload without network opens the latest entries
+  // (not the ones from when the journal was first opened).
+  if (path === '/api/draft' && data?.revision && body?.trainerId) {
+    const key = '/api/workout/' + body.trainerId + '/' + body.programId + '/' + body.dayId;
+    const saved = loadCached(userId, key);
+    if (!saved?.data) return;
+    const draft = { ...(saved.data.draft || {}), exercises: body.exercises, feedback: body.feedback || '', updatedAt: data.updatedAt, revision: data.revision, closed: false };
+    saveCached(userId, key, { ...saved.data, draft, revision: data.revision });
+    return;
+  }
   if (path !== '/api/attendance' || !body?.clientId) return;
   const saved = loadCached(userId, '/api/clients');
   if (!saved?.data?.clients) return;

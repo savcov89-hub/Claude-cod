@@ -38,8 +38,13 @@ export interface JournalActivity {
   /** Exercise with the next set to do, e.g. "Жим ногами 2/3". */
   current: string | null;
 }
-/** Records the workout; `at` backdates it (e.g. to the last set of a workout left open). */
-export type JournalFinisher = (at?: string) => Promise<boolean>;
+/** A workout left open this long after its last entry (on any device) is finished by the gym on its own. */
+export const AUTO_FINISH_IDLE_MS = 60 * 60000;
+/**
+ * Records the workout; `at` backdates it (e.g. to the last set of a workout left open). `auto`: finished by the gym
+ * after a long pause, answered 'active' when entries keep coming in elsewhere (the other phone, the client card).
+ */
+export type JournalFinisher = (at?: string, auto?: boolean) => Promise<boolean | 'active'>;
 
 /** Loads a workout and renders the set log. */
 export function Journal({
@@ -129,6 +134,47 @@ function mergeCarried(planned: SessionExercise[], carried: SessionExercise[]) {
     }
   }
   return out;
+}
+
+/**
+ * Entries saved for another version of the day (the program was changed meanwhile) put into the current plan,
+ * so nothing done is lost: the same exercise (or its replacement for today) gets its sets, other done ones
+ * stay as exercises added for this workout only.
+ */
+function intoPlan(planned: SessionExercise[], saved: SessionExercise[]) {
+  const out = planned.map((e) => ({ ...e, sets: [...e.sets] }));
+  const used = new Set<number>();
+  for (const c of saved) {
+    const done = c.sets.filter((s) => s.reps > 0);
+    let at = out.findIndex((e, i) => !used.has(i) && i < planned.length && e.exerciseId === c.exerciseId);
+    if (at < 0 && !c.extra && c.replaces && !out.some((e) => e.exerciseId === c.exerciseId))
+      at = out.findIndex((e, i) => !used.has(i) && i < planned.length && e.exerciseId === c.replaces);
+    if (at >= 0) {
+      used.add(at);
+      const target = out[at];
+      const rest = target.sets.slice(done.length).map((s) => ({ ...s, weight: s.weight || done.at(-1)?.weight || 0 }));
+      out[at] = {
+        ...target,
+        ...(target.exerciseId !== c.exerciseId ? { exerciseId: c.exerciseId, exerciseName: c.exerciseName, replaces: target.exerciseId } : {}),
+        ...(c.skipped ? { skipped: true } : {}),
+        ...(c.note ? { note: c.note } : {}),
+        sets: done.length ? [...done, ...rest] : target.sets,
+      };
+      continue;
+    }
+    if (!done.length || out.some((e) => e.exerciseId === c.exerciseId)) continue;
+    const reps = done.map((s) => s.reps);
+    const extra = c.extra || { repMin: Math.min(...reps), repMax: Math.max(...reps), targetRir: 2, once: true };
+    out.push({ exerciseId: c.exerciseId, exerciseName: c.exerciseName, extra, ...(c.note ? { note: c.note } : {}), sets: done });
+  }
+  return out;
+}
+
+interface DraftLike {
+  revision: string;
+  exercises: SessionExercise[];
+  feedback?: string;
+  updatedAt: string;
 }
 
 const cacheKeyOf = (w: WorkoutPayload) =>
@@ -223,8 +269,17 @@ function JournalBody({
     () => (carry && carry.key === carryKeyOf({ trainerId: workout.trainerId, programId: workout.programId, dayId: workout.day.id }) ? carry.entries : null),
     [workout],
   );
+  // Entries saved for another version of the day (the program changed under an open workout): done sets are
+  // put into the current plan instead of being dropped, and saved right away.
+  const doneIn = (list?: SessionExercise[]) => (list || []).some((e) => e.sets.some((s) => s.reps > 0));
+  const unplanned = useMemo(() => {
+    const local =
+      initialCache?.pending && (initialCache.baseRevision || null) === (workout.revision || null) ? initialCache.results : null;
+    const list = local && !matchesPlan(local) ? local : !local && draftOf && !matchesPlan(draftOf.exercises) ? draftOf.exercises : null;
+    return list && doneIn(list) ? list : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workout]);
   const [results, setResults] = useState<SessionExercise[]>(() => {
-    const doneIn = (list?: SessionExercise[]) => (list || []).some((e) => e.sets.some((s) => s.reps > 0));
     const base = cacheUsable ? initialCache!.results : matchesPlan(draftOf?.exercises) ? draftOf!.exercises : null;
     if (base && !(carried && !doneIn(base))) return programChanged ? fitToPlan(base) : base;
     const fresh = workout.day.exercises.map((e, i) => ({
@@ -236,7 +291,7 @@ function JournalBody({
         rir: null,
       })),
     }));
-    return carried ? mergeCarried(fresh, carried) : fresh;
+    return carried ? mergeCarried(fresh, carried) : unplanned ? intoPlan(fresh, unplanned) : fresh;
   });
   const [feedback, setFeedback] = useState(() => (cacheUsable ? initialCache!.feedback || '' : draftOf?.feedback || ''));
   const [status, setStatus] = useState<SaveStatus>(draftOf ? 'saved' : 'idle');
@@ -425,7 +480,24 @@ function JournalBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const edits = useRef(0);
+  const fetchDraft = async () =>
+    (await api.get(`/api/draft/${encodeURIComponent(workout.trainerId)}/${encodeURIComponent(workout.programId)}/${encodeURIComponent(workout.day.id)}`))
+      .data as (DraftLike & { closed?: boolean; updatedByRole?: string }) | null;
+  /** Takes the server's entries (newer than this phone's, nothing waiting here). */
+  const adopt = (d: DraftLike) => {
+    baseRevision.current = d.revision;
+    latest.current = d.exercises;
+    setResults(d.exercises);
+    feedbackRef.current = d.feedback || '';
+    setFeedback(d.feedback || '');
+    writeCache(false);
+    setStatus('saved');
+    if (doneIn(d.exercises)) setLastSetAt(Date.parse(d.updatedAt) || Date.now());
+  };
+
   const schedule = () => {
+    edits.current++;
     pending.current = true;
     if (!writeCache(true)) setErrorText('Браузер не сохраняет резервную копию. Дождитесь «Сохранено» перед выходом.');
     setStatus('saving');
@@ -445,21 +517,16 @@ function JournalBody({
       // Hidden journals (other gym tabs, display: none) have no boxes; fixed ones have no offsetParent, so boxes are checked.
       if (document.visibilityState !== 'visible' || !rootRef.current?.getClientRects().length) return;
       busy = true;
+      // An answer sent before a save of this phone came back is older than what is on screen: it is dropped.
+      const before = baseRevision.current;
+      const editsBefore = edits.current;
       try {
-        const r = await api.get(`/api/draft/${encodeURIComponent(workout.trainerId)}/${encodeURIComponent(workout.programId)}/${encodeURIComponent(workout.day.id)}`);
-        const d = r.data;
+        const d = await fetchDraft();
+        if (baseRevision.current !== before || edits.current !== editsBefore) return;
         if (!d?.revision || d.revision === baseRevision.current || pending.current || editingRef.current || completed.current) return;
         // Finished on the other phone, or the program changed under it: load the journal again.
         if (d.closed || !matchesPlan(d.exercises)) return onReload();
-        baseRevision.current = d.revision;
-        latest.current = d.exercises;
-        setResults(d.exercises);
-        feedbackRef.current = d.feedback || '';
-        setFeedback(d.feedback || '');
-        writeCache(false);
-        setStatus('saved');
-        const doneThere = (d.exercises as SessionExercise[]).some((e) => e.sets.some((x) => x.reps > 0));
-        if (doneThere) setLastSetAt(Date.parse(d.updatedAt) || Date.now());
+        adopt(d);
         setLiveAt({ at: Date.now(), by: d.updatedByRole && d.updatedByRole !== workout.actorRole ? d.updatedByRole : undefined });
       } catch {
         /* no network or no access: try again later */
@@ -488,7 +555,7 @@ function JournalBody({
 
   // Set counts taken from the edited program are saved right away.
   useEffect(() => {
-    if (programChanged && !carried) schedule();
+    if ((programChanged || unplanned) && !carried) schedule();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // Carried sets are saved right away, like any entry.
@@ -836,16 +903,58 @@ function JournalBody({
   const setNote = (ei: number, note: string) =>
     update(latest.current.map((x, i) => (i === ei ? { ...x, note: note || undefined } : x)));
 
-  const finish = async (at?: string): Promise<boolean> => {
-    setConfirmFinish(false);
-    const performed = countDone(latest.current);
-    if (!performed || completed.current) {
-      if (!performed) setErrorText('Нет выполненных подходов. Отметьте хотя бы один подход.');
-      return false;
+  /**
+   * Before a workout is recorded: entries saved on the server after this journal last saw them (the other phone,
+   * another journal of this workout) are taken first, so nothing done there is left out.
+   */
+  const catchUp = async (auto: boolean): Promise<{ state: 'ok' | 'done' | 'active' | 'stop'; lastAt?: number }> => {
+    let d;
+    try {
+      d = await fetchDraft();
+    } catch (err) {
+      // Offline: recorded from what is on this phone.
+      if (isNetworkError(err)) return { state: 'ok' };
+      throw err;
     }
+    if (!d?.revision) return { state: 'ok' };
+    if (d.closed) {
+      // Already recorded elsewhere.
+      completed.current = true;
+      safeStorage.remove(cacheKey);
+      onReload();
+      return { state: 'done' };
+    }
+    if (d.revision !== baseRevision.current && !pending.current) {
+      if (!matchesPlan(d.exercises)) {
+        onReload();
+        return { state: auto ? 'active' : 'stop' };
+      }
+      adopt(d);
+    }
+    const lastAt = Date.parse(d.updatedAt);
+    if (auto && doneIn(d.exercises) && Date.now() - lastAt < AUTO_FINISH_IDLE_MS) {
+      setLastSetAt(lastAt);
+      return { state: 'active' };
+    }
+    return { state: 'ok', lastAt };
+  };
+
+  const finish = async (at?: string, auto = false): Promise<boolean | 'active'> => {
+    setConfirmFinish(false);
+    if (completed.current) return false;
     setFinishing(true);
     if (timer.current) clearTimeout(timer.current);
     try {
+      const { state, lastAt } = await catchUp(auto);
+      if (state === 'done') return true;
+      if (state !== 'ok') return state === 'active' ? 'active' : false;
+      const performed = countDone(latest.current);
+      if (!performed) {
+        setErrorText('Нет выполненных подходов. Отметьте хотя бы один подход.');
+        return false;
+      }
+      // Backdated to the last entry, wherever it was made.
+      if (at && lastAt && Date.parse(at) < lastAt) at = new Date(lastAt).toISOString();
       pending.current = true;
       // Offline the draft stays unsaved: the workout itself goes to the outbox with all its sets.
       await persist().catch((err) => {
@@ -868,7 +977,7 @@ function JournalBody({
   finishRef.current = finish;
   useEffect(() => {
     if (!onRegisterFinish) return;
-    onRegisterFinish((at) => finishRef.current(at));
+    onRegisterFinish((at, auto) => finishRef.current(at, auto));
     return () => onRegisterFinish(null);
   }, [onRegisterFinish]);
 
