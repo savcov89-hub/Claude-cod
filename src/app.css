@@ -3107,16 +3107,16 @@ h2 {
   }
 }
 
-/* Narrow phones (360 px Android, small iPhones): the hint goes under the name, so the card never gets wider than the screen. */
-@media (max-width: 389px) {
+/* Phones: the hint goes under the name, so the card (with its picture) never gets wider than the screen. */
+@media (max-width: 480px) {
   .ex-head {
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr) auto auto;
+    grid-template-columns: 40px minmax(0, 1fr) auto auto;
     grid-template-areas: 'num name move menu' '. hint hint hint';
     column-gap: 8px;
     row-gap: 4px;
   }
-  .ex-head .ex-num {
+  .ex-head .ex-art {
     grid-area: num;
   }
   .ex-head .ex-name {
@@ -3146,4 +3146,152 @@ h2 {
   .gym-toolbar .btn-sm {
     padding-inline: 8px;
   }
+}
+
+/* Exercise pictures (src/ui/exerciseArt.tsx): a figure in the theme's ink, the working muscles in the accent colour. */
+.xa {
+  display: block;
+  overflow: visible;
+  --xa-ghost: color-mix(in srgb, var(--ink) 13%, transparent);
+  --xa-gear: color-mix(in srgb, var(--ink-2) 70%, var(--surface));
+  --xa-pad: color-mix(in srgb, var(--ink-2) 42%, var(--surface));
+  --xa-load: color-mix(in srgb, var(--ink) 72%, var(--surface));
+}
+.xa line,
+.xa path {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+.xa circle,
+.xa rect {
+  stroke: none;
+}
+.xa .xa-body {
+  stroke: var(--ink);
+}
+.xa .xa-work {
+  stroke: var(--accent);
+}
+.xa .xa-far {
+  stroke: color-mix(in srgb, var(--ink) 42%, var(--surface));
+}
+.xa .xa-ghost {
+  stroke: var(--xa-ghost);
+}
+.xa circle.xa-body,
+.xa path.xa-fill.xa-body {
+  fill: var(--ink);
+}
+.xa circle.xa-work,
+.xa path.xa-fill.xa-work {
+  fill: var(--accent);
+}
+.xa circle.xa-ghost,
+.xa path.xa-fill.xa-ghost {
+  fill: var(--xa-ghost);
+}
+.xa .xg-floor {
+  stroke: var(--line);
+}
+.xa .xg-gear {
+  stroke: var(--xa-gear);
+}
+.xa circle.xg-gear,
+.xa rect.xg-gear {
+  fill: var(--xa-gear);
+}
+.xa .xg-pad {
+  stroke: var(--xa-pad);
+}
+.xa circle.xg-pad,
+.xa rect.xg-pad {
+  fill: var(--xa-pad);
+}
+.xa .xg-cable {
+  stroke: var(--ink-2);
+}
+.xa .xg-load {
+  stroke: var(--xa-load);
+}
+.xa circle.xg-load,
+.xa rect.xg-load {
+  fill: var(--xa-load);
+}
+.xa circle.xg-loadHub {
+  fill: var(--surface);
+}
+.xa rect.xg-stack {
+  fill: color-mix(in srgb, var(--ink-2) 55%, var(--surface));
+}
+.xa .xg-stackLine {
+  stroke: var(--surface);
+}
+.xa-thumb {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.xa-figures {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+.xa-motion {
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 4px;
+}
+.xa-pair {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.xa-pair figure {
+  margin: 0;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.xa-pair figcaption {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.xa-note {
+  margin-top: 8px;
+}
+
+/* The exercise's picture on its journal card, with its number in the corner; tap: how to do it. */
+.ex-art {
+  position: relative;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.ex-art .ex-num {
+  position: absolute;
+  left: -5px;
+  top: -5px;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.pick .xa-thumb,
+.lib-item .xa-thumb {
+  margin-right: 2px;
+}
+.lib-figures {
+  padding: 4px 0 8px;
 }

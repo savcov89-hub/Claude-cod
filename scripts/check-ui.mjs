@@ -506,6 +506,26 @@ await scenario('15. Двойное касание ✓, вес с запятой,
   expect(first?.weight === 102.5, 'the weight «102,5» is recorded as 102.5', first);
 });
 
+await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
+  await goGym();
+  await p.locator('.gym-tab').first().click();
+  const pic = pane().getByRole('button', { name: /^Как выполнять/ }).first();
+  const name = (await pic.getAttribute('aria-label')).replace('Как выполнять: ', '');
+  await pic.click();
+  await p.waitForTimeout(700);
+  const sheet = p.locator('.sheet').last();
+  const text = await sheet.innerText();
+  const svgs = await sheet.locator('svg.xa').count();
+  expect(text.includes(name) && /Начало/.test(text) && /Конец/.test(text) && svgs >= 3, 'the sheet shows the movement, the start and the end', [name, svgs]);
+  const m1 = await sheet.locator('.xa-motion svg').innerHTML();
+  await p.waitForTimeout(500);
+  const m2 = await sheet.locator('.xa-motion svg').innerHTML();
+  expect(m1 !== m2, 'the movement plays');
+  await p.keyboard.press('Escape');
+  await sheet.getByRole('button', { name: 'Закрыть' }).click().catch(() => {});
+  await p.waitForTimeout(300);
+});
+
 await scenario('16. Узкие экраны (320, 360, 375 px): ничего не уезжает вбок', async () => {
   await checkIn('Ольга');
   for (const width of [320, 360, 375]) {

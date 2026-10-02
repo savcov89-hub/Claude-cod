@@ -8,6 +8,7 @@ import { mergeEntries, mergeText } from '../draftMerge';
 import type { Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
 import { Confirm, Sheet, clock, elapsed, fmtDate, fmtSets, useNow } from './common';
 import { ExercisePicker } from './ProgramBuilder';
+import { ExerciseInfoSheet, ExerciseThumb } from './exerciseArt';
 
 let exerciseList: Promise<Exercise[]> | null = null;
 const loadExercises = () =>
@@ -413,6 +414,8 @@ function JournalBody({
     });
   };
 
+  // «How to do it»: the exercise's pictures (start, end, the movement).
+  const [howTo, setHowTo] = useState<WorkoutExercise | null>(null);
   // Previous results of exercises swapped in for this workout, keyed by exercise id.
   const [swapInfo, setSwapInfo] = useState<Record<string, Previous>>({});
   const [swapping, setSwapping] = useState<{ ei: number; list: Exercise[] } | null>(null);
@@ -1313,7 +1316,17 @@ function JournalBody({
               onBlur={(ev) => ev.target instanceof HTMLInputElement && stopEditing()}
             >
               <header className="ex-head" onClick={complete ? () => toggleExpanded(slot) : undefined}>
-                <span className="ex-num num">{ei + 1}</span>
+                <button
+                  className="ex-art"
+                  aria-label={'Как выполнять: ' + e.exerciseName}
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    setHowTo(e);
+                  }}
+                >
+                  <ExerciseThumb exercise={e} size={40} />
+                  <span className="ex-num num">{ei + 1}</span>
+                </button>
                 <div className="ex-name">
                   <h3>{e.exerciseName}</h3>
                   <span className="ex-plan">
@@ -1475,6 +1488,7 @@ function JournalBody({
         )}
       </fieldset>
 
+      {howTo && <ExerciseInfoSheet exercise={howTo} name={howTo.exerciseName} onClose={() => setHowTo(null)} />}
       {swapping && (
         <ExercisePicker
           title={'Замена: ' + plan[swapping.ei].exerciseName}

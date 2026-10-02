@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowLeft, ArrowUp, Plus, RefreshCw, Search, Trash2, Undo2 } from 'lucide-react';
 import { api, readError } from '../transport';
+import { ExerciseThumb } from './exerciseArt';
 import { DAY_FOCUS, focusDay, templateDays, templates } from '../templates';
 import {
   SESSION_SOFT_LIMIT,
@@ -591,6 +592,7 @@ export function ExercisePicker({
           <Fragment key={e.id}>
           {i === inGroup.length && <p className="muted small pick-other">В других группах</p>}
           <button className="pick" onClick={() => onPick(e)}>
+            <ExerciseThumb exercise={e} size={40} />
             <span className="grow">
               <strong>{e.name}</strong>
               <span className="muted small">

@@ -5,6 +5,7 @@ import { api, readError } from '../transport';
 import { exerciseRules, muscleNames } from '../trainingRules';
 import type { Exercise } from '../types';
 import { Sheet, searchKey } from './common';
+import { ExerciseFigures, ExerciseThumb } from './exerciseArt';
 
 export function Library({ exercises, onCreated }: { exercises: Exercise[]; onCreated: () => Promise<void> }) {
   const [q, setQ] = useState('');
@@ -37,6 +38,7 @@ export function Library({ exercises, onCreated }: { exercises: Exercise[]; onCre
           return (
             <Fragment key={e.id}>
               <button className={'lib-item' + (open === e.id ? ' open' : '')} onClick={() => setOpen(open === e.id ? null : e.id)}>
+                <ExerciseThumb exercise={e} size={44} />
                 <span className="grow">
                   <strong>{e.name}</strong>
                   <span className="muted small">
@@ -54,6 +56,11 @@ export function Library({ exercises, onCreated }: { exercises: Exercise[]; onCre
                 </span>
                 {e.custom && <span className="chip chip-info">моё</span>}
               </button>
+              {open === e.id && (
+                <div className="lib-figures">
+                  <ExerciseFigures exercise={e} />
+                </div>
+              )}
               {e.custom && open === e.id && (
                 <button className="btn btn-quiet btn-sm lib-edit" onClick={() => setEditing(e)}>
                   <Pencil size={14} /> Изменить
