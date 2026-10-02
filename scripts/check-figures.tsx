@@ -10,14 +10,10 @@ import { FLOOR, joints, jointProblems, mix, type Pose } from '../src/ui/figure/r
 
 const out = process.argv[2];
 const photos = process.argv[3];
-const REF: Record<string, string> = {
-  'bench-press': 'Bench',
-  'back-squat': 'Barbell_Squat',
-  'lat-pulldown': 'Wide-Grip_Lat_Pulldown',
-  'leg-press': 'Leg_Press',
-  'dumbbell-curl': 'Dumbbell_Bicep_Curl',
-  rdl: 'Romanian_Deadlift',
-};
+/** Photos to compare with (free-exercise-db names); the photos themselves are fetched by the person checking. */
+const REF: Record<string, string> = JSON.parse(readFileSync('scripts/figure-refs.json', 'utf8'));
+/** ONLY=id,id — just these exercises on the sheet. */
+const only = process.env.ONLY ? new Set(process.env.ONLY.split(',')) : null;
 
 const at = (frames: Pose[], t: number) => {
   const k = t * (frames.length - 1);
@@ -28,6 +24,7 @@ const at = (frames: Pose[], t: number) => {
 let failures = 0;
 const rows: string[] = [];
 for (const [id, m] of Object.entries(MOVES)) {
+  if (only && !only.has(id)) continue;
   const problems = new Set<string>();
   for (let s = 0; s <= 40; s++) {
     const t = s / 40;

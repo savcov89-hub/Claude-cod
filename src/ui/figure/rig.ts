@@ -33,6 +33,8 @@ export interface Reach {
   bend: V;
   /** The limb seen at an angle (a wide grip): shorter on the picture. */
   shorten?: number;
+  /** Only the upper part (upper arm / thigh) seen at an angle — arms out to the sides with the forearm upright. */
+  upperK?: number;
 }
 
 export interface Limb {
@@ -47,7 +49,7 @@ export interface Limb {
 
 export interface Pose {
   /** Which point of the body stays where: the ankle (standing), the hip (sitting, lying) or the hands (hanging). */
-  anchor: { at: 'ankle' | 'hip' | 'shoulder'; to: V };
+  anchor: { at: 'ankle' | 'hip' | 'shoulder' | 'hand'; to: V };
   trunk: number;
   /** Head nod relative to the trunk (+ chin down to the chest). */
   head?: number;
@@ -123,7 +125,7 @@ export function joints(p: Pose): Joints {
     if (l.reach) {
       const k = l.reach.shorten ?? 1;
       const target = l.reach.from ? inTrunk(l.reach.to, l.reach.from === 'hip' ? hip0 : shoulder0) : l.reach.to;
-      const r = solve(hip0, target, BODY.thigh * k, BODY.shin * k, l.reach.bend);
+      const r = solve(hip0, target, BODY.thigh * k * (l.reach.upperK ?? 1), BODY.shin * k, l.reach.bend);
       if (!r.ok) short.push(name);
       knee = r.mid;
       ankle = r.end;
@@ -145,7 +147,7 @@ export function joints(p: Pose): Joints {
     if (l.reach) {
       const k = l.reach.shorten ?? 1;
       const target = l.reach.from ? inTrunk(l.reach.to, l.reach.from === 'hip' ? hip0 : shoulder0) : l.reach.to;
-      const r = solve(s, target, BODY.upper * k, BODY.fore * k, l.reach.bend);
+      const r = solve(s, target, BODY.upper * k * (l.reach.upperK ?? 1), BODY.fore * k, l.reach.bend);
       if (!r.ok) short.push(name);
       elbow = r.mid;
       hand = r.end;
@@ -209,7 +211,8 @@ export function joints(p: Pose): Joints {
   };
   // Where the anchor point is with the hip at 0, then move everything so it lands on `to`.
   const probe = placeOnce([0, 0]);
-  const anchorAt = p.anchor.at === 'hip' ? probe.hip : p.anchor.at === 'shoulder' ? probe.shoulder : probe.ankle;
+  const anchorAt =
+    p.anchor.at === 'hip' ? probe.hip : p.anchor.at === 'shoulder' ? probe.shoulder : p.anchor.at === 'hand' ? probe.hand : probe.ankle;
   short.length = 0;
   const j = placeOnce(sub(p.anchor.to, anchorAt));
   j.short = [...new Set(short)];
@@ -220,7 +223,11 @@ export function joints(p: Pose): Joints {
 export function mix(a: Pose, b: Pose, t: number): Pose {
   const n = (x: number | undefined, y: number | undefined) => (x === undefined || y === undefined ? (t < 0.5 ? x : y) : lerp(x, y, t));
   const reach = (x?: Reach, y?: Reach): Reach | undefined =>
-    x && y ? { ...y, to: lerpV(x.to, y.to, t), shorten: n(x.shorten ?? 1, y.shorten ?? 1) } : t < 0.5 ? x : y;
+    x && y
+      ? { ...y, to: lerpV(x.to, y.to, t), shorten: n(x.shorten ?? 1, y.shorten ?? 1), upperK: n(x.upperK ?? 1, y.upperK ?? 1), bend: lerpV(x.bend, y.bend, t) }
+      : t < 0.5
+        ? x
+        : y;
   const limb = (x: Limb, y: Limb): Limb => ({ a: n(x.a, y.a), b: n(x.b, y.b), foot: n(x.foot, y.foot), reach: reach(x.reach, y.reach) });
   return {
     anchor: { at: b.anchor.at, to: lerpV(a.anchor.to, b.anchor.to, t) },
