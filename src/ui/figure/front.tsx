@@ -11,10 +11,16 @@ export interface FrontPose {
   center: V;
   /** Sitting: thighs come towards the viewer (seen short), shins hang down to the floor. */
   seated?: boolean;
-  /** Arms: angle out from hanging down (0) to straight up (180); the forearm turns on by `bend` more. */
-  arm: { out: number; bend?: number; foreK?: number };
+  /**
+   * Arms: angle out from hanging down (0) to straight up (180); the forearm turns on by `bend` more. Or, for arms
+   * that come forward towards the viewer (flies), where the hand and the elbow are seen — from the shoulder, for the
+   * arm on the viewer's right (the left one mirrors it); negative x is towards the middle.
+   */
+  arm: FrontArm;
   /** The other arm (on the viewer's left) when it does something else. */
-  arm2?: { out: number; bend?: number; foreK?: number };
+  arm2?: FrontArm;
+  /** Shoulders raised (a shrug), in units; the head stays. */
+  shrug?: number;
   /** Legs: angle out from straight down (standing) or from straight ahead (sitting). */
   leg: { out: number };
 }
@@ -30,32 +36,60 @@ export interface FrontJoints {
   head: V;
   neck: V;
   seated: boolean;
+  shrug: number;
+}
+
+export interface FrontArm {
+  out: number;
+  bend?: number;
+  foreK?: number;
+  hand?: V;
+  elbow?: V;
 }
 
 const dirOut = (out: number, side: number): V => [side * Math.sin(out * DEG), Math.cos(out * DEG)];
+const mirror = (v: V, side: number): V => [v[0] * side, v[1]];
 
 export function frontJoints(p: FrontPose): FrontJoints {
   const c = p.center;
   const sides = [-1, 1] as const;
-  const shoulder = sides.map((s) => add(c, [s * 8.4, -23.6])) as [V, V];
+  const shoulder = sides.map((s) => add(c, [s * 8.4, -23.6 - (p.shrug ?? 0)])) as [V, V];
   const armOf = (i: number) => (i === 0 && p.arm2 ? p.arm2 : p.arm);
-  const elbow = sides.map((s, i) => add(shoulder[i], dirOut(armOf(i).out, s), 13.5)) as [V, V];
-  const hand = sides.map((s, i) => add(elbow[i], dirOut(armOf(i).out + (armOf(i).bend ?? 0), s), 12 * (armOf(i).foreK ?? 1))) as [V, V];
+  const elbow = sides.map((s, i) => {
+    const a = armOf(i);
+    return a.elbow ? add(shoulder[i], mirror(a.elbow, s)) : add(shoulder[i], dirOut(a.out, s), 13.5);
+  }) as [V, V];
+  const hand = sides.map((s, i) => {
+    const a = armOf(i);
+    return a.hand ? add(shoulder[i], mirror(a.hand, s)) : add(elbow[i], dirOut(a.out + (a.bend ?? 0), s), 12 * (a.foreK ?? 1));
+  }) as [V, V];
   const hip = sides.map((s) => add(c, [s * 4.4, 0])) as [V, V];
   const knee = sides.map((s, i) =>
     p.seated ? add(hip[i], [s * 18.5 * Math.sin(p.leg.out * DEG), 2.2]) : add(hip[i], dirOut(p.leg.out, s), 18.5),
   ) as [V, V];
   const ankle = sides.map((s, i) => (p.seated ? ([knee[i][0], ANKLE_Y] as V) : add(knee[i], dirOut(p.leg.out, s), 17.5))) as [V, V];
-  return { center: c, shoulder, elbow, hand, hip, knee, ankle, neck: add(c, [0, -26.2]), head: add(c, [0, -31.6]), seated: !!p.seated };
+  return { center: c, shoulder, elbow, hand, hip, knee, ankle, neck: add(c, [0, -26.2]), head: add(c, [0, -31.6]), seated: !!p.seated, shrug: p.shrug ?? 0 };
+}
+
+const lerpV = (a: V, b: V, t: number): V => [lerp(a[0], b[0], t), lerp(a[1], b[1], t)];
+function mixArm(a: FrontArm, b: FrontArm, t: number): FrontArm {
+  return {
+    out: lerp(a.out, b.out, t),
+    bend: lerp(a.bend ?? 0, b.bend ?? 0, t),
+    foreK: lerp(a.foreK ?? 1, b.foreK ?? 1, t),
+    hand: a.hand && b.hand ? lerpV(a.hand, b.hand, t) : b.hand,
+    elbow: a.elbow && b.elbow ? lerpV(a.elbow, b.elbow, t) : b.elbow,
+  };
 }
 
 export function mixFront(a: FrontPose, b: FrontPose, t: number): FrontPose {
   return {
     center: [lerp(a.center[0], b.center[0], t), lerp(a.center[1], b.center[1], t)],
     seated: b.seated,
-    arm: { out: lerp(a.arm.out, b.arm.out, t), bend: lerp(a.arm.bend ?? 0, b.arm.bend ?? 0, t), foreK: lerp(a.arm.foreK ?? 1, b.arm.foreK ?? 1, t) },
+    arm: mixArm(a.arm, b.arm, t),
     leg: { out: lerp(a.leg.out, b.leg.out, t) },
-    arm2: a.arm2 && b.arm2 ? { out: lerp(a.arm2.out, b.arm2.out, t), bend: lerp(a.arm2.bend ?? 0, b.arm2.bend ?? 0, t) } : b.arm2,
+    arm2: a.arm2 && b.arm2 ? mixArm(a.arm2, b.arm2, t) : b.arm2,
+    shrug: lerp(a.shrug ?? 0, b.shrug ?? 0, t),
   };
 }
 
@@ -78,8 +112,10 @@ export function PersonFront({ j, work = [], gear = [] }: { j: FrontJoints; work?
     [1.5, 8.4],
     [3.2, 6],
   ];
-  const right = half.map(([y, x]) => [c[0] + x, c[1] + y] as V);
-  const left = half.map(([y, x]) => [c[0] - x, c[1] + y] as V).reverse();
+  // A shrug lifts the top of the trunk (the shoulders and the trapezius) with the shoulders.
+  const lift = (y: number) => (y < -20 ? j.shrug : 0);
+  const right = half.map(([y, x]) => [c[0] + x, c[1] + y - lift(y)] as V);
+  const left = half.map(([y, x]) => [c[0] - x, c[1] + y - lift(y)] as V).reverse();
   const trunk = [...right, ...left].map((q) => f(q[0]) + ',' + f(q[1])).join(' ');
   const delts = work.includes('delts');
   return (
@@ -97,6 +133,8 @@ export function PersonFront({ j, work = [], gear = [] }: { j: FrontJoints; work?
         </g>
       ))}
       <polygon points={trunk} className="fg-body" strokeLinejoin="round" />
+      {work.includes('chest') &&
+        [-1, 1].map((sd) => <ellipse key={'ch' + sd} cx={f(c[0] + sd * 4.3)} cy={f(c[1] - 18.6)} rx={3.7} ry={2.7} className="fg-work" />)}
       <Seg a={j.neck} b={[j.neck[0], j.neck[1] - 3]} ra={2.6} rb={2.4} cls="fg-body" />
       <circle cx={f(j.head[0])} cy={f(j.head[1])} r={5.3} className="fg-body" />
       {layer('mid')}
@@ -108,6 +146,9 @@ export function PersonFront({ j, work = [], gear = [] }: { j: FrontJoints; work?
           <Seg a={j.elbow[i]} b={j.hand[i]} ra={2.3} rb={1.7} cls="fg-body" />
           <circle cx={f(j.hand[i][0])} cy={f(j.hand[i][1])} r={1.9} className="fg-body" />
           {delts && <circle cx={f(j.shoulder[i][0])} cy={f(j.shoulder[i][1] + 0.6)} r={3.1} className="fg-work" />}
+          {work.includes('upperBack') && (
+            <path d={capsule(add(j.neck, [(i ? 1 : -1) * 2.2, 1.2]), add(j.shoulder[i], [(i ? -1 : 1) * 2.2, -1.6]), 1.8, 1.6)} className="fg-work" />
+          )}
         </g>
       ))}
       {layer('front')}
@@ -207,3 +248,67 @@ function hips(out: boolean): FrontMove {
 }
 export const hipAbduction = hips(true);
 export const hipAdduction = hips(false);
+
+/** Standing cable crossover from the front: the hands from high and wide down to cross in front of the hips. */
+export const cableCrossover: FrontMove = {
+  view: 'front',
+  frames: [
+    { center: [50, ANKLE_Y - 36], arm: { out: 0, hand: [21, -5], elbow: [11.5, -1.5] }, leg: { out: 6 } },
+    { center: [50, ANKLE_Y - 36], arm: { out: 0, hand: [14, 12], elbow: [11, 3] }, leg: { out: 6 } },
+    { center: [50, ANKLE_Y - 36], arm: { out: 0, hand: [-9.6, 19], elbow: [1.5, 10.5] }, leg: { out: 6 } },
+  ],
+  work: ['chest', 'delts'],
+  show: [[14, 10], [86, 10]],
+  gear: (j) => [
+    { layer: 'back', node: G.floor() },
+    { layer: 'back', node: G.bar([16, FLOOR], [16, 8], 2.4) },
+    { layer: 'back', node: G.bar([84, FLOOR], [84, 8], 2.4) },
+    { layer: 'back', node: G.wheel([18, 12]) },
+    { layer: 'back', node: G.wheel([82, 12]) },
+    { layer: 'back', node: G.cable([18, 12], j.hand[0]) },
+    { layer: 'back', node: G.cable([82, 12], j.hand[1]) },
+    { layer: 'front', node: G.wheel(j.hand[0], 1.4) },
+    { layer: 'front', node: G.wheel(j.hand[1], 1.4) },
+  ],
+};
+
+/** A seated machine with the arms moving round to the front and back (pec deck, reverse pec deck), from the front. */
+function seatedFly(together: 'end' | 'start'): FrontMove {
+  const center: V = [50, ANKLE_Y - 19.7];
+  const wide: FrontArm = { out: 0, hand: [21.5, 2.5], elbow: [11.5, 2.5] };
+  const mid: FrontArm = { out: 0, hand: [11, 3.5], elbow: [7, 3.5] };
+  const close: FrontArm = { out: 0, hand: [-6.8, 3.5], elbow: [1.6, 5.5] };
+  const arms = together === 'end' ? [wide, mid, close] : [close, mid, wide];
+  return {
+    view: 'front',
+    frames: arms.map((arm) => ({ center, seated: true, arm, leg: { out: 12 } })),
+    work: together === 'end' ? ['chest', 'delts'] : ['delts', 'upperBack'],
+    show: [[50, 14], [24, FLOOR], [76, FLOOR]],
+    gear: (j) => [
+      { layer: 'back', node: G.floor() },
+      { layer: 'back', node: G.pad([j.center[0] - 13, j.center[1] + 4.6], [j.center[0] + 13, j.center[1] + 4.6], 3) },
+      { layer: 'back', node: G.bar([j.center[0], j.center[1] + 7.5], [j.center[0], FLOOR], 2.2) },
+      { layer: 'back', node: G.pad([j.center[0] - 9, j.center[1] - 30], [j.center[0] + 9, j.center[1] - 30], 28) },
+      { layer: 'back', node: G.bar([j.center[0] - 16, 14], [j.center[0] + 16, 14], 2.4) },
+      ...[0, 1].map((i) => ({ layer: 'back' as const, node: G.bar([j.shoulder[i][0], 14], add(j.hand[i], [0, -2.2]), 1.8) })),
+      ...[0, 1].map((i) => ({ layer: 'front' as const, node: G.bar(add(j.hand[i], [0, -2.2]), add(j.hand[i], [0, 2.2]), 1.6) })),
+    ],
+  };
+}
+export const pecDeckFront = seatedFly('end');
+export const reverseFlyFront = seatedFly('start');
+
+/** Shrugs from the front: arms hanging with the handles, the shoulders up towards the ears. */
+export const shrugFront: FrontMove = {
+  view: 'front',
+  frames: [
+    { center: [50, ANKLE_Y - 36], arm: { out: 7, bend: 0 }, leg: { out: 5 } },
+    { center: [50, ANKLE_Y - 36], arm: { out: 7, bend: 0 }, leg: { out: 5 }, shrug: 3.4 },
+  ],
+  work: ['upperBack'],
+  gear: (j) => [
+    { layer: 'back', node: G.floor() },
+    { layer: 'front', node: G.dumbbell(j.hand[0]) },
+    { layer: 'front', node: G.dumbbell(j.hand[1]) },
+  ],
+};
