@@ -1,14 +1,17 @@
 // All exercise pictures by exercise id (src/catalog.ts). An exercise without its own picture (the trainer's own)
 // gets one of its muscle group: pictureFor in figure/index.tsx.
 import type { Move } from './kit';
+import type { FrontMove } from './front';
+import * as front from './front';
 import * as chest from './chest';
 import * as back from './back';
 import * as legs from './legs';
 import * as arms from './arms';
 
 export type { Move };
+export type AnyMove = Move | FrontMove;
 
-export const MOVES: Record<string, Move> = {
+export const MOVES: Record<string, AnyMove> = {
   // chest
   'bench-press': chest.benchPress,
   'incline-dumbbell-press': chest.inclineDumbbellPress,
@@ -71,6 +74,15 @@ export const MOVES: Record<string, Move> = {
   'plate-lunge': legs.plateLunge,
   'cable-kickback': legs.cableKickback,
   'calf-raise': legs.standingCalfRaise,
+  'hip-abduction': front.hipAbduction,
+  'stack-hip-abduction': front.hipAbduction,
+  'hip-adduction': front.hipAdduction,
+  'stack-hip-adduction': front.hipAdduction,
+  // shoulders
+  'lateral-raise': front.lateralRaise,
+  'cable-lateral-raise': front.cableLateralRaise,
+  'machine-lateral-raise': front.machineLateralRaise,
+  'stack-lateral-raise': front.machineLateralRaise,
   'standing-calf-raise': legs.standingCalfRaise,
   'seated-calf-raise': legs.seatedCalfRaise,
   // arms

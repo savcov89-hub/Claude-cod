@@ -26,7 +26,8 @@ const rows: string[] = [];
 for (const [id, m] of Object.entries(MOVES)) {
   if (only && !only.has(id)) continue;
   const problems = new Set<string>();
-  for (let s = 0; s <= 40; s++) {
+  // Front-view moves: angles out to the sides only, checked on the sheet by eye.
+  for (let s = 0; s <= 40 && !('view' in m); s++) {
     const t = s / 40;
     const j = joints(at(m.frames, t));
     const tag = `t=${t.toFixed(2)}: `;
