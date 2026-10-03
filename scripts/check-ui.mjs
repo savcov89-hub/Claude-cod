@@ -506,16 +506,35 @@ await scenario('15. Двойное касание ✓, вес с запятой,
   expect(first?.weight === 102.5, 'the weight «102,5» is recorded as 102.5', first);
 });
 
-await scenario('18. Клиентка сама начала тренировку — у тренера она в зале', async () => {
+await scenario('18. Клиентка открыла день посмотреть — не в зале; записала подход — у тренера она в зале', async () => {
+  // As the trainer: the clients and who is in the gym now.
+  const all = (await call('get', '/api/clients')).clients;
   await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
   await p.waitForTimeout(1500);
   const select = p.locator('#demo-client');
   const options = await select.locator('option').allInnerTexts();
-  // Someone not in the gym yet.
-  const inGymNow = new Set((await call('get', '/api/clients').catch(() => ({ clients: [] }))).clients?.filter?.((c) => c.checkedInAt).map((c) => c.clientName) || []);
-  const who = options.find((o) => !inGymNow.has(o.trim()) && !['Анна', 'Павел', 'Мария', 'Дмитрий', 'Сергей', 'Екатерина', 'Иван', 'Ольга', 'Юлия'].includes(o.trim())) || options[options.length - 1];
+  const busy = ['Анна', 'Павел', 'Мария', 'Дмитрий', 'Сергей', 'Екатерина', 'Иван', 'Ольга', 'Юлия'];
+  const who = options.find((o) => !all.some((c) => c.clientName === o.trim() && c.checkedInAt) && !busy.includes(o.trim())) || options.find((o) => !busy.includes(o.trim())) || options[options.length - 1];
+  // Marked by an earlier scenario: she left first (as the trainer would mark it).
+  const her = all.find((c) => c.clientName === who.trim());
+  if (her?.checkedInAt) {
+    await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+    await p.waitForTimeout(1200);
+    await call('post', '/api/attendance', { clientId: her.clientId, present: false, localDate: new Date().toISOString().slice(0, 10), at: new Date().toISOString() });
+    await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
+    await p.waitForTimeout(1500);
+  }
   await select.selectOption({ label: who });
   await p.waitForTimeout(1500);
+  // Only looking at a day (no set recorded) is not coming to the gym.
+  await p.locator('.day-link').last().click();
+  await p.waitForTimeout(1200);
+  await p.getByRole('button', { name: 'Назад' }).first().click();
+  await p.waitForTimeout(800);
+  // As the client: her coaches and whether she is marked with them.
+  const looked = (await call('get', '/api/my-programs')).coaches || [];
+  expect(looked.length > 0 && looked.every((c) => !c.checkedInAt), '«' + who.trim() + '» opened a day just to look — not marked in the gym', looked.map((c) => c.checkedInAt));
+  expect((await p.getByRole('button', { name: 'Я в зале' }).count()) > 0, 'her button still says «Я в зале»');
   await p.getByRole('button', { name: 'Начать тренировку' }).click();
   await p.waitForTimeout(1200);
   const j = p.locator('.main .journal').first();

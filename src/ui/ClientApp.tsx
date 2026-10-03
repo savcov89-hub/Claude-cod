@@ -80,16 +80,13 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
     }
   };
   const here = coaches.some((c) => inGym(c.checkedInAt));
-  /** Opening a workout to do it: the trainer sees the client in the gym (marked here unless already there). */
+  /**
+   * Opening a workout, also just to look at it: not a visit yet. The client is marked in the gym by the server with
+   * her first recorded set (the trainer then sees her in «Зал»).
+   */
   const startWorkout = (program: Program, dayId: string) => {
     setJustDone(null);
     setJournal({ program, dayId });
-    const coach = coaches.find((c) => c.trainerId === program.trainerId);
-    if (coach && !inGym(coach.checkedInAt))
-      void api
-        .post('/api/attendance', { trainerId: program.trainerId, present: true, localDate: localDate(), at: new Date().toISOString() })
-        .then(() => load())
-        .catch(() => undefined);
   };
   const toggleGym = async () => {
     setBusy(true);
@@ -109,7 +106,10 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
         <main className="main narrow">
           <Journal
             source={{ trainerId: journal.program.trainerId, programId: journal.program.id, dayId: journal.dayId }}
-            onBack={() => setJournal(null)}
+            onBack={() => {
+              setJournal(null);
+              void load(); // a set recorded there has marked her in the gym
+            }}
             onDayChange={(dayId) => setJournal({ ...journal, dayId })}
             onCompleted={async ({ records, by }) => {
               setJournal(null);
