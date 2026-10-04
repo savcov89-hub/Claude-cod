@@ -462,6 +462,14 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     const date = DATE_RE.test(String(localDay || '')) ? String(localDay) : nowIso().slice(0, 10);
     await saveClient(trainerId, client, { checkedInAt: nowIso(), visits: withVisit(client.visits, date) });
   }
+  /** Sets recorded since `since` (a check-in): a workout finished after it, or one open with sets saved after it. */
+  async function recordedSince(trainerId: string, clientId: string, since: string) {
+    const from = Date.parse(since) - 60000;
+    if (!Number.isFinite(from)) return true;
+    const sessions = await listAll<SessionRecord>(sessionsTable(clientId), 400);
+    if (sessions.some((x) => x.trainerId === trainerId && Date.parse(x.completedAt) >= from)) return true;
+    return (await openWorkouts(trainerId, clientId, Date.parse(nowIso()) - from)).length > 0;
+  }
   const doneCount = (list: SessionExercise[] | undefined) => (list || []).reduce((n, e) => n + e.sets.filter((x) => x.reps > 0).length, 0);
 
   /** Done sets of a workout as its record keeps them, with the muscles of own exercises. */
@@ -984,10 +992,14 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const at = Number.isFinite(sent) && sent <= nowMs + 60000 && sent >= nowMs - 12 * 3600000 ? new Date(Math.min(sent, nowMs)).toISOString() : nowIso();
         const checkedInAt = b.present ? at : null;
         const date = DATE_RE.test(b.localDate || '') ? b.localDate : nowIso().slice(0, 10);
-        const ok = await saveClient(trainerId, client, {
-          checkedInAt,
-          visits: b.present ? withVisit(client.visits, date) : client.visits || [],
-        });
+        let visits = b.present ? withVisit(client.visits, date) : client.visits || [];
+        // Marked here by mistake: left within 15 minutes without a set recorded during the visit (an old workout
+        // opened from the card, a stray tap on «Пришёл») — the visit is taken back. A workout of an earlier day
+        // finished now is dated to its own day, so it does not count. A longer visit stays even without records.
+        const stayed = client.checkedInAt ? nowMs - Date.parse(client.checkedInAt) : Infinity;
+        if (!b.present && stayed < 15 * 60000 && !(await recordedSince(trainerId, clientId, client.checkedInAt!)))
+          visits = visits.filter((v) => v !== date);
+        const ok = await saveClient(trainerId, client, { checkedInAt, visits });
         return ok ? json({ checkedInAt }) : error('Отметка не сохранена', 500);
       },
     ],

@@ -596,6 +596,65 @@ await scenario('19. Карточка клиента → «Не завершен�
   expect(done > 0, 'the unfinished workout with its sets is the one shown', done);
 });
 
+await scenario('20. Забытая тренировка прошлых дней: «Открыть» в карточке не отмечает клиента пришедшим', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(1200);
+  const today = await p.evaluate(() => {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  });
+  const { clients } = await call('get', '/api/clients');
+  const { programs } = await call('get', '/api/programs');
+  // A client not in the gym, not seen today, with a program.
+  const c = clients.find((x) => !x.checkedInAt && !(x.visits || []).includes(today) && programs.some((pr) => pr.clientId === x.clientId && !pr.archived && !pr.free));
+  expect(!!c, 'a client away today with a program', clients.map((x) => [x.clientName, !!x.checkedInAt]));
+  if (!c) return;
+  const pr = programs.find((x) => x.clientId === c.clientId && !x.archived && !x.free);
+  const day = pr.days[pr.days.length - 1];
+  // Two days ago one set was recorded and the workout was never finished.
+  const w = await call('get', '/api/workout/' + pr.trainerId + '/' + pr.id + '/' + day.id);
+  const ex = w.day.exercises[0];
+  await p.evaluate(async () => (await import('/src/clock.ts')).setClockOffset(-2 * 86400000));
+  await call('post', '/api/draft', {
+    trainerId: pr.trainerId,
+    programId: pr.id,
+    dayId: day.id,
+    baseRevision: w.revision ?? null,
+    base: w.draft?.exercises || [],
+    feedback: '',
+    exercises: [{ exerciseId: ex.exerciseId, exerciseName: ex.exerciseName, sets: [{ weight: 20, reps: 10 }] }],
+  });
+  await p.evaluate(async () => (await import('/src/clock.ts')).setClockOffset(0));
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: c.clientName }).first().locator('.client-open').click();
+  await p.waitForTimeout(1500);
+  const bar = p.locator('.review-bar', { hasText: 'Не завершена' }).first();
+  expect((await bar.count()) > 0, 'the card shows the workout left two days ago');
+  await bar.getByRole('button', { name: 'Открыть' }).click();
+  await p.waitForTimeout(1500);
+  const onGym = (await p.locator('.nav').getByRole('button', { name: 'Зал' }).getAttribute('aria-current')) === 'page';
+  expect(!onGym, 'it opens in the card, not in the gym');
+  const stale = p.locator('.stale');
+  expect((await stale.count()) > 0, 'the journal offers to write it to history');
+  await stale.getByRole('button', { name: 'Записать' }).click();
+  await p.waitForTimeout(1800);
+  await dismiss();
+  const after = (await call('get', '/api/clients')).clients.find((x) => x.clientId === c.clientId);
+  expect(!after.checkedInAt && !(after.visits || []).includes(today), 'not marked in the gym and no visit today', [after.checkedInAt, after.visits?.slice(-3)]);
+  const hist = (await call('get', '/api/client/' + c.clientId + '/history')).sessions;
+  const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
+  expect(hist.some((x) => x.completedAt.slice(0, 10) === twoDaysAgo), 'the workout is in history on its own day', hist.slice(0, 2).map((x) => x.completedAt));
+
+  // A stray «Пришёл» and «Ушёл» right after, nothing recorded: no visit is left behind.
+  await call('post', '/api/attendance', { clientId: c.clientId, present: true, localDate: today, at: new Date().toISOString() });
+  await call('post', '/api/attendance', { clientId: c.clientId, present: false, localDate: today, at: new Date().toISOString() });
+  const back = (await call('get', '/api/clients')).clients.find((x) => x.clientId === c.clientId);
+  expect(!(back.visits || []).includes(today), 'a stray check-in taken back by «Ушёл» leaves no visit', back.visits?.slice(-3));
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(400);
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

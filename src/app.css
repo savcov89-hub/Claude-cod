@@ -1204,6 +1204,14 @@ table {
   gap: 4px;
   margin-top: 4px;
 }
+/* A long flag («↓ Болгарский сплит-присед −5%») wraps inside the row on narrow screens. */
+.attention-row .grow {
+  grid-template-columns: minmax(0, 1fr);
+}
+.flags .chip {
+  white-space: normal;
+  max-width: 100%;
+}
 .att-row {
   padding-block: 8px;
 }

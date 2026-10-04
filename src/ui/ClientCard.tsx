@@ -8,7 +8,7 @@ import { Avatar, Confirm, Empty, Sheet, VisitGrid, ago, fmtDate, fmtDateTime } f
 import { ProgressView } from './Progress';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
-import { Journal } from './Journal';
+import { AUTO_FINISH_IDLE_MS, Journal } from './Journal';
 import { AVATARS, AvatarArt } from './avatars';
 import { RecordsSheet } from './Records';
 import { copyLater, programText } from './programText';
@@ -30,7 +30,11 @@ export function ClientCard({
   initialTab?: string;
   onTabChange?: (tab: string) => void;
   onBack: () => void;
-  /** An unfinished workout goes to the client's tab in the gym (checked in if needed), among everyone there. */
+  /**
+   * An unfinished workout under way goes to the client's tab in the gym (checked in if needed), among everyone there.
+   * One left from an earlier visit (no sets for over an hour, the client not here) opens right in the card: it is
+   * not a visit today.
+   */
   openInGym?: (workout: OpenWorkout) => void;
   openBuilder: (opts: { clientId: string; program?: Program; copy?: boolean }) => void;
 }) {
@@ -79,6 +83,8 @@ export function ClientCard({
 
   if (!client) return <Empty title="Клиент не найден" action={<button className="btn" onClick={onBack}>Назад</button>} />;
 
+  /** Left from an earlier visit: the client is not here and nothing was recorded for over an hour. */
+  const leftBehind = (w: OpenWorkout) => !inGym(client?.checkedInAt) && Date.now() - Date.parse(w.updatedAt) > AUTO_FINISH_IDLE_MS;
   if (journal)
     return (
       <Journal
@@ -217,7 +223,9 @@ export function ClientCard({
           </span>
           <button
             className="btn btn-primary btn-sm"
-            onClick={() => (openInGym ? openInGym(w) : setJournal({ trainerId: w.trainerId, programId: w.programId, dayId: w.dayId }))}
+            onClick={() =>
+              openInGym && !leftBehind(w) ? openInGym(w) : setJournal({ trainerId: w.trainerId, programId: w.programId, dayId: w.dayId })
+            }
           >
             Открыть
           </button>
