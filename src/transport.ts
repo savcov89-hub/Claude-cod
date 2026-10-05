@@ -1,4 +1,4 @@
-import { remoteApi as remote } from './supabase';
+import { remoteApi as remote, remoteLive } from './supabase';
 import { localApi } from './local/runtime';
 
 /** Test build (artifact) or ?demo=1: requests run in the browser against sample data. */
@@ -17,6 +17,28 @@ export const api = {
   post: (path: string, body: unknown): Promise<{ data: any }> =>
     isLocal() ? localApi.post(path, body) : remote.post(path, body),
 };
+
+export interface LiveLink {
+  ping: (payload: { rev?: string; by?: string }) => void;
+  close: () => void;
+}
+/** In the test build: the same signal between tabs of this browser (and journals on one page). */
+function localLive(name: string, onPing: (payload: { rev?: string; by?: string }) => void): LiveLink | null {
+  if (typeof BroadcastChannel === 'undefined') return null;
+  const listen = new BroadcastChannel('tl-live:' + name);
+  listen.onmessage = (e) => onPing(e.data || {});
+  return {
+    ping: (payload) => {
+      const send = new BroadcastChannel('tl-live:' + name);
+      send.postMessage(payload);
+      send.close();
+    },
+    close: () => listen.close(),
+  };
+}
+/** «Saved» signals of one workout between the phones that have it open (see remoteLive). */
+export const live = (name: string, onPing: (payload: { rev?: string; by?: string }) => void): LiveLink | null =>
+  isLocal() ? localLive(name, onPing) : remoteLive(name, onPing);
 
 // Test mode only: the sample data's API for the automatic checks (scripts/check-ui.mjs) in a production build.
 if (typeof window !== 'undefined' && isLocal()) (window as unknown as { __tlApi?: typeof api }).__tlApi = api;

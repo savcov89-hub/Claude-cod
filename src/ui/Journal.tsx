@@ -1,6 +1,6 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, Check, ChevronDown, ListOrdered, Minus, MoreHorizontal, Pencil, Plus, SkipForward, Trash2, Undo2 } from 'lucide-react';
-import { api, inGym, isLocal, readError, safeStorage } from '../transport';
+import { api, inGym, isLocal, live, readError, safeStorage, type LiveLink } from '../transport';
 import { equipmentOf, fmtKg, isStack, suggestNext, weightUnit, type PersonalRecord, type Suggestion } from '../analytics';
 import { localDate } from '../clock';
 import { isNetworkError, isQueued } from '../offline';
@@ -580,6 +580,13 @@ function JournalBody({
           writeCache(!settled);
           setStatus(settled ? 'saved' : 'saving');
           setErrorText('');
+          // The other phone open on this workout takes it at once (see the live effect below).
+          liveRef.current?.ping({ rev: d.revision, by: workout.actorRole });
+          // A signal came while this phone was saving: what the other phone saved is read now.
+          if (settled && missedPing.current) {
+            missedPing.current = false;
+            setTimeout(() => void tickRef.current(), 0);
+          }
         } catch (err: any) {
           if (isNetworkError(err)) {
             // Kept on the device (pending) and sent when the network is back.
@@ -639,15 +646,27 @@ function JournalBody({
     timer.current = setTimeout(() => void persist().catch(() => undefined), 700);
   };
 
-  // Live: entries made on the other phone (trainer ↔ client) show up while this journal is on screen.
-  // Only when nothing is waiting to be saved here and no number is being typed, so nobody's input is overwritten.
+  // Live: entries made on the other phone (trainer ↔ client) show up while this journal is on screen — at once on
+  // the other phone's «saved» signal (Realtime), and every few seconds in any case. Only when nothing is waiting to
+  // be saved here: a save on the way brings the other phone's entries back merged, then the journal reads again.
+  // A field being typed in keeps its own text until it is left (NumberInput), so nobody's input is overwritten.
   const [liveAt, setLiveAt] = useState<{ at: number; by?: string } | null>(null);
-  const editingRef = useRef(editing);
-  editingRef.current = editing;
+  const liveRef = useRef<LiveLink | null>(null);
+  const missedPing = useRef(false);
+  const tickRef = useRef<() => Promise<void>>(async () => undefined);
   useEffect(() => {
     let busy = false;
+    let again = false;
     const tick = async () => {
-      if (busy || completed.current || conflictRef.current || pending.current || editingRef.current) return;
+      if (busy) {
+        again = true;
+        return;
+      }
+      if (completed.current || conflictRef.current) return;
+      if (pending.current) {
+        missedPing.current = true;
+        return;
+      }
       // Hidden journals (other gym tabs, display: none) have no boxes; fixed ones have no offsetParent, so boxes are checked.
       if (document.visibilityState !== 'visible' || !rootRef.current?.getClientRects().length) return;
       busy = true;
@@ -657,7 +676,7 @@ function JournalBody({
       try {
         const d = await fetchDraft();
         if (baseRevision.current !== before || edits.current !== editsBefore) return;
-        if (!d?.revision || d.revision === baseRevision.current || pending.current || editingRef.current || completed.current) return;
+        if (!d?.revision || d.revision === baseRevision.current || pending.current || completed.current) return;
         // Finished on the other phone: shown as recorded. The program changed under it: loaded again.
         if (d.closed) return finishedElsewhere(d.exercises, d.updatedByRole);
         if (!matchesPlan(d.exercises)) return onReload();
@@ -667,10 +686,29 @@ function JournalBody({
         /* no network or no access: try again later */
       } finally {
         busy = false;
+        // A signal came during this read: read once more.
+        if (again) {
+          again = false;
+          void tick();
+        }
       }
     };
+    tickRef.current = tick;
+    const link = live('w:' + workout.programId + ':' + workout.day.id, (p) => {
+      if (p.rev && p.rev === baseRevision.current) return;
+      void tick();
+    });
+    liveRef.current = link;
     const t = window.setInterval(() => void tick(), 4000);
-    return () => window.clearInterval(t);
+    // Back to the app from another one: read at once.
+    const onShow = () => document.visibilityState === 'visible' && void tick();
+    document.addEventListener('visibilitychange', onShow);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener('visibilitychange', onShow);
+      link?.close();
+      liveRef.current = null;
+    };
     // refs and stable callbacks only
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1115,6 +1153,8 @@ function JournalBody({
       if (completed.current) return true;
       const r = await api.post('/api/sessions', body(latest.current, feedbackRef.current, at));
       completed.current = true;
+      // The other phone shows it as recorded at once.
+      liveRef.current?.ping({ rev: 'finished', by: workout.actorRole });
       safeStorage.remove(cacheKey);
       if (r.data?.queued) safeStorage.set(doneKey, String(Date.now()));
       onCompleted({ sets: countDone(latest.current), records: r.data?.records || [] });

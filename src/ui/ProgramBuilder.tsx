@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import { ArrowDown, ArrowLeft, ArrowUp, Plus, RefreshCw, Search, Trash2, Undo2 } from 'lucide-react';
 import { api, readError } from '../transport';
 import { ExerciseThumb } from './exerciseArt';
-import { DAY_FOCUS, focusDay, templateDays, templates } from '../templates';
+import { DAY_FOCUS, focusDay, refreshExercises, roleOf, templateDays, templates } from '../templates';
 import {
   SESSION_SOFT_LIMIT,
   cycleLoad,
@@ -87,11 +87,19 @@ export function ProgramBuilder({
   const applyFocus = (f: { key: string; label: string }) => {
     setFocusAsk(null);
     const again = lastFocus?.dayId === day.id && lastFocus.key === f.key;
-    const v = again ? lastFocus!.variant + 1 : 0;
+    if (again) return refreshDay();
     const generic = !day.name.trim() || /^Тренировка( [A-ZА-Я0-9]+)?$/i.test(day.name.trim()) || DAY_FOCUS.some((x) => x.label === day.name);
-    patchDay({ ...day, name: generic ? f.label : day.name, exercises: focusDay(f.key, v) });
-    setLastFocus({ dayId: day.id, key: f.key, variant: v });
+    patchDay({ ...day, name: generic ? f.label : day.name, exercises: focusDay(f.key) });
+    setLastFocus({ dayId: day.id, key: f.key, variant: 0 });
   };
+  /** The open workout with other exercises of the same roles: order, sets, reps and RIR stay; undone with «Вернуть». */
+  const [dayUndo, setDayUndo] = useState<{ dayId: string; exercises: ProgramExercise[] } | null>(null);
+  const refreshDay = () => {
+    setDayUndo({ dayId: day.id, exercises: day.exercises });
+    const elsewhere = days.filter((d) => d.id !== day.id).flatMap((d) => d.exercises.map((e) => e.exerciseId));
+    patchDay({ ...day, exercises: refreshExercises(day.exercises, elsewhere) });
+  };
+  const canRefresh = day.exercises.some((e) => roleOf(e.exerciseId));
   const patchExercise = (i: number, patch: Partial<ProgramExercise>) =>
     patchDay({ ...day, exercises: day.exercises.map((e, j) => (j === i ? { ...e, ...patch } : e)) });
   // Quick rep ranges: one exercise in a tap, or every exercise of the program after a confirmation.
@@ -323,7 +331,29 @@ export function ProgramBuilder({
               </button>
             ))}
           </div>
-          {lastFocus?.dayId === day.id && <small className="muted">Нажмите ещё раз — другие упражнения на те же мышцы. Любое можно заменить или убрать.</small>}
+          {canRefresh && (
+            <div className="row gap refresh-row">
+              <button className="btn btn-sm" onClick={refreshDay}>
+                <RefreshCw size={15} /> Обновить упражнения
+              </button>
+              {dayUndo?.dayId === day.id && (
+                <button
+                  className="btn btn-sm btn-quiet"
+                  onClick={() => {
+                    patchDay({ ...day, exercises: dayUndo.exercises });
+                    setDayUndo(null);
+                  }}
+                >
+                  <Undo2 size={15} /> Вернуть
+                </button>
+              )}
+            </div>
+          )}
+          {canRefresh && (
+            <small className="muted">
+              Другие упражнения на те же мышцы: порядок, подходы и повторы сохраняются. Любое можно заменить или убрать.
+            </small>
+          )}
         </div>
         {focusAsk && (
           <Confirm

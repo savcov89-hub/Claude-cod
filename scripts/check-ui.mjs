@@ -655,6 +655,36 @@ await scenario('20. Забытая тренировка прошлых дней:
   await p.waitForTimeout(400);
 });
 
+await scenario('21. Программа: «Ягодицы» → «Обновить упражнения» — другие упражнения, та же схема', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(1000);
+  await p.locator('.nav').getByRole('button', { name: 'Программы' }).click();
+  await p.waitForTimeout(500);
+  await p.getByRole('button', { name: 'Программа', exact: true }).click();
+  await p.waitForTimeout(800);
+  await p.locator('.focus-chips').getByRole('button', { name: 'Ягодицы', exact: true }).click();
+  await p.waitForTimeout(400);
+  const rows = async () =>
+    p.evaluate(() =>
+      [...document.querySelectorAll('[aria-label^="Заменить: "]')].map((b) => b.getAttribute('aria-label').replace('Заменить: ', '')),
+    );
+  const before = await rows();
+  const setsBefore = await p.locator('[aria-label^="Повторы: "]').count();
+  await p.getByRole('button', { name: 'Обновить упражнения' }).click();
+  await p.waitForTimeout(400);
+  const after = await rows();
+  const changed = after.filter((x, i) => x !== before[i]).length;
+  expect(before.length === 6 && after.length === 6, 'still 6 exercises', [before.length, after.length]);
+  expect(changed >= 4, 'most exercises are new (' + changed + ' of 6)', [before, after]);
+  expect(/Ягодичный мост/.test(after[1]), 'the glute bridge stays a glute bridge (its role)', after[1]);
+  expect((await p.locator('[aria-label^="Повторы: "]').count()) === setsBefore, 'rep ranges are kept for every exercise');
+  await p.getByRole('button', { name: 'Вернуть' }).click();
+  await p.waitForTimeout(300);
+  expect(JSON.stringify(await rows()) === JSON.stringify(before), '«Вернуть» brings the previous exercises back');
+  await p.locator('.nav').getByRole('button', { name: 'Зал' }).click();
+  await p.waitForTimeout(400);
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

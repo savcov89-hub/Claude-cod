@@ -188,6 +188,30 @@ if (typeof window !== 'undefined' && url && key && !/[?&]demo=1/.test(location.s
   setTimeout(() => void syncOutbox(), 2000);
 }
 
+/**
+ * A live signal between the phones open on one workout: «saved, revision …». It carries no entries (only the
+ * revision and who saved); the other phone then reads the workout through the API as usual. The channel name
+ * holds the program's random id, so only those who have the workout know it. Without Realtime nothing breaks:
+ * the journal still checks every few seconds.
+ */
+export function remoteLive(name: string, onPing: (payload: { rev?: string; by?: string }) => void) {
+  if (!url || !key) return null;
+  try {
+    const channel = sb().channel(name, { config: { broadcast: { self: false, ack: false } } });
+    channel.on('broadcast', { event: 'saved' }, (m) => onPing((m.payload || {}) as { rev?: string; by?: string })).subscribe();
+    return {
+      ping: (payload: { rev?: string; by?: string }) => {
+        void channel.send({ type: 'broadcast', event: 'saved', payload }).catch(() => undefined);
+      },
+      close: () => {
+        void sb().removeChannel(channel).catch(() => undefined);
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 export const remoteApi = {
   get: (path: string) => call('GET', path),
   post: (path: string, body: unknown) => call('POST', path, body),
