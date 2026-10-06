@@ -223,6 +223,9 @@ const draftTable = (clientId: string, programId: string, dayId: string) =>
 /** Body measurements of one client key, one row per date. */
 const bodyTable = (clientId: string) => 'body:' + tableKey(clientId);
 const bodyProfileTable = (clientId: string) => 'body_profile:' + tableKey(clientId);
+/** Keys for «Команды» on iPhone (steps and weight from «Здоровье»): rows by the key's hash, and each owner's current one. */
+const HEALTH_KEYS = 'health_keys';
+const healthKeyOfTable = (owner: string) => 'health_key_of:' + tableKey(owner);
 const BODY_FIELDS = { weight: [20, 400], waist: [40, 250], neck: [20, 70], hips: [50, 250], steps: [0, 100000], kcal: [0, 15000] } as const;
 type BodyField = keyof typeof BODY_FIELDS;
 interface BodyEntry {
@@ -237,6 +240,8 @@ interface BodyEntry {
   kcal?: number | null;
   updatedAt: string;
   recordedByRole?: Role;
+  /** Came from «Здоровье» on iPhone through the key (steps, weight). */
+  fromHealth?: boolean;
 }
 const ACTIVITY = ['low', 'light', 'moderate', 'high', 'extreme'];
 interface BodyProfile {
@@ -712,6 +717,71 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     return Number.isFinite(n) && n >= lo && n <= hi ? n : undefined;
   };
 
+  /** One day's measurements put into every table of the person (`keys`): fields not sent stay as they were. */
+  async function writeBody(keys: string[], date: string, patch: Partial<Record<BodyField, number | null>>, role: Role, fromHealth = false) {
+    const updatedAt = nowIso();
+    let entry: BodyEntry | null = null;
+    for (const key of keys) {
+      const table = bodyTable(key);
+      const current = (await listAll<BodyEntry>(table, 2000)).find((e) => e.date === date);
+      if (current) {
+        const { id, ...record } = current;
+        entry = { ...record, ...patch, updatedAt, recordedByRole: role, ...(fromHealth ? { fromHealth } : {}) };
+        const [ok] = await db.update(table, [{ id, record: entry }]);
+        if (!ok) return null;
+      } else {
+        entry = { date, ...patch, updatedAt, recordedByRole: role, ...(fromHealth ? { fromHealth } : {}) };
+        const [id] = await db.add(table, [entry]);
+        if (!id) return null;
+      }
+    }
+    return entry;
+  }
+
+  // ---- «Здоровье» on iPhone through «Команды»: a personal key lets a shortcut send steps and weight. ----
+  const sha256 = async (value: string) =>
+    Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  interface HealthKey {
+    /** A client with an account (her own measurements), or a trainer's client (the trainer made the key). */
+    userId?: string;
+    trainerId?: string;
+    clientId?: string;
+    timeZone: string;
+    createdAt: string;
+  }
+  /** Whose key: the client herself, or a client of the signed-in trainer. */
+  async function healthOwner(ctx: Ctx, clientId: unknown) {
+    const userId = ctx.user!.userId;
+    const profile = await getProfile(userId);
+    if (profile?.role === 'trainer') {
+      const id = text(clientId, 200);
+      return id && (await findClient(userId, id)) ? { owner: 'trainer:' + userId + ':' + id, key: { trainerId: userId, clientId: id } } : null;
+    }
+    if (profile?.role === 'client') return { owner: 'user:' + userId, key: { userId } };
+    return null;
+  }
+  const validZone = (tz: unknown) => {
+    const zone = text(tz, 64);
+    try {
+      new Intl.DateTimeFormat('en-CA', { timeZone: zone });
+      return zone || 'Europe/Moscow';
+    } catch {
+      return 'Europe/Moscow';
+    }
+  };
+  /** yyyy-mm-dd now in a time zone. */
+  const dateIn = (timeZone: string) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(nowIso()));
+  /** A number as «Команды» may send it: 8532, "8 532", "72,4". */
+  const looseNumber = (v: unknown) => {
+    if (typeof v === 'number') return v;
+    if (typeof v !== 'string') return NaN;
+    const t = v.replace(/[\s\u00a0\u202f]/g, '').replace(',', '.');
+    return t ? Number(t) : NaN;
+  };
+
   return router({
     'GET /api/_healthcheck': [async () => json({ message: 'Success' })],
 
@@ -1140,23 +1210,79 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
             return error('Проверьте значения: вес 20–400 кг, талия 40–250, шея 20–70, бёдра 50–250 см, шаги до 100 000, калории до 15 000.', 400);
           patch[f] = (f === 'steps' || f === 'kcal') && v !== null ? Math.round(v) : v;
         }
-        const updatedAt = nowIso();
-        let entry: BodyEntry | null = null;
-        for (const key of access.keys) {
-          const table = bodyTable(key);
-          const current = (await listAll<BodyEntry>(table, 2000)).find((e) => e.date === b.date);
-          if (current) {
-            const { id, ...record } = current;
-            entry = { ...record, ...patch, updatedAt, recordedByRole: access.role };
-            const [ok] = await db.update(table, [{ id, record: entry }]);
-            if (!ok) return error('Не удалось сохранить.', 500);
-          } else {
-            entry = { date: b.date, ...patch, updatedAt, recordedByRole: access.role };
-            const [id] = await db.add(table, [entry]);
-            if (!id) return error('Не удалось сохранить.', 500);
-          }
-        }
+        const entry = await writeBody(access.keys, b.date, patch, access.role);
+        if (!entry) return error('Не удалось сохранить.', 500);
         return json({ entry });
+      },
+    ],
+
+    // Whether there is a key for «Команды» (never the key itself: only its hash is kept).
+    'GET /api/health-key': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const who = await healthOwner(ctx, ctx.query?.clientId);
+        if (!who) return error('Нет доступа.', 403);
+        const current = await first<{ hash: string; createdAt: string }>(healthKeyOfTable(who.owner));
+        return json({ active: !!current?.hash, createdAt: current?.hash ? current.createdAt : null });
+      },
+    ],
+    // A new key (the old one stops working); shown once.
+    'POST /api/health-key': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const who = await healthOwner(ctx, ctx.body?.clientId);
+        if (!who) return error('Нет доступа.', 403);
+        const pointer = healthKeyOfTable(who.owner);
+        const old = await first<{ hash: string }>(pointer);
+        if (old?.hash) await db.remove(HEALTH_KEYS, [old.hash]);
+        if (ctx.body?.revoke) {
+          await upsertSingle(pointer, { hash: '', createdAt: nowIso() });
+          return json({ active: false });
+        }
+        const raw = new Uint8Array(24);
+        crypto.getRandomValues(raw);
+        const key = Array.from(raw, (b) => b.toString(16).padStart(2, '0')).join('');
+        const hash = await sha256(key);
+        const createdAt = nowIso();
+        const record: HealthKey = { ...who.key, timeZone: validZone(ctx.body?.timeZone), createdAt };
+        const [id] = await db.add(HEALTH_KEYS, [record], [hash]);
+        if (!id) return error('Не удалось создать ключ.', 500);
+        await upsertSingle(pointer, { hash, createdAt });
+        return json({ key, active: true, createdAt });
+      },
+    ],
+    // From the shortcut, no sign-in: the key decides whose measurements. Steps of today (or `date`), the latest weight.
+    'POST /api/health': [
+      async (ctx: Ctx) => {
+        const b = ctx.body || {};
+        const key = text(b.key, 100).toLowerCase();
+        if (!/^[0-9a-f]{48}$/.test(key)) return error('Неверный ключ. Создайте новый в «Замерах».', 403);
+        const [record] = await db.get<HealthKey>(HEALTH_KEYS, [await sha256(key)]);
+        if (!record) return error('Ключ отключён. Создайте новый в «Замерах».', 403);
+        let keys: string[];
+        let role: Role;
+        if (record.trainerId && record.clientId) {
+          if (!(await findClient(record.trainerId, record.clientId))) return error('Клиент не найден.', 403);
+          keys = [record.clientId];
+          role = 'trainer';
+        } else if (record.userId) {
+          const own = (await keysOf(record.userId)).map((k) => k.clientId);
+          keys = own.length ? Array.from(new Set(own)) : [record.userId];
+          role = 'client';
+        } else return error('Ключ отключён.', 403);
+        const date = DATE_RE.test(b.date || '') ? b.date : dateIn(record.timeZone);
+        const patch: Partial<Record<BodyField, number | null>> = {};
+        const steps = Math.round(looseNumber(b.steps));
+        if (Number.isFinite(steps) && steps > 0 && steps <= BODY_FIELDS.steps[1]) patch.steps = steps;
+        const weight = Math.round(looseNumber(b.weight) * 10) / 10;
+        if (Number.isFinite(weight) && weight >= BODY_FIELDS.weight[0] && weight <= BODY_FIELDS.weight[1]) patch.weight = weight;
+        if (!Object.keys(patch).length) return json({ saved: false, date, message: 'Нет шагов и веса за сегодня — ничего не записано.' });
+        const entry = await writeBody(keys, date, patch, role, true);
+        if (!entry) return error('Не удалось сохранить.', 500);
+        const said = [patch.steps !== undefined ? 'шаги ' + patch.steps : '', patch.weight !== undefined ? 'вес ' + String(patch.weight).replace('.', ',') + ' кг' : '']
+          .filter(Boolean)
+          .join(', ');
+        return json({ saved: true, date, steps: patch.steps ?? null, weight: patch.weight ?? null, message: 'Записано в «Замеры»: ' + said + '.' });
       },
     ],
 

@@ -212,6 +212,9 @@ export function remoteLive(name: string, onPing: (payload: { rev?: string; by?: 
   }
 }
 
+/** Where the «Команды» shortcut sends steps and weight (no sign-in: the personal key in the body decides). */
+export const healthUrl = () => (url ? url.replace(/\/$/, '') + '/functions/v1/api/api/health' : '');
+
 export const remoteApi = {
   get: (path: string) => call('GET', path),
   post: (path: string, body: unknown) => call('POST', path, body),

@@ -3306,3 +3306,40 @@ h2 {
   max-height: 40vh;
   overflow: auto;
 }
+
+/* «Здоровье» link in the measurements */
+.health-link summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+.health-link summary::-webkit-details-marker {
+  display: none;
+}
+.health-link summary h4 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.health-link details > * + * {
+  margin-top: 10px;
+}
+.health-key {
+  display: block;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12px;
+  word-break: break-all;
+  user-select: all;
+}
+.health-steps {
+  display: grid;
+  gap: 6px;
+  padding-left: 20px;
+}

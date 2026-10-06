@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Ruler, Trash2 } from 'lucide-react';
+import { Copy, HeartPulse, Ruler, Trash2 } from 'lucide-react';
 import { ACTIVITY, actualExpenditure, calories, ffmi, latest, navyBodyFat, weeklyAverage, type BodyEntry, type BodyProfile } from '../body';
 import { fmtKg } from '../analytics';
 import { localDate } from '../clock';
-import { api, readError } from '../transport';
+import { api, isLocal, readError } from '../transport';
+import { healthUrl } from '../supabase';
+import { copyLater } from './programText';
 import { Confirm, Sparkline, fmtDate } from './common';
 
 const num = (v: string) => {
@@ -132,7 +134,7 @@ export function BodyView({ clientId }: { clientId?: string }) {
             </div>
           </div>
         ) : (
-          <p className="muted small">Утром вместе с весом запишите шаги за вчера (из «Здоровья» или часов). Калорийность будет считаться по реальной активности.</p>
+          <p className="muted small">Утром вместе с весом запишите шаги за вчера (из «Здоровья» или часов) — или подключите «Здоровье» внизу, и шаги будут приходить сами. Калорийность будет считаться по реальной активности.</p>
         )}
       </section>
 
@@ -301,6 +303,8 @@ export function BodyView({ clientId }: { clientId?: string }) {
           />
         )}
       </section>
+
+      <HealthLink clientId={clientId} onDone={load} />
 
       {entries.length > 0 && <EntryList entries={entries} profile={profile} onDelete={(date) => save({ date, weight: null, waist: null, neck: null, hips: null, steps: null, kcal: null })} />}
     </div>
@@ -618,6 +622,128 @@ function EntryList({ entries, profile, onDelete }: { entries: BodyEntry[]; profi
           {all ? 'Свернуть' : 'Показать все (' + list.length + ')'}
         </button>
       )}
+    </section>
+  );
+}
+
+/**
+ * Steps and weight from «Здоровье» on iPhone: a personal key for a shortcut in «Команды» that sends today's steps
+ * and weight every evening. The key is shown once; a new one switches the old one off.
+ */
+function HealthLink({ clientId, onDone }: { clientId?: string; onDone: () => void }) {
+  const [state, setState] = useState<{ active: boolean; createdAt: string | null } | null>(null);
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [copied, setCopied] = useState('');
+  const [confirmOff, setConfirmOff] = useState(false);
+  const q = clientId ? '?clientId=' + encodeURIComponent(clientId) : '';
+  useEffect(() => {
+    api
+      .get('/api/health-key' + q)
+      .then((r) => setState(r.data))
+      .catch(() => setState({ active: false, createdAt: null }));
+  }, [q]);
+  const post = async (revoke = false) => {
+    setBusy(true);
+    setErr('');
+    try {
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const r = await api.post('/api/health-key', { ...(clientId ? { clientId } : {}), timeZone, ...(revoke ? { revoke: true } : {}) });
+      setState({ active: r.data.active, createdAt: r.data.createdAt || null });
+      setKey(r.data.key || '');
+      setConfirmOff(false);
+      onDone();
+    } catch (e) {
+      setErr(readError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const address = isLocal() ? '' : healthUrl();
+  // Not copied (an old browser): the text stays on screen to select by hand.
+  const copy = (what: string, value: string) =>
+    void copyLater(Promise.resolve(value)).then((failed) => {
+      if (failed) return;
+      setCopied(what);
+      setTimeout(() => setCopied(''), 1800);
+    });
+  return (
+    <section className="block health-link">
+      <details open={!!key}>
+        <summary>
+          <h4>
+            <HeartPulse size={16} /> Шаги и вес из «Здоровья» (iPhone)
+          </h4>
+          <span className="muted small">{state?.active ? 'подключено' + (state.createdAt ? ' с ' + fmtDate(state.createdAt.slice(0, 10)) : '') : 'не подключено'}</span>
+        </summary>
+        <p className="muted small">
+          Команда в приложении «Команды» на iPhone каждый вечер берёт из «Здоровья» шаги и вес за день и записывает их сюда.
+          Настраивается один раз{clientId ? ' на телефоне клиента: отправьте ему ключ и эту инструкцию' : ''}.
+        </p>
+        {err && <div className="alert">{err}</div>}
+        {key ? (
+          <>
+            <div className="field">
+              <span>Ключ (показывается один раз)</span>
+              <div className="row gap">
+                <code className="health-key grow">{key}</code>
+                <button className="btn btn-sm" onClick={() => copy('key', key)}>
+                  <Copy size={15} /> {copied === 'key' ? 'Скопировано' : 'Скопировать'}
+                </button>
+              </div>
+            </div>
+            <div className="field">
+              <span>Адрес</span>
+              <div className="row gap">
+                <code className="health-key grow">{address || 'в тестовом режиме адреса нет'}</code>
+                {address && (
+                  <button className="btn btn-sm" onClick={() => copy('url', address)}>
+                    <Copy size={15} /> {copied === 'url' ? 'Скопировано' : 'Скопировать'}
+                  </button>
+                )}
+              </div>
+            </div>
+            <ol className="small health-steps">
+              <li>Откройте «Команды» → «+» (новая команда).</li>
+              <li>
+                Действие «Найти образцы здоровья»: Тип — «Шаги», фильтр «Дата начала» — «Сегодня», «Группировать по» — «День».
+              </li>
+              <li>Действие «Вычислить статистику» — «Сумма».</li>
+              <li>
+                Ещё «Найти образцы здоровья»: Тип — «Вес», фильтр «Дата начала» — «Сегодня», «Сортировать по» — «Дата начала»,
+                «Порядок» — «Сначала новые», «Ограничение» — 1.
+              </li>
+              <li>
+                Действие «Получить содержимое URL»: адрес выше. В «Показать больше»: Метод — POST, Тело запроса — JSON, три поля:
+                <b> key</b> (Текст) — ключ; <b>steps</b> (Число) — «Статистика»; <b>weight</b> (Число) — «Образцы здоровья» из шага 4.
+              </li>
+              <li>Назовите команду «Журнал: шаги и вес» и запустите один раз: разрешите доступ к шагам и весу. Ответ — «Записано в „Замеры“…».</li>
+              <li>«Автоматизация» → «+» → «Время суток»: 23:30, ежедневно, «Запускать сразу» → эта команда.</li>
+            </ol>
+            <p className="muted small">Вес берётся только сегодняшний; шаги — за сегодня на момент запуска. Запустить вручную можно в любое время — данные дня обновятся.</p>
+          </>
+        ) : null}
+        <div className="row gap">
+          <button className="btn btn-sm btn-primary" disabled={busy || !state} onClick={() => void post()}>
+            {state?.active ? 'Новый ключ' : 'Подключить'}
+          </button>
+          {state?.active && (
+            <button className="btn btn-sm btn-quiet" disabled={busy} onClick={() => setConfirmOff(true)}>
+              Отключить
+            </button>
+          )}
+        </div>
+        {state?.active && !key && <p className="muted small">Новый ключ отключит старый — команду нужно будет обновить.</p>}
+        {confirmOff && (
+          <Confirm
+            text="Отключить? Команда на iPhone перестанет записывать шаги и вес."
+            confirmLabel="Отключить"
+            onConfirm={() => void post(true)}
+            onCancel={() => setConfirmOff(false)}
+          />
+        )}
+      </details>
     </section>
   );
 }
