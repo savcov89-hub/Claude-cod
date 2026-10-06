@@ -1254,7 +1254,13 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     // From the shortcut, no sign-in: the key decides whose measurements. Steps of today (or `date`), the latest weight.
     'POST /api/health': [
       async (ctx: Ctx) => {
-        const b = ctx.body || {};
+        // Field names as typed in «Команды»: the iPhone may capitalize them (Key), or they may be in Russian.
+        const raw = (ctx.body && typeof ctx.body === 'object' ? ctx.body : {}) as Record<string, unknown>;
+        const named: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(raw)) named[k.trim().toLowerCase()] = v;
+        const field = (...names: string[]) => names.map((n) => named[n]).find((v) => v !== undefined && v !== null && v !== '');
+        const keyLike = Object.values(raw).find((v) => typeof v === 'string' && /^[0-9a-f]{48}$/i.test(v.trim()));
+        const b = { key: field('key', 'ключ') ?? keyLike, steps: field('steps', 'шаги'), weight: field('weight', 'вес'), date: field('date', 'дата') } as Record<string, any>;
         const key = text(b.key, 100).toLowerCase();
         if (!/^[0-9a-f]{48}$/.test(key)) return error('Неверный ключ. Создайте новый в «Замерах».', 403);
         const [record] = await db.get<HealthKey>(HEALTH_KEYS, [await sha256(key)]);
@@ -1276,7 +1282,16 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         if (Number.isFinite(steps) && steps > 0 && steps <= BODY_FIELDS.steps[1]) patch.steps = steps;
         const weight = Math.round(looseNumber(b.weight) * 10) / 10;
         if (Number.isFinite(weight) && weight >= BODY_FIELDS.weight[0] && weight <= BODY_FIELDS.weight[1]) patch.weight = weight;
-        if (!Object.keys(patch).length) return json({ saved: false, date, message: 'Нет шагов и веса за сегодня — ничего не записано.' });
+        if (!Object.keys(patch).length) {
+          const unnamed = b.steps === undefined && b.weight === undefined;
+          return json({
+            saved: false,
+            date,
+            message: unnamed
+              ? 'Ключ принят, но нет полей steps и weight. Проверьте названия полей в «Получить содержимое URL».'
+              : 'Нет шагов и веса за сегодня — ничего не записано.',
+          });
+        }
         const entry = await writeBody(keys, date, patch, role, true);
         if (!entry) return error('Не удалось сохранить.', 500);
         const said = [patch.steps !== undefined ? 'шаги ' + patch.steps : '', patch.weight !== undefined ? 'вес ' + String(patch.weight).replace('.', ',') + ' кг' : '']
