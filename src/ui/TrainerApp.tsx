@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { BookOpen, ClipboardList, Dumbbell, LayoutDashboard, Users } from 'lucide-react';
-import type { OpenWorkout, Profile } from '../types';
+import type { OpenWorkout, Profile, Program } from '../types';
+import { api } from '../transport';
 import { presentClients, useTrainerData } from './data';
 import { Gym } from './Gym';
 import { Dashboard } from './Dashboard';
@@ -24,7 +25,18 @@ export function TrainerApp({ header, onSwitchRole }: { profile: Profile; header:
   const reviews = data.clients.filter((c) => c.needsReview && !c.archived).length;
 
   const openClient = (id: string, t?: string) => setCard({ id, tab: t });
-  const openBuilder = (opts: BuilderOptions) => setBuilder(opts);
+  // An existing program opens as it is on the server now (it may have been changed in the gym moments ago).
+  const openBuilder = async (opts: BuilderOptions) => {
+    if (opts.program && !opts.copy) {
+      try {
+        const fresh = (await api.get('/api/programs')).data.programs.find((x: Program) => x.id === opts.program!.id);
+        if (fresh) opts = { ...opts, program: fresh };
+      } catch {
+        /* offline: the copy on screen */
+      }
+    }
+    setBuilder(opts);
+  };
   const go = (t: Tab) => {
     setTab(t);
     setCard(null);

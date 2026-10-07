@@ -94,6 +94,7 @@ export function ClientCard({
           void loadHistory();
         }}
         onDayChange={(dayId) => setJournal({ ...journal, dayId })}
+        onProgramChanged={() => void data.reload()}
         onCompleted={async ({ records }) => {
           setJournal(null);
           if (records?.length) setNewRecords(records);

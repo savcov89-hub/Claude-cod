@@ -4,6 +4,7 @@ import { clientInsights, sessionRecords, type ClientInsights } from '../src/anal
 import { nowIso } from '../src/clock';
 import type { OpenWorkout } from '../src/types';
 import { doneDiffers, fitPlan, mergeEntries, mergeText } from '../src/draftMerge';
+import { mergeProgramDays } from '../src/programMerge';
 
 // The request logic is written against this small surface so the same code runs
 // on Supabase (backend/server.ts) and in the demo build (in-browser database).
@@ -1417,8 +1418,24 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         if (!program || program.trainerId !== trainerId) return error('Программа не найдена.', 404);
         const name = text(ctx.body?.name, 100);
         if (!name) return error('Введите название программы.', 400);
-        const days = await cleanDays(trainerId, ctx.body?.days);
-        if (typeof days === 'string') return error(days, 400);
+        const sent = await cleanDays(trainerId, ctx.body?.days);
+        if (typeof sent === 'string') return error(sent, 400);
+        // The editor was opened on an older version (changed meanwhile in the gym journal or on another phone):
+        // its edits go on top of the program as it is now, so nothing done there is undone.
+        let days = sent;
+        let merged = false;
+        const base = ctx.body?.base;
+        const version = program.updatedAt || program.createdAt;
+        if (base && typeof base.updatedAt === 'string' && base.updatedAt !== version && Array.isArray(base.days)) {
+          const baseDays = await cleanDays(trainerId, base.days);
+          if (typeof baseDays !== 'string') {
+            const result = await cleanDays(trainerId, mergeProgramDays(baseDays, sent, program.days));
+            if (typeof result !== 'string') {
+              merged = JSON.stringify(result) !== JSON.stringify(sent);
+              days = result;
+            }
+          }
+        }
         let nextDayId = days.some((d) => d.id === program.nextDayId) ? program.nextDayId : days[0].id;
         // The next workout wrapped round to the first day after the last one was done; a workout added
         // right after that last day comes next instead (e.g. a program built one day at a time).
@@ -1438,7 +1455,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           const { id, ...record } = assignment;
           await db.update(assignmentsTable(program.clientId), [{ id, record: { ...record, programName: name } }]);
         }
-        return json({ program: { id: programId, ...rest, name, days, nextDayId } });
+        return json({ program: { id: programId, ...rest, name, days, nextDayId }, merged });
       },
     ],
 
@@ -1471,10 +1488,12 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         if (new Set(ids).size !== ids.length || ids.some((id) => !day.exercises.some((e) => e.exerciseId === id) && !added.has(id)))
           return error('Упражнения не совпадают с программой. Обновите журнал.', 400);
         if (ids.length > 30) return error('Не больше 30 упражнений в тренировке.', 400);
+        // Saved whatever the open workout is doing (the other phone may have ticked a set a moment ago);
+        // the open workout is rewritten safely below.
         const draftT = draftTable(program.clientId, programId, dayId);
         const draft = await first<DraftRecord & { id: string }>(draftT);
-        if (draft && !draft.closed && (draft.revision || null) !== (ctx.body?.baseRevision || null))
-          return error('Запись уже изменена на другом устройстве. Обновите журнал перед продолжением.', 409);
+        // Saved meanwhile on the other phone (this journal had not seen it yet).
+        const changedElsewhere = !!draft && !draft.closed && (draft.revision || null) !== (ctx.body?.baseRevision || null);
         const exercises = ids.map((id) => day.exercises.find((e) => e.exerciseId === id) || added.get(id)!);
         const days = program.days.map((d) => (d.id === dayId ? { ...d, exercises } : d));
         const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
@@ -1492,7 +1511,15 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         // other added ones stay added; the journal's own order is kept when sent.
         const revision = await rewriteDraft(draftT, draft, (list) =>
           list
-            .filter((e) => (e.extra ? true : ids.includes(slot(e))))
+            .flatMap((e): SessionExercise[] => {
+              if (e.extra || ids.includes(slot(e))) return [e];
+              // Taken out of the program while the other phone had just ticked a set of it: it stays in today's
+              // workout, for today only (sets ticked on this phone were confirmed to go).
+              if (!changedElsewhere || !e.sets.some((x) => x.reps > 0)) return [];
+              const was = day.exercises.find((p) => p.exerciseId === slot(e));
+              const { replaces: _r, ...plain } = e;
+              return was ? [{ ...plain, extra: { repMin: was.repMin, repMax: was.repMax, targetRir: was.targetRir, once: true } }] : [];
+            })
             .map(({ extra, ...e }) => (extra && !added.has(e.exerciseId) ? { ...e, extra } : e))
             .sort((a, b) => rank(a) - rank(b)),
         );
@@ -1531,10 +1558,10 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           const { sets, repMin, repMax, targetRir } = next;
           next = toProgramExercise({ sets, repMin, repMax, targetRir }, known);
         }
+        // Saved in the program whatever the open workout is doing: the other phone may have ticked a set a moment
+        // ago (live recording). The open workout is rewritten safely below (it retries on a save in between).
         const draftT = draftTable(program.clientId, programId, dayId);
         const draft = await first<DraftRecord & { id: string }>(draftT);
-        if (draft && !draft.closed && (draft.revision || null) !== (b.baseRevision || null))
-          return error('Запись уже изменена на другом устройстве. Обновите журнал перед продолжением.', 409);
         const days = program.days.map((d) =>
           d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.exerciseId === current.exerciseId ? next : e)) } : d,
         );
@@ -1946,13 +1973,18 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           needsReview: access.role === 'client',
           visits: withVisit(client?.visits, date),
         });
-        const idx = program.days.findIndex((d) => d.id === dayId);
-        const nextDayId = program.days[(idx + 1) % program.days.length].id;
+        // The program as it is now: changed meanwhile (a replacement «насовсем» from the other phone, the editor),
+        // those changes stay — only the next day, the dates and the exercises joined here are written.
+        const [fresh] = await db.get<ProgramRecord>(programsTable(trainerId), [programId]);
+        const now = fresh || program;
+        const nowDay = now.days.find((d) => d.id === dayId) || day;
+        const idx = now.days.findIndex((d) => d.id === dayId);
+        const nextDayId = now.days[(idx + 1) % now.days.length].id;
         // Exercises the trainer added in the gym and did join the program day, each after the planned
         // exercise it followed in the journal; the planned ones keep their order.
-        const joined = program.free || access.role !== 'trainer' ? [] : matched!.filter((e) => e.extra && !e.extra.once && performed.some((p) => p.exerciseId === e.exerciseId));
-        let days = program.days;
-        if (joined.length && day.exercises.length + joined.length <= 30) {
+        const joined = now.free || access.role !== 'trainer' ? [] : matched!.filter((e) => e.extra && !e.extra.once && performed.some((p) => p.exerciseId === e.exerciseId));
+        let days = now.days;
+        if (joined.length && idx >= 0 && nowDay.exercises.length + joined.length <= 30) {
           const findKnown = knownExercises(trainerId);
           const after = new Map<string, ProgramExercise[]>();
           let prev = '';
@@ -1963,21 +1995,21 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
               if (known) after.set(prev, [...(after.get(prev) || []), toProgramExercise({ ...e.extra, sets: e.sets.length }, known)]);
             }
           }
-          const exercises = [...(after.get('') || []), ...day.exercises.flatMap((p) => [p, ...(after.get(p.exerciseId) || [])])];
-          days = program.days.map((d) => (d.id === dayId ? { ...d, exercises } : d));
+          const exercises = [...(after.get('') || []), ...nowDay.exercises.flatMap((p) => [p, ...(after.get(p.exerciseId) || [])])];
+          days = now.days.map((d) => (d.id === dayId ? { ...d, exercises } : d));
         }
-        const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
+        const { id: _drop, ...rest } = now as ProgramRecord & { id?: string };
         const [updated] = await db.update(programsTable(trainerId), [
           {
             id: programId,
             record: {
               ...rest,
-              ...(days !== program.days ? { days, updatedAt: completedAt } : {}),
+              ...(days !== now.days ? { days, updatedAt: completedAt } : {}),
               nextDayId,
               lastCompletedAt: completedAt,
               lastRecordedByRole: access.role,
               // A free workout is remembered as the starting point of the next one.
-              ...(program.free
+              ...(now.free
                 ? {
                     lastFree: matched!
                       .filter((e) => e.extra)

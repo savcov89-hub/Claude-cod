@@ -431,6 +431,7 @@ function JournalBody({
   const since = inGym(workout.checkedInAt) ? new Date(workout.checkedInAt!).getTime() : null;
   // A replacement picked for a planned exercise: today only, or in the program for good.
   const [swapChoice, setSwapChoice] = useState<{ ei: number; ex: Exercise } | null>(null);
+  const [swapError, setSwapError] = useState('');
   // Sets / rep range being changed for the exercise at this index.
   const [targetsFor, setTargetsFor] = useState<number | null>(null);
   const [repeating, setRepeating] = useState(false);
@@ -1084,7 +1085,7 @@ function JournalBody({
   const replaceInProgram = async (ei: number, ex: Exercise) => {
     const slot = slotOf(latest.current[ei]);
     if (latest.current[ei].exerciseId !== ex.id) await swapExercise(ei, ex);
-    await saveExerciseToProgram(slot, { replaceWith: ex.id });
+    return saveExerciseToProgram(slot, { replaceWith: ex.id });
   };
   const setNote = (ei: number, note: string) =>
     update(latest.current.map((x, i) => (i === ei ? { ...x, note: note || undefined } : x)));
@@ -1726,13 +1727,16 @@ function JournalBody({
               className="btn btn-primary btn-block"
               disabled={programBusy}
               onClick={async () => {
-                await replaceInProgram(swapChoice.ei, swapChoice.ex);
-                setSwapChoice(null);
+                setSwapError('');
+                // Closed only once it is in the program; otherwise it says so here (today the swap stays).
+                if (await replaceInProgram(swapChoice.ei, swapChoice.ex)) setSwapChoice(null);
+                else setSwapError('Не сохранилось в программе — сегодня упражнение уже заменено. Нажмите ещё раз.');
               }}
             >
               {programBusy ? 'Сохраняем…' : 'В программе насовсем'}
             </button>
           </div>
+          {swapError && <div className="alert">{swapError}</div>}
         </Sheet>
       )}
 

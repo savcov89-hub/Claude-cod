@@ -708,6 +708,42 @@ await scenario('22. «+» подход — только сегодня; «Сох
   expect(rowsAfter === rows0 + 1, 'today keeps the added set', rowsAfter);
 });
 
+await scenario('23. Замена «насовсем» из зала не теряется, когда редактор программы был открыт раньше', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  await p.locator('.nav').getByRole('button', { name: 'Программы' }).click();
+  await p.waitForTimeout(500);
+  const { programs } = await call('get', '/api/programs');
+  const prog = programs.find((x) => !x.archived && x.days.length > 1);
+  const card = p.locator('.program', { hasText: prog.name }).filter({ hasText: prog.clientName }).first();
+  await card.getByRole('button', { name: 'Изменить' }).click();
+  await p.waitForTimeout(800);
+  // Meanwhile, in the gym on the other phone: the first exercise of the first workout replaced for good.
+  const day = prog.days[0];
+  const old = day.exercises[0].exerciseId;
+  const used = new Set(day.exercises.map((e) => e.exerciseId));
+  const repl = ['pendulum-squat', 'smith-squat', 'hack-squat', 'leg-press', 'plate-leg-press'].find((x) => !used.has(x));
+  await call('post', `/api/programs/${prog.id}/days/${day.id}/exercise`, { exerciseId: old, replaceWith: repl });
+  // The editor, opened before, sets 4 sets everywhere and saves.
+  await p.locator('.field', { hasText: 'Подходы для всей программы' }).getByRole('button', { name: '4', exact: true }).click();
+  await p.getByRole('button', { name: 'Поставить' }).click();
+  await p.getByRole('button', { name: 'Сохранить изменения' }).click();
+  await p.waitForTimeout(1200);
+  const after = (await call('get', '/api/programs')).programs.find((x) => x.id === prog.id);
+  const first = after.days[0].exercises[0];
+  expect(first.exerciseId === repl, 'the replacement made in the gym stays (' + repl + ')', [old, first.exerciseId]);
+  expect(after.days.every((d) => d.exercises.every((e) => e.sets === 4)), 'and the editor\'s 4 sets everywhere, the replacement too', after.days.map((d) => d.exercises.map((e) => e.sets).join('')));
+  // Opened now, the editor shows the program as it is.
+  await card.getByRole('button', { name: 'Изменить' }).click();
+  await p.waitForTimeout(800);
+  const shown = await p.evaluate(() => [...document.querySelectorAll('[aria-label^="Заменить: "]')].map((b) => b.getAttribute('aria-label')));
+  expect(shown.some((x) => x.includes(first.exerciseName)), 'the editor shows the replacement', shown.slice(0, 3));
+  await p.getByRole('button', { name: 'Закрыть конструктор' }).click();
+  await p.waitForTimeout(300);
+  await p.locator('.nav').getByRole('button', { name: 'Зал' }).click();
+  await p.waitForTimeout(300);
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

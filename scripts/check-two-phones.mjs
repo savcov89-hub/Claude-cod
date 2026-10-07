@@ -233,6 +233,62 @@ expect(sets2 === 4, "the offline client's 2 sets joined the trainer's 2", last?.
 const failed = await C.p.getByText('Не удалось отправить').count();
 expect(!failed, 'no «could not send» on the client phone');
 
+console.log('5. Тренер в зале меняет упражнение «насовсем», а клиентка в эти секунды отмечает подходы');
+await T.p.reload();
+await T.p.waitForTimeout(3000);
+await T.p.locator('.gym-tab', { hasText: 'Ольга' }).first().click().catch(() => {});
+await T.p.waitForTimeout(1000);
+const wk = await api(s.ct, 'GET', `/api/programs`);
+const prog = wk.programs.find((x) => x.id === s.programId);
+const dayNow = prog.days.find((d) => d.id === prog.nextDayId) || prog.days[0];
+// The client's phone: saves her ticks on the third exercise every few hundred ms.
+let stop = false;
+let clientSaves = 0;
+const clientLoop = (async () => {
+  let k = 0;
+  while (!stop) {
+    try {
+      const w = await api(s.ot, 'GET', `/api/workout/${prog.trainerId}/${prog.id}/${dayNow.id}`);
+      const list = w.draft?.exercises || w.day.exercises.map((e) => ({ exerciseId: e.exerciseId, exerciseName: e.exerciseName, sets: Array.from({ length: e.sets }, () => ({ weight: 0, reps: 0, rir: null })) }));
+      const next = list.map((e, i) => (i === 2 ? { ...e, sets: e.sets.map((x, j) => (j === k % e.sets.length ? { ...x, weight: 30, reps: 10 } : x)) } : e));
+      await api(s.ot, 'POST', '/api/draft', { trainerId: prog.trainerId, programId: prog.id, dayId: dayNow.id, exercises: next, baseRevision: w.revision, base: list, feedback: '', localDate: today });
+      clientSaves++;
+      k++;
+    } catch {
+      /* the program changed under her: reads again */
+    }
+    await sleep(250);
+  }
+})();
+await sleep(1500);
+const firstEx = dayNow.exercises[0];
+await journal(T.p).locator('[aria-label^="Действия с упражнением: "]').first().click();
+await T.p.waitForTimeout(400);
+await T.p.locator('.menu-item', { hasText: 'Заменить' }).first().click();
+await T.p.waitForTimeout(400);
+const ok = T.p.getByRole('button', { name: 'Выбрать замену' });
+if (await ok.count()) await ok.click();
+await T.p.waitForTimeout(800);
+const pick = T.p.locator('.sheet').last();
+const used = new Set(dayNow.exercises.map((e) => e.exerciseId));
+const replName = used.has('hack-squat') ? 'Маятниковый' : 'Гакк';
+await pick.locator('input').first().fill(replName);
+await T.p.waitForTimeout(500);
+await pick.locator('.pick').first().click();
+await T.p.waitForTimeout(400);
+await T.p.getByRole('button', { name: 'В программе насовсем' }).click();
+await sleep(3000);
+stop = true;
+await clientLoop;
+const after = (await api(s.ct, 'GET', `/api/programs`)).programs.find((x) => x.id === s.programId);
+const saved = after.days.find((d) => d.id === dayNow.id).exercises[0];
+expect(saved.exerciseId !== firstEx.exerciseId, `replaced in the program for good while she was ticking (${firstEx.exerciseId} → ${saved.exerciseId}; her saves: ${clientSaves})`, saved.exerciseId);
+expect(!(await T.p.getByText('Не сохранилось в программе').count()), 'no «not saved» on the trainer phone');
+const w2 = await api(s.ct, 'GET', `/api/workout/${prog.trainerId}/${prog.id}/${dayNow.id}`);
+const herSets = w2.draft?.exercises?.[2]?.sets?.filter((x) => x.reps > 0).length || 0;
+expect(herSets > 0, `her ticked sets are still there (${herSets})`, w2.draft?.exercises?.[2]);
+expect(w2.draft?.exercises?.[0]?.exerciseId === saved.exerciseId, 'and the open workout already has the new exercise', w2.draft?.exercises?.[0]);
+
 console.log(errs.length ? 'Замечания:\n  ' + errs.join('\n  ') : 'Ошибок страницы нет');
 console.log(`\n${checks} проверок, ошибок: ${failures}`);
 await browser.close();

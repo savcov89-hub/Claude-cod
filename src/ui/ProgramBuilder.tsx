@@ -150,7 +150,13 @@ export function ProgramBuilder({
     setSaving(true);
     setErrorText('');
     try {
-      if (editing) await api.post('/api/programs/' + options.program!.id, { name: name.trim(), days });
+      // The version the editor started from: changes made meanwhile in the gym journal are kept by the server.
+      if (editing)
+        await api.post('/api/programs/' + options.program!.id, {
+          name: name.trim(),
+          days,
+          base: { updatedAt: options.program!.updatedAt || options.program!.createdAt, days: options.program!.days },
+        });
       else await api.post('/api/programs', { clientId, name: name.trim(), days });
       await onSaved();
     } catch (e) {
