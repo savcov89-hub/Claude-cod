@@ -9,9 +9,11 @@ interface Slot {
   repMax: number;
   rir: number;
 }
+/** Sets of every exercise of a new program, unless a slot asks for more (the trainer's rule: 3 by default). */
+export const DEFAULT_SETS = 3;
 const s = (ids: string, sets: number, reps: string, rir: number): Slot => {
   const [repMin, repMax] = reps.split('-').map(Number);
-  return { ids: ids.split('|'), sets, repMin, repMax, rir };
+  return { ids: ids.split('|'), sets: Math.max(sets, DEFAULT_SETS), repMin, repMax, rir };
 };
 
 const plans: Record<string, { name: string; slots: Slot[] }> = {
@@ -671,7 +673,7 @@ export function templateDays(
       rir: slot.rir,
     }));
     if (withAbs)
-      rows.push({ id: ABS[(i + variant) % ABS.length], sets: 2, repMin: 10, repMax: 15, rir: 1 });
+      rows.push({ id: ABS[(i + variant) % ABS.length], sets: DEFAULT_SETS, repMin: 10, repMax: 15, rir: 1 });
     const planned = rows.map((row) => {
       const e = catalog.find((c) => c.id === row.id);
       if (!e) throw new Error('Упражнение не найдено: ' + row.id);

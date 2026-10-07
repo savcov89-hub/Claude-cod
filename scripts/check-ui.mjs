@@ -235,7 +235,8 @@ const dismiss = async () => {
 };
 const goGym = async () => {
   await dismiss();
-  const back = p.locator('.main').getByRole('button', { name: 'Назад' });
+  // Exactly «Назад»: an exercise name may contain the word («Отведение ноги назад…»).
+  const back = p.locator('.main').getByRole('button', { name: 'Назад', exact: true });
   if (await back.count()) await back.first().click();
   await p.locator('.nav').getByRole('button', { name: 'Зал' }).click();
   await p.waitForTimeout(600);
@@ -314,7 +315,7 @@ await scenario('6. Журнал из карточки клиента', async () 
   await finishHere(j);
   const after = await historyOf('Мария');
   expect(after.length === before + 1 && after[0].dayName === prog.days[1].name, 'recorded from the client card as «' + prog.days[1].name + '»', after[0]?.dayName);
-  await p.getByRole('button', { name: 'Назад' }).first().click().catch(() => {});
+  await p.getByRole('button', { name: 'Назад', exact: true }).first().click().catch(() => {});
 });
 
 await scenario('7. Замена упражнения на сегодня', async () => {
@@ -435,7 +436,7 @@ await scenario('12. Удаление записи из истории', async ()
   await p.getByRole('button', { name: 'Удалить', exact: true }).click();
   await p.waitForTimeout(1200);
   expect((await historyOf('Павел')).length === before - 1, 'deleted', before);
-  await p.getByRole('button', { name: 'Назад' }).first().click().catch(() => {});
+  await p.getByRole('button', { name: 'Назад', exact: true }).first().click().catch(() => {});
 });
 
 await scenario('13. Клиент записывает сам в своём кабинете', async () => {
@@ -529,7 +530,7 @@ await scenario('18. Клиентка открыла день посмотрет�
   // Only looking at a day (no set recorded) is not coming to the gym.
   await p.locator('.day-link').last().click();
   await p.waitForTimeout(1200);
-  await p.getByRole('button', { name: 'Назад' }).first().click();
+  await p.getByRole('button', { name: 'Назад', exact: true }).first().click();
   await p.waitForTimeout(800);
   // As the client: her coaches and whether she is marked with them.
   const looked = (await call('get', '/api/my-programs')).coaches || [];
@@ -540,7 +541,7 @@ await scenario('18. Клиентка открыла день посмотрет�
   const j = p.locator('.main .journal').first();
   await tickNext(j, 30);
   await p.waitForTimeout(1500);
-  await p.getByRole('button', { name: 'Назад' }).first().click();
+  await p.getByRole('button', { name: 'Назад', exact: true }).first().click();
   await p.waitForTimeout(500);
   await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
   await p.waitForTimeout(2000);
@@ -683,6 +684,28 @@ await scenario('21. Программа: «Ягодицы» → «Обновит�
   expect(JSON.stringify(await rows()) === JSON.stringify(before), '«Вернуть» brings the previous exercises back');
   await p.locator('.nav').getByRole('button', { name: 'Зал' }).click();
   await p.waitForTimeout(400);
+});
+
+await scenario('22. «+» подход — только сегодня; «Сохранить в программе» — насовсем', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(1000);
+  await checkIn('Юлия');
+  const table = pane().locator('[role="table"]').filter({ has: p.getByRole('button', { name: 'Добавить подход' }) }).first();
+  const name = (await table.getAttribute('aria-label')).replace('Подходы: ', '');
+  const rows0 = await table.locator('.set-row:not(.set-labels)').count();
+  await table.getByRole('button', { name: 'Добавить подход' }).click();
+  await p.waitForTimeout(900);
+  const diff = pane().locator('.sets-diff').first();
+  const said = await diff.innerText().catch(() => '');
+  expect(said.includes('Сегодня ' + (rows0 + 1)) && said.includes('в программе ' + rows0), '«+» shows today vs program', said);
+  await diff.getByRole('button', { name: 'Сохранить в программе' }).click();
+  await p.waitForTimeout(1800);
+  const { programs } = await call('get', '/api/programs');
+  const ex = programs.flatMap((pr) => pr.days.flatMap((d) => d.exercises)).filter((e) => e.exerciseName === name);
+  expect(ex.some((e) => e.sets === rows0 + 1), 'the program now has ' + (rows0 + 1) + ' sets for ' + name, ex.map((e) => e.sets));
+  expect((await pane().locator('.sets-diff').count()) === 0, 'the hint is gone once saved');
+  const rowsAfter = await pane().locator(`[role="table"][aria-label="Подходы: ${name}"] .set-row:not(.set-labels)`).count();
+  expect(rowsAfter === rows0 + 1, 'today keeps the added set', rowsAfter);
 });
 
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {

@@ -3343,3 +3343,17 @@ h2 {
   gap: 6px;
   padding-left: 20px;
 }
+
+/* Journal: today's set count differs from the program's («+» / «−» are for today only). */
+.sets-diff {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+}

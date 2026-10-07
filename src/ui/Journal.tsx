@@ -6,7 +6,7 @@ import { localDate } from '../clock';
 import { isNetworkError, isQueued } from '../offline';
 import { mergeEntries, mergeText } from '../draftMerge';
 import type { Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
-import { Confirm, Sheet, clock, elapsed, fmtDate, fmtSets, useNow } from './common';
+import { Confirm, Sheet, clock, elapsed, fmtDate, fmtSets, plural, useNow } from './common';
 import { ExercisePicker } from './ProgramBuilder';
 import { ExerciseInfoSheet, ExerciseThumb } from './exerciseArt';
 
@@ -1488,6 +1488,21 @@ function JournalBody({
                   );
                 })}
               </div>
+              {/* «+» / «−» change today's sets only; the program keeps its number until saved there. */}
+              {canProgram && !r.extra && r.sets.length !== e.sets && (
+                <div className="sets-diff">
+                  <span className="small">
+                    Сегодня {r.sets.length} {plural(r.sets.length, 'подход', 'подхода', 'подходов')}, в программе {e.sets}
+                  </span>
+                  <button
+                    className="btn btn-sm"
+                    disabled={programBusy}
+                    onClick={() => void saveExerciseToProgram(slotOf(r), { sets: r.sets.length, repMin: e.repMin, repMax: e.repMax, targetRir: e.targetRir })}
+                  >
+                    {programBusy ? 'Сохраняем…' : 'Сохранить в программе'}
+                  </button>
+                </div>
+              )}
               <ExerciseNote value={r.note || ''} previous={e.previousNote} onChange={(v) => setNote(ei, v)} />
             </section>
           );
@@ -1871,7 +1886,7 @@ function ExerciseMenu({
                 Подходы и повторы
                 <small>
                   {entry.sets.length}×{targets.repMin}–{targets.repMax}, RIR {targets.targetRir}
-                  {extra ? ' · на эту тренировку' : ' · сохранится в программе'}
+                  {extra ? ' · на эту тренировку' : ' · в программе насовсем (кнопка «+» у подходов — только сегодня)'}
                 </small>
               </span>
             </button>

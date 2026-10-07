@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import { ArrowDown, ArrowLeft, ArrowUp, Plus, RefreshCw, Search, Trash2, Undo2 } from 'lucide-react';
 import { api, readError } from '../transport';
 import { ExerciseThumb } from './exerciseArt';
-import { DAY_FOCUS, focusDay, refreshExercises, roleOf, templateDays, templates } from '../templates';
+import { DAY_FOCUS, DEFAULT_SETS, focusDay, refreshExercises, roleOf, templateDays, templates } from '../templates';
 import {
   SESSION_SOFT_LIMIT,
   cycleLoad,
@@ -15,7 +15,7 @@ import {
 } from '../trainingRules';
 import { fmtKg } from '../analytics';
 import type { ClientItem, Exercise, Program, ProgramDay, ProgramExercise } from '../types';
-import { Confirm, Sheet, searchKey } from './common';
+import { Confirm, Sheet, plural, searchKey } from './common';
 import { AddExercise } from './Library';
 
 export interface BuilderOptions {
@@ -104,6 +104,11 @@ export function ProgramBuilder({
     patchDay({ ...day, exercises: day.exercises.map((e, j) => (j === i ? { ...e, ...patch } : e)) });
   // Quick rep ranges: one exercise in a tap, or every exercise of the program after a confirmation.
   const [rangeAll, setRangeAll] = useState<[number, number] | null>(null);
+  const [setsAll, setSetsAll] = useState<number | null>(null);
+  const setSetsEverywhere = (sets: number) => {
+    setDays((ds) => ds.map((d) => ({ ...d, exercises: d.exercises.map((e) => ({ ...e, sets })) })));
+    setSetsAll(null);
+  };
   const setRangeEverywhere = ([repMin, repMax]: [number, number]) => {
     setDays((ds) => ds.map((d) => ({ ...d, exercises: d.exercises.map((e) => ({ ...e, repMin, repMax })) })));
     setRangeAll(null);
@@ -123,7 +128,7 @@ export function ProgramBuilder({
     const entry: ProgramExercise = {
       exerciseId: ex.id,
       exerciseName: ex.name,
-      sets: prev?.sets ?? (isolation ? 2 : 3),
+      sets: prev?.sets ?? DEFAULT_SETS,
       repMin: prev?.repMin ?? (isolation ? 10 : 8),
       repMax: prev?.repMax ?? (isolation ? 15 : 12),
       targetRir: prev?.targetRir ?? (isolation ? 1 : 2),
@@ -258,6 +263,26 @@ export function ProgramBuilder({
         )}
       </section>
 
+      {totalExercises > 0 && (
+        <div className="field">
+          <span>Подходы для всей программы</span>
+          <div className="chips range-chips">
+            {[2, 3, 4, 5].map((n) => (
+              <button key={n} className="filter" onClick={() => setSetsAll(n)}>
+                {n}
+              </button>
+            ))}
+          </div>
+          {setsAll !== null && (
+            <Confirm
+              text={`Поставить ${setsAll} ${plural(setsAll, 'подход', 'подхода', 'подходов')} всем упражнениям программы (${totalExercises})? Повторы и RIR не меняются.`}
+              confirmLabel="Поставить"
+              onConfirm={() => setSetsEverywhere(setsAll)}
+              onCancel={() => setSetsAll(null)}
+            />
+          )}
+        </div>
+      )}
       {totalExercises > 0 && (
         <div className="field">
           <span>Повторы для всей программы</span>
