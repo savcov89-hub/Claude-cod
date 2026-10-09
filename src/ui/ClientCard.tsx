@@ -469,7 +469,7 @@ function Overview({ data, clientId, sessionsCount }: { data: TrainerData; client
       <section className="block">
         {confirmArchive ? (
           <Confirm
-            text="Клиент пропадёт из списков и сводки. История и программы сохранятся, вернуть можно из архива."
+            text="Клиент пропадёт из списков и сводки, а в его приложении будет только «Ваш профиль перенесён в архив» — записывать тренировки и замеры он не сможет. История и программы сохранятся, вернуть можно из архива."
             confirmLabel="В архив"
             onConfirm={() => archive(true)}
             onCancel={() => setConfirmArchive(false)}

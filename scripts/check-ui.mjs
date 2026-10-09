@@ -744,6 +744,75 @@ await scenario('23. Замена «насовсем» из зала не тер�
   await p.waitForTimeout(300);
 });
 
+await scenario('24. «Пришёл» с незавершённой тренировкой прошлого визита: клиент остаётся, открыта следующая', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  const today = await p.evaluate(() => {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  });
+  const { clients } = await call('get', '/api/clients');
+  const { programs } = await call('get', '/api/programs');
+  const c = clients.find((x) => !x.checkedInAt && !x.archived && programs.some((pr) => pr.clientId === x.clientId && !pr.archived && pr.days.length > 1));
+  expect(!!c, 'a client away, with a program of several workouts');
+  if (!c) return;
+  const pr = programs.find((x) => x.clientId === c.clientId && !x.archived && x.days.length > 1);
+  const day = pr.days.find((d) => d.id === pr.nextDayId) || pr.days[0];
+  const w = await call('get', '/api/workout/' + pr.trainerId + '/' + pr.id + '/' + day.id);
+  const ex = w.day.exercises[0];
+  // Two days ago: two sets of the program's next workout, never finished.
+  await p.evaluate(async () => (await import('/src/clock.ts')).setClockOffset(-2 * 86400000));
+  await call('post', '/api/draft', {
+    trainerId: pr.trainerId, programId: pr.id, dayId: day.id, baseRevision: w.revision ?? null, base: w.draft?.exercises || [], feedback: '',
+    exercises: [{ exerciseId: ex.exerciseId, exerciseName: ex.exerciseName, sets: [{ weight: 20, reps: 10 }, { weight: 20, reps: 10 }] }],
+  });
+  await p.evaluate(async () => (await import('/src/clock.ts')).setClockOffset(0));
+  const before = (await call('get', '/api/client/' + c.clientId + '/history')).sessions.length;
+  await checkIn(c.clientName);
+  await p.waitForTimeout(4000);
+  const stillHere = (await p.locator('.gym-tab', { hasText: c.clientName }).count()) > 0;
+  expect(stillHere, '«' + c.clientName + '» stays in the gym');
+  const after = (await call('get', '/api/clients')).clients.find((x) => x.clientId === c.clientId);
+  expect(!!after.checkedInAt && (after.visits || []).includes(today), 'still marked here, with today\'s visit', [after.checkedInAt, after.visits?.slice(-2)]);
+  const hist = (await call('get', '/api/client/' + c.clientId + '/history')).sessions;
+  const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
+  expect(hist.length === before + 1 && hist.some((x) => x.dayId === day.id && x.completedAt.slice(0, 10) === twoDaysAgo), 'the leftover workout is in history on its own day', hist.slice(0, 2).map((x) => [x.dayName, x.completedAt]));
+  await p.locator('.gym-tab', { hasText: c.clientName }).first().click();
+  await p.waitForTimeout(800);
+  const text = (await pane().innerText()).replace(/\s+/g, ' ');
+  const next = pr.days[(pr.days.findIndex((d) => d.id === day.id) + 1) % pr.days.length];
+  expect(text.includes(next.name) && /\b0\/\d+/.test(text), 'the next workout is open, nothing done yet (' + next.name + ')', text.slice(0, 160));
+  expect(/прошлая тренировка/.test(await p.innerText('body')), 'a note says the earlier one was recorded');
+});
+
+await scenario('25. Клиент в архиве: в приложении только «профиль перенесён в архив», записи не принимаются', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  const { clients } = await call('get', '/api/clients');
+  const who = clients.find((x) => x.clientName === 'Мария');
+  await call('post', '/api/client/' + who.clientId + '/update', { archived: true });
+  await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
+  await p.waitForTimeout(1200);
+  await p.locator('#demo-client').selectOption({ label: 'Мария' });
+  await p.waitForTimeout(1500);
+  const body = await p.innerText('body');
+  expect(/Ваш профиль перенесён в архив/.test(body) && !(await p.getByRole('button', { name: 'Начать тренировку' }).count()), 'the client sees only «профиль перенесён в архив»', body.slice(0, 200));
+  const hist = await call('get', '/api/my-history');
+  expect(hist.archived === true && hist.sessions.length === 0, 'her history is closed too');
+  const refused = await call('post', '/api/body', { date: '2026-01-01', weight: 70 }).then(() => false, () => true);
+  expect(refused, 'measurements are not accepted');
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  await call('post', '/api/client/' + who.clientId + '/update', { archived: false });
+  await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
+  await p.waitForTimeout(1200);
+  await p.locator('#demo-client').selectOption({ label: 'Мария' });
+  await p.waitForTimeout(1500);
+  expect((await p.getByRole('button', { name: 'Начать тренировку' }).count()) > 0, 'back from the archive: everything is there again');
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

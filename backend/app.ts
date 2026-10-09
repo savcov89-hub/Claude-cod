@@ -330,6 +330,16 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     const coaches = await listAll<CoachRecord>(coachesTable(userId), 50);
     return coaches.map((c) => ({ ...c, clientId: c.clientId || userId }));
   }
+  /**
+   * The client's links to trainers that still count: a trainer who moved the client to the archive is left out
+   * (the app shows «профиль в архиве», nothing can be read or recorded there). `archived` — every link is.
+   */
+  async function activeKeysOf(userId: string) {
+    const all = await keysOf(userId);
+    const active = [];
+    for (const k of all) if (!(await findClient(k.trainerId, k.clientId))?.archived) active.push(k);
+    return Object.assign(active, { archived: all.length > 0 && active.length === 0 });
+  }
   async function hasAssignment(clientId: string, trainerId: string, programId: string) {
     const items = await listAll<AssignmentRecord>(assignmentsTable(clientId));
     return items.some((i) => i.trainerId === trainerId && i.programId === programId);
@@ -346,7 +356,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     } else {
       permitted =
         !program.archived &&
-        (await keysOf(userId)).some((k) => k.trainerId === trainerId && k.clientId === program.clientId);
+        (await activeKeysOf(userId)).some((k) => k.trainerId === trainerId && k.clientId === program.clientId);
     }
     // The hidden program of free workouts is not assigned to the client; its trainer may use it.
     if (!permitted || (!(program.free && profile.role === 'trainer') && !(await hasAssignment(program.clientId, trainerId, programId)))) return null;
@@ -709,7 +719,9 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
       return id && (await findClient(userId, id)) ? { role: profile.role, keys: [id] } : null;
     }
     if (profile?.role !== 'client') return null;
-    const keys = (await keysOf(userId)).map((k) => k.clientId);
+    const active = await activeKeysOf(userId);
+    if (active.archived) return null;
+    const keys = active.map((k) => k.clientId);
     return { role: profile.role, keys: keys.length ? Array.from(new Set(keys)) : [userId] };
   }
   const bodyNumber = (v: unknown, [lo, hi]: readonly [number, number]) => {
@@ -1050,7 +1062,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           trainerId = userId;
           clientId = b.clientId;
         } else if (profile?.role === 'client') {
-          const key = (await keysOf(userId)).find((k) => k.trainerId === b.trainerId);
+          const key = (await activeKeysOf(userId)).find((k) => k.trainerId === b.trainerId);
           trainerId = key?.trainerId;
           clientId = key?.clientId;
         }
@@ -1159,7 +1171,8 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     'GET /api/my-history': [
       requireAuth(),
       async (ctx: Ctx) => {
-        const keys = await keysOf(ctx.user!.userId);
+        const keys = await activeKeysOf(ctx.user!.userId);
+        if (keys.archived) return json({ sessions: [], archived: true });
         const tables = Array.from(new Set([ctx.user!.userId, ...keys.map((k) => k.clientId)]));
         const lists = await Promise.all(tables.map((k) => listAll<SessionRecord>(sessionsTable(k), 400)));
         const sessions = lists.flat().sort((a, b) => b.completedAt.localeCompare(a.completedAt));
@@ -1269,11 +1282,15 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         let keys: string[];
         let role: Role;
         if (record.trainerId && record.clientId) {
-          if (!(await findClient(record.trainerId, record.clientId))) return error('Клиент не найден.', 403);
+          const client = await findClient(record.trainerId, record.clientId);
+          if (!client) return error('Клиент не найден.', 403);
+          if (client.archived) return error('Профиль в архиве у тренера — шаги и вес не записываются.', 403);
           keys = [record.clientId];
           role = 'trainer';
         } else if (record.userId) {
-          const own = (await keysOf(record.userId)).map((k) => k.clientId);
+          const active = await activeKeysOf(record.userId);
+          if (active.archived) return error('Профиль в архиве у тренера — шаги и вес не записываются.', 403);
+          const own = active.map((k) => k.clientId);
           keys = own.length ? Array.from(new Set(own)) : [record.userId];
           role = 'client';
         } else return error('Ключ отключён.', 403);
@@ -1695,7 +1712,9 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const userId = ctx.user!.userId;
         const profile = await getProfile(userId);
         if (profile?.role !== 'client') return error('Доступ только для клиента.', 403);
-        const keys = await keysOf(userId);
+        const keys = await activeKeysOf(userId);
+        // Moved to the archive by every trainer: the app shows only that.
+        if (keys.archived) return json({ coaches: [], programs: [], live: null, archived: true });
         const programs: Array<ProgramRecord & { id: string }> = [];
         const coaches = [];
         for (const key of keys) {

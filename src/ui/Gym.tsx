@@ -6,7 +6,7 @@ import { AUTO_FINISH_IDLE_MS, Journal, type JournalActivity, type JournalFinishe
 import { activeClients, lastVisit, presentClients, programsOf, type TrainerData } from './data';
 import { Confetti, RecordList } from './Records';
 import type { PersonalRecord } from '../analytics';
-import { Avatar, Empty, Sheet, ago, clock, elapsed, useNow } from './common';
+import { Avatar, Empty, Sheet, ago, clock, elapsed, fmtDate, useNow } from './common';
 
 interface Source {
   programId: string;
@@ -251,6 +251,8 @@ export function Gym({
       if (autoTried.current.has(id) || leaving === id) continue;
       const a = activity[id];
       const idle = a?.lastSetAt && a.done > 0 && now - a.lastSetAt > IDLE_MS;
+      // The last set was before this visit's «Пришёл» (a minute of slack for clocks).
+      const leftover = !!idle && !!c.checkedInAt && a!.lastSetAt! < new Date(c.checkedInAt).getTime() - 60000;
       const empty = !a?.done && !!c.checkedInAt && now - new Date(c.checkedInAt).getTime() > EMPTY_MS;
       if (!idle && !empty) continue;
       autoTried.current.add(id);
@@ -271,6 +273,17 @@ export function Gym({
           if (r === 'active') return void autoTried.current.delete(id);
           if (!r) return;
           recorded = true;
+        }
+        // Left from an earlier visit (its last set before today's «Пришёл»): recorded with its own date, the client
+        // stays in the gym and the next workout opens — this visit has only begun.
+        if (leftover) {
+          // Not recorded yet (its journal not ready): tried again in a minute.
+          if (!recorded && finished[id] === undefined) return void autoTried.current.delete(id);
+          await data.reload();
+          nextWorkout(id);
+          autoTried.current.delete(id);
+          setAutoClosed((list) => [...list, { id, name: c.clientName, text: `прошлая тренировка (${fmtDate(new Date(a!.lastSetAt!).toISOString())}) записана в историю, открыта следующая` }]);
+          return;
         }
         await data.setPresence(c, false);
         setFinished((f) => {

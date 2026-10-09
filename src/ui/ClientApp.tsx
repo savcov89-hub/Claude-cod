@@ -28,10 +28,13 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
   const [newRecords, setNewRecords] = useState<PersonalRecord[] | null>(null);
   // A workout the trainer is recording right now.
   const [live, setLive] = useState<{ programId: string; dayId: string; dayName: string; updatedAt: string; updatedByRole?: string } | null>(null);
+  // The trainer moved the profile to the archive: the app shows only that.
+  const [archived, setArchived] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const [p, h] = await Promise.all([api.get('/api/my-programs'), api.get('/api/my-history')]);
+      setArchived(!!p.data.archived);
       setCoaches(p.data.coaches);
       setPrograms(p.data.programs);
       setLive(p.data.live || null);
@@ -58,6 +61,7 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
       try {
         const p = await api.get('/api/my-programs');
         setLive(p.data.live || null);
+        setArchived(!!p.data.archived);
       } catch {
         /* offline: keep what is shown */
       }
@@ -99,6 +103,22 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
       setBusy(false);
     }
   };
+
+  if (archived)
+    return (
+      <div className="app">
+        {header}
+        <main className="main narrow">
+          <section className="block archived-note">
+            <h3>Ваш профиль перенесён в архив</h3>
+            <p className="muted">
+              Тренер перенёс ваш профиль в архив, поэтому программа, тренировки и замеры сейчас недоступны. Если это
+              ошибка или вы возобновляете занятия — напишите тренеру: после возврата из архива всё откроется как было.
+            </p>
+          </section>
+        </main>
+      </div>
+    );
 
   if (journal)
     return (
