@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { BookOpen, ClipboardList, Dumbbell, LayoutDashboard, Users } from 'lucide-react';
 import type { OpenWorkout, Profile, Program } from '../types';
-import { api } from '../transport';
+import { api, readError } from '../transport';
 import { presentClients, useTrainerData } from './data';
 import { Gym } from './Gym';
 import { Dashboard } from './Dashboard';
@@ -14,8 +14,26 @@ import { ProgramBuilder, type BuilderOptions } from './ProgramBuilder';
 type Tab = 'gym' | 'dash' | 'clients' | 'programs' | 'library';
 
 /** `onSwitchRole` offers «Я клиент» while the account is still empty (a role picked by mistake). */
-export function TrainerApp({ header, onSwitchRole }: { profile: Profile; header: ReactNode; onSwitchRole?: () => void }) {
+export function TrainerApp({ profile, header, onSwitchRole }: { profile: Profile; header: ReactNode; onSwitchRole?: () => void }) {
   const data = useTrainerData();
+  // The trainer's own picture (clients see it next to the trainer's name).
+  const [me, setMe] = useState<{ name: string; avatar?: string }>({ name: profile.name, avatar: profile.avatar });
+  useEffect(() => {
+    api
+      .get('/api/me')
+      .then((r) => r.data.profile && setMe({ name: r.data.profile.name, avatar: r.data.profile.avatar }))
+      .catch(() => undefined);
+  }, []);
+  const pickAvatar = async (avatar: string) => {
+    try {
+      const p = (await api.post('/api/profile/avatar', { avatar })).data.profile;
+      setMe({ name: p.name, avatar: p.avatar });
+      return true;
+    } catch (err) {
+      data.setErrorText(readError(err));
+      return false;
+    }
+  };
   const [tab, setTab] = useState<Tab>('gym');
   const [card, setCard] = useState<{ id: string; tab?: string } | null>(null);
   const [builder, setBuilder] = useState<BuilderOptions | null>(null);
@@ -120,7 +138,7 @@ export function TrainerApp({ header, onSwitchRole }: { profile: Profile; header:
                 openInGym={(w) => openInGym(card!.id, w)}
               />
             )}
-            {!overlay && tab === 'dash' && <Dashboard data={data} openClient={openClient} />}
+            {!overlay && tab === 'dash' && <Dashboard data={data} openClient={openClient} me={me} onPickAvatar={pickAvatar} />}
             {!overlay && tab === 'clients' && <Clients data={data} openClient={openClient} />}
             {!overlay && tab === 'programs' && <Programs data={data} openBuilder={openBuilder} />}
             {!overlay && tab === 'library' && <Library exercises={data.exercises} onCreated={data.reload} />}

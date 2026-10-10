@@ -848,6 +848,128 @@ await scenario('25. Клиент в архиве: в приложении тол
   await p.waitForTimeout(800);
 });
 
+await scenario('26. Повторы: две цифры — курсор сам переходит на следующий подход', async () => {
+  await goGym();
+  await p.locator('.gym-tab', { hasText: 'Кира' }).first().click();
+  await p.waitForTimeout(800);
+  const reps = (i, j) => pane().locator('[data-r="' + i + '-' + j + '"]');
+  const active = () => p.evaluate(() => document.activeElement?.getAttribute('data-r') || document.activeElement?.tagName);
+  await reps(0, 0).click();
+  await p.keyboard.type('1');
+  expect((await active()) === '0-0', 'one digit: the cursor stays', await active());
+  await p.keyboard.type('2');
+  await p.waitForTimeout(300);
+  expect((await active()) === '0-1', 'two digits: the cursor is on the next set', await active());
+  await p.keyboard.type('10');
+  await p.waitForTimeout(300);
+  expect((await active()) === '0-2', 'and on to the third set', await active());
+  await p.keyboard.type('9');
+  await p.waitForTimeout(200);
+  await p.keyboard.type('8');
+  await p.waitForTimeout(300);
+  expect((await active()) !== '0-2' && !/^\d/.test(String(await active())), 'the last set: the keyboard closes (nothing left)', await active());
+  await p.waitForTimeout(1500);
+  // All three done: the exercise folds into one line with its sets.
+  const shown = (await pane().locator('.ex').first().innerText()).replace(/\s+/g, ' ');
+  expect(/×12\b.*×10\b.*×98\b/.test(shown), 'the typed reps stay in their sets (12, 10, 98)', shown.slice(0, 160));
+});
+
+await scenario('27. Приложение тренера открыто двое суток: «Пришёл» без «тренировки прошлого визита»', async () => {
+  // A phone of its own, its clock moved on by hand.
+  const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const q = await ctx2.newPage();
+  await q.clock.install();
+  q.on('pageerror', (e) => errs.push('pageerror (27): ' + e.message));
+  await q.goto(APP);
+  await q.waitForTimeout(4000);
+  await q.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await q.waitForTimeout(1000);
+  const NAME = 'Ольга';
+  const qpane = () => q.locator('.gym-pane:not([hidden])');
+  const arrive = async () => {
+    await q.locator('.nav').getByRole('button', { name: 'Зал' }).click();
+    await q.waitForTimeout(600);
+    const add = q.getByRole('button', { name: 'Отметить пришедших' });
+    if (await add.count()) await add.click();
+    await q.locator('.arrival', { hasText: NAME }).first().click();
+    await q.getByRole('button', { name: /Пришли: 1/ }).click();
+    await q.waitForTimeout(1500);
+    await q.locator('.gym-tab', { hasText: NAME }).first().click();
+    await q.waitForTimeout(800);
+  };
+  await arrive();
+  await qpane().locator('.set-row:not(.set-labels):not(.is-done)').first().getByRole('button', { name: /^Подход выполнен/ }).click();
+  await q.waitForTimeout(1500);
+  // «Завершить тренировку», but nobody pressed «Ушёл»: 12 hours on she is no longer in the gym.
+  await qpane().getByRole('button', { name: /Завершить тренировку/ }).click();
+  await q.getByRole('button', { name: 'Завершить', exact: true }).click();
+  await q.waitForTimeout(2000);
+  const cool = q.getByRole('button', { name: 'Круто!' });
+  if (await cool.count()) await cool.first().click();
+  await q.clock.fastForward(13 * 3600000);
+  await q.waitForTimeout(3000);
+  expect(!(await q.locator('.gym-tab', { hasText: NAME }).count()), '12 hours later she is out of the gym by herself');
+  // Two days later, the app never reloaded: «Пришёл» again.
+  await q.clock.fastForward(36 * 3600000);
+  await q.waitForTimeout(2000);
+  await arrive();
+  const tab = (await q.locator('.gym-tab', { hasText: NAME }).first().innerText()).replace(/\s+/g, ' ');
+  expect(/\b1\/\d/.test(tab), 'her tab shows the new workout from its first set', tab);
+  expect(!(await qpane().getByText('Тренировка записана').count()), 'not the last visit\'s «Тренировка записана»');
+  await q.clock.fastForward(65000);
+  await q.waitForTimeout(3000);
+  expect((await q.locator('.gym-tab', { hasText: NAME }).count()) > 0, 'a minute later she is still in the gym');
+  const notes = (await q.locator('.undo-stack').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  expect(!/прошлая тренировка|час без|Записана в историю/.test(notes), 'no note about a workout of the last visit', notes);
+  await ctx2.close();
+});
+
+await scenario('28. Аватарка тренера: «Сводка» → «Моя аватарка», клиенты видят её', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  await p.locator('.nav').getByRole('button', { name: 'Сводка' }).click();
+  await p.waitForTimeout(500);
+  await p.getByRole('button', { name: 'Моя аватарка' }).click();
+  await p.waitForTimeout(400);
+  await p.locator('.sheet').getByRole('button', { name: 'Викинг' }).click();
+  await p.waitForTimeout(800);
+  expect(!(await p.locator('.sheet').count()), 'the picker closes once picked');
+  const me = (await call('get', '/api/me')).profile;
+  expect(me.avatar === 'viking', 'saved in the trainer\'s profile', me);
+  expect((await p.locator('.me .avatar.art').count()) > 0, '«Сводка» shows the picture');
+  await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
+  await p.waitForTimeout(1000);
+  await p.locator('#demo-client').selectOption({ label: 'Анна' });
+  await p.waitForTimeout(1500);
+  const mine = await call('get', '/api/my-programs');
+  expect(mine.coaches?.[0]?.trainerAvatar === 'viking', 'the client gets the trainer\'s picture', mine.coaches?.[0]);
+  expect((await p.locator('.coach-pic .avatar.art').count()) > 0, 'shown next to the trainer\'s name on her program');
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+});
+
+await scenario('29. Тренер поменял имя клиентки — в её приложении новое имя', async () => {
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: 'Анна' }).first().locator('.client-open').click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('button', { name: 'Изменить имя' }).click();
+  await p.locator('#client-rename').fill('Анна Петрова');
+  await p.locator('.rename-form').getByRole('button', { name: 'Сохранить' }).click();
+  await p.waitForTimeout(1200);
+  await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
+  await p.waitForTimeout(1000);
+  await p.locator('#demo-client').selectOption({ label: 'Анна' });
+  await p.waitForTimeout(1200);
+  const me = (await call('get', '/api/me')).profile;
+  expect(me.name === 'Анна Петрова', 'her profile has the new name', me.name);
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  const { clients } = await call('get', '/api/clients');
+  const anna = clients.find((x) => x.clientName === 'Анна Петрова');
+  if (anna) await call('post', '/api/client/' + anna.clientId + '/update', { clientName: 'Анна' });
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

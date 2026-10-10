@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronRight, Play } from 'lucide-react';
 import { api, inGym, isLocal, readError } from '../transport';
 import { onRemoteChange } from '../local/runtime';
@@ -55,26 +55,43 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
       off();
     };
   }, [load]);
-  // While the home screen is open, notice a workout the trainer starts recording.
+  // While the home screen is open (and as soon as the app is opened again): a workout the trainer starts
+  // recording shows up, and one the trainer has finished is gone at once — the next workout and the history follow.
+  const programsRef = useRef(programs);
+  programsRef.current = programs;
   useEffect(() => {
     if (journal) return;
-    const t = window.setInterval(async () => {
-      if (document.visibilityState !== 'visible') return;
+    const progress = (list: Program[]) => list.map((x) => x.id + ':' + x.nextDayId + ':' + (x.lastCompletedAt || '')).join('|');
+    let busy = false;
+    const refresh = async () => {
+      if (document.visibilityState !== 'visible' || busy) return;
+      busy = true;
       try {
         const p = await api.get('/api/my-programs');
         setLive(p.data.live || null);
         setArchived(!!p.data.archived);
-        // Recorded by the server meanwhile: the history and the next workout change.
-        if (p.data.autoFinished?.length) {
-          await load();
-          setJustDone(autoFinishedText(p.data.autoFinished));
+        if (!p.data.archived) {
+          setCoaches(p.data.coaches);
+          // A workout recorded meanwhile (by the trainer, or by itself): the history too.
+          if (progress(p.data.programs) !== progress(programsRef.current)) setSessions((await api.get('/api/my-history')).data.sessions);
+          setPrograms(p.data.programs);
         }
+        if (p.data.autoFinished?.length) setJustDone(autoFinishedText(p.data.autoFinished));
       } catch {
         /* offline: keep what is shown */
+      } finally {
+        busy = false;
       }
-    }, 20000);
-    return () => window.clearInterval(t);
-  }, [journal, load]);
+    };
+    const t = window.setInterval(() => void refresh(), 20000);
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [journal]);
   const liveProgram = live ? programs.find((p) => p.id === live.programId) : null;
 
   const connect = async () => {
@@ -234,7 +251,12 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
                     const next = p.days.find((d) => d.id === p.nextDayId) || p.days[0];
                     return (
                       <article className="program next-card" key={p.id}>
-                        <span className="eyebrow">
+                        <span className="eyebrow coach-line">
+                          {coaches.some((c) => c.trainerId === p.trainerId && c.trainerAvatar) && (
+                            <span className="coach-pic">
+                              <Avatar name={p.trainerName || 'Т'} avatar={coaches.find((c) => c.trainerId === p.trainerId)?.trainerAvatar} />
+                            </span>
+                          )}
                           {p.trainerName} · {p.name}
                         </span>
                         <h3>Следующая: {next.name}</h3>

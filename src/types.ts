@@ -6,6 +6,8 @@ export interface Profile {
   role: Role;
   name: string;
   email: string;
+  /** Trainer: own picture (src/ui/avatars.tsx). */
+  avatar?: string;
 }
 export interface ClientNotes {
   goal?: string;
@@ -165,4 +167,6 @@ export interface Coach {
   visits?: string[];
   /** The picture the trainer chose for this client. */
   avatar?: string;
+  /** The trainer's own picture. */
+  trainerAvatar?: string;
 }

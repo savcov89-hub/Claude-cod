@@ -1,4 +1,4 @@
-import { AvatarArt, isAvatar } from './avatars';
+import { AVATARS, AvatarArt, isAvatar } from './avatars';
 import { useEffect, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { SeriesPoint, Trend } from '../analytics';
@@ -108,6 +108,36 @@ export function Empty({ title, text, action }: { title: string; text?: string; a
       {text && <p>{text}</p>}
       {action}
     </div>
+  );
+}
+
+/** Ready-made pictures and the initial letter, the current one marked. */
+export function AvatarPicker({
+  title = 'Аватарка',
+  name,
+  current,
+  onPick,
+  onClose,
+}: {
+  title?: string;
+  name: string;
+  current?: string;
+  onPick: (avatar: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Sheet title={title} onClose={onClose}>
+      <div className="avatar-grid">
+        <button className={'avatar-choice' + (!isAvatar(current) ? ' on' : '')} aria-label="Буква имени" onClick={() => onPick('')}>
+          <span className="avatar avatar-letter">{name.slice(0, 1).toUpperCase()}</span>
+        </button>
+        {AVATARS.map((a) => (
+          <button key={a.id} className={'avatar-choice' + (current === a.id ? ' on' : '')} aria-label={a.label} onClick={() => onPick(a.id)}>
+            <AvatarArt id={a.id} size={60} />
+          </button>
+        ))}
+      </div>
+    </Sheet>
   );
 }
 

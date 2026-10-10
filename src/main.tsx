@@ -76,6 +76,28 @@ if (import.meta.env.PROD && import.meta.env.VITE_LOCAL_ONLY !== "1" && "serviceW
   });
 }
 
+// A phone keeps the app open for days. Coming back to it after a while, a newer published version is loaded at once
+// (entries not saved yet stay on the phone and are sent after), so fixes reach every phone without reinstalling.
+if (import.meta.env.PROD && import.meta.env.VITE_LOCAL_ONLY !== "1") {
+  const running = document.querySelector('script[type="module"][src*="assets/"]')?.getAttribute("src");
+  let hiddenAt = 0;
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState === "hidden") {
+      hiddenAt = Date.now();
+      return;
+    }
+    if (!running || !hiddenAt || Date.now() - hiddenAt < 30000) return;
+    hiddenAt = 0;
+    try {
+      const html = await (await fetch("./", { cache: "no-store" })).text();
+      const published = html.match(/<script[^>]*type="module"[^>]*src="([^"]+)"/)?.[1];
+      if (published && published !== running) location.reload();
+    } catch {
+      /* offline: the version on the phone */
+    }
+  });
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <CrashScreen>

@@ -4,12 +4,11 @@ import { api, inGym, readError } from '../transport';
 import { inviteLink } from '../invite';
 import type { AutoFinished, OpenWorkout, Program, Session } from '../types';
 import { activeClients, lastVisit, programsOf, visits30, type TrainerData } from './data';
-import { Avatar, Confirm, Empty, Sheet, VisitGrid, ago, autoFinishedText, fmtDate, fmtDateTime } from './common';
+import { Avatar, AvatarPicker, Confirm, Empty, Sheet, VisitGrid, ago, autoFinishedText, fmtDate, fmtDateTime } from './common';
 import { ProgressView } from './Progress';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
 import { AUTO_FINISH_IDLE_MS, Journal } from './Journal';
-import { AVATARS, AvatarArt } from './avatars';
 import { RecordsSheet } from './Records';
 import { copyLater, programText } from './programText';
 import type { PersonalRecord } from '../analytics';
@@ -167,23 +166,7 @@ export function ClientCard({
       </div>
       {newRecords && <RecordsSheet records={newRecords} onClose={() => setNewRecords(null)} />}
       {pickingAvatar && (
-        <Sheet title="Аватарка" onClose={() => setPickingAvatar(false)}>
-          <div className="avatar-grid">
-            <button className={'avatar-choice' + (!client.avatar ? ' on' : '')} aria-label="Буква имени" onClick={() => void chooseAvatar('')}>
-              <span className="avatar avatar-letter">{client.clientName.slice(0, 1).toUpperCase()}</span>
-            </button>
-            {AVATARS.map((a) => (
-              <button
-                key={a.id}
-                className={'avatar-choice' + (client.avatar === a.id ? ' on' : '')}
-                aria-label={a.label}
-                onClick={() => void chooseAvatar(a.id)}
-              >
-                <AvatarArt id={a.id} size={60} />
-              </button>
-            ))}
-          </div>
-        </Sheet>
+        <AvatarPicker name={client.clientName} current={client.avatar} onPick={(a) => void chooseAvatar(a)} onClose={() => setPickingAvatar(false)} />
       )}
       {renaming !== null && (
         <form

@@ -157,6 +157,22 @@ function RealApp() {
     })();
   }, []);
 
+  // Back in the app: the name (the trainer may have changed it) and the picture as they are now.
+  useEffect(() => {
+    if (!user) return;
+    const onShow = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const fresh = (await api.get('/api/me')).data.profile as Profile | null;
+        if (fresh) setProfile((cur) => (cur && cur.role === fresh.role && cur.name === fresh.name && cur.avatar === fresh.avatar ? cur : fresh));
+      } catch {
+        /* offline: as it was */
+      }
+    };
+    document.addEventListener('visibilitychange', onShow);
+    return () => document.removeEventListener('visibilitychange', onShow);
+  }, [user]);
+
   const google = async () => {
     setBusy(true);
     setErr('');

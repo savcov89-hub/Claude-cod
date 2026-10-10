@@ -544,7 +544,11 @@ async function main() {
     const h2 = await history(s);
     expect(h2.sessions.length === 1 && doneOf(h2.sessions[0].exercises)['leg-press']?.length === 3, 'still one workout, with the late set', h2.sessions.map((x: any) => doneOf(x.exercises)));
     const w = await call(s.trainer, 'GET', `/api/workout/${s.trainer}/${s.program.id}/day-1`);
-    expect(!w.draft && !w.autoFinished, 'the day opens anew', w.draft);
+    expect(!w.draft, 'the day opens anew', w.draft);
+    expect(w.autoFinished?.[0]?.dayId === 'day-1', 'a moment later it still says the workout was recorded by itself', w.autoFinished);
+    at('2026-10-02T10:05:00Z');
+    const w3 = await call(s.trainer, 'GET', `/api/workout/${s.trainer}/${s.program.id}/day-1`);
+    expect(!w3.autoFinished, 'minutes later it is not said again', w3.autoFinished);
     at('2026-10-02T07:00:00Z');
   }
 

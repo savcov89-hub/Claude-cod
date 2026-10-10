@@ -2,7 +2,8 @@ import { ChevronRight } from 'lucide-react';
 import { daysSince } from '../analytics';
 import type { ClientItem } from '../types';
 import { activeClients, lastVisit, presentClients, programsOf, visits30, type TrainerData } from './data';
-import { Avatar, Empty, ago, plural } from './common';
+import { useState } from 'react';
+import { Avatar, AvatarPicker, Empty, ago, plural } from './common';
 
 interface Flag {
   tone: 'good' | 'warn' | 'bad' | 'info';
@@ -20,7 +21,19 @@ function flagsOf(c: ClientItem, hasProgram: boolean): Flag[] {
   return out;
 }
 
-export function Dashboard({ data, openClient }: { data: TrainerData; openClient: (id: string, tab?: string) => void }) {
+export function Dashboard({
+  data,
+  openClient,
+  me,
+  onPickAvatar,
+}: {
+  data: TrainerData;
+  openClient: (id: string, tab?: string) => void;
+  /** The trainer: own name and picture (tap to change it). */
+  me?: { name: string; avatar?: string };
+  onPickAvatar?: (avatar: string) => Promise<boolean>;
+}) {
+  const [picking, setPicking] = useState(false);
   const clients = activeClients(data.clients);
   if (!clients.length)
     return <Empty title="Пока нет клиентов" text="Добавьте первого клиента во вкладке «Клиенты»." />;
@@ -46,11 +59,29 @@ export function Dashboard({ data, openClient }: { data: TrainerData; openClient:
   return (
     <div className="dash">
       <div className="section-head">
-        <div>
-          <h2>Сводка</h2>
-          <p className="muted">Что происходит с клиентами и на что обратить внимание.</p>
+        <div className="me">
+          {me && (
+            <button className="avatar-btn" aria-label="Моя аватарка" onClick={() => setPicking(true)}>
+              <Avatar name={me.name} avatar={me.avatar} />
+            </button>
+          )}
+          <div>
+            <h2>Сводка</h2>
+            <p className="muted">Что происходит с клиентами и на что обратить внимание.</p>
+          </div>
         </div>
       </div>
+      {picking && me && onPickAvatar && (
+        <AvatarPicker
+          title="Моя аватарка — её видят клиенты"
+          name={me.name}
+          current={me.avatar}
+          onPick={async (a) => {
+            if (await onPickAvatar(a)) setPicking(false);
+          }}
+          onClose={() => setPicking(false)}
+        />
+      )}
       <div className="kpis">
         <div className="kpi">
           <span>Сейчас в зале</span>

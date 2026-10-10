@@ -2962,6 +2962,17 @@ h2 {
   height: 52px;
   font-size: 18px;
 }
+/* Client home: the trainer's picture next to the trainer's name */
+.coach-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.coach-pic .avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+}
 /* Workout focus in the program editor: one row that scrolls sideways */
 .focus-chips {
   flex-wrap: nowrap;

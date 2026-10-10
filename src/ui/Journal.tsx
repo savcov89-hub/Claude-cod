@@ -854,6 +854,22 @@ function JournalBody({
     }
     update(next);
   };
+  /**
+   * Two digits of reps typed (12, 10…): the cursor goes on to the next set's reps; after the last set, to the first
+   * open set of the next exercise; with nothing left, the keyboard closes.
+   */
+  const toNextReps = (ei: number, si: number) => {
+    const root = rootRef.current;
+    if (!root) return;
+    const field = (i: number, j: number) => root.querySelector<HTMLInputElement>('[data-r="' + i + '-' + j + '"]');
+    let next = field(ei, si + 1);
+    for (let i = ei + 1; !next && i < latest.current.length; i++) {
+      const j = latest.current[i].sets.findIndex((x) => x.reps === 0);
+      if (j >= 0 && !latest.current[i].skipped) next = field(i, j);
+    }
+    if (next) next.focus();
+    else (document.activeElement as HTMLElement | null)?.blur();
+  };
   // A double tap on ✓ (wet fingers, a laggy phone) marks the set once instead of marking and clearing it.
   const lastToggle = useRef<{ key: string; at: number } | null>(null);
   const toggleDone = (ei: number, si: number, confirm = false) => {
@@ -1488,10 +1504,13 @@ function JournalBody({
                         }}
                       />
                       <NumberInput
+                        dataR={ei + '-' + si}
                         label={e.exerciseName + ', подход ' + (si + 1) + ', повторы'}
                         value={s.reps || null}
                         placeholder={String(target)}
                         onChange={(v) => patchSet(ei, si, { reps: v ?? 0 })}
+                        fillAt={2}
+                        onFilled={() => toNextReps(ei, si)}
                       />
                       {showRir && (
                         <NumberInput
@@ -2175,10 +2194,17 @@ function NumberInput({
   showZero = false,
   placeholder = '—',
   dataW,
+  dataR,
   nudge = false,
+  fillAt,
+  onFilled,
 }: {
   dataW?: string;
+  dataR?: string;
   nudge?: boolean;
+  /** Typed up to this many digits: `onFilled` (e.g. the cursor goes on to the next set). */
+  fillAt?: number;
+  onFilled?: () => void;
   value: number | null;
   onChange: (n: number | null) => void;
   label: string;
@@ -2190,7 +2216,10 @@ function NumberInput({
   const show = (v: number | null) => (v === null || (v === 0 && !showZero) ? '' : String(v).replace('.', ','));
   const [textValue, setText] = useState(show(value));
   const focused = useRef(false);
+  // Typed and passed on, not back in `value` yet: a field left right away still shows it.
+  const sent = useRef<number | null | undefined>(undefined);
   useEffect(() => {
+    sent.current = undefined;
     if (!focused.current) setText(show(value));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
@@ -2198,6 +2227,7 @@ function NumberInput({
     <input
       className={'num-input num' + (small ? ' small' : '') + (nudge ? ' nudge' : '')}
       data-w={dataW}
+      data-r={dataR}
       aria-label={label}
       inputMode={decimal ? 'decimal' : 'numeric'}
       value={textValue}
@@ -2208,15 +2238,18 @@ function NumberInput({
       }}
       onBlur={() => {
         focused.current = false;
-        setText(show(value));
+        setText(show(sent.current !== undefined ? sent.current : value));
       }}
       onChange={(e) => {
         const raw = e.target.value.replace(',', '.');
         if (!(decimal ? /^\d{0,4}(\.\d{0,2})?$/ : /^\d{0,4}$/).test(raw)) return;
+        const filled = !!fillAt && raw.length >= fillAt && textValue.length < fillAt;
         setText(e.target.value);
         // The digit shows at once; the rest of the journal follows without holding up the next key.
         const n = raw === '' ? null : Number(raw);
+        sent.current = n;
         startTransition(() => onChange(n));
+        if (filled) onFilled?.();
       }}
     />
   );

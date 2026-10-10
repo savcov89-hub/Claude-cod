@@ -64,6 +64,8 @@ interface Profile {
   role: Role;
   name: string;
   email: string;
+  /** Trainer: own picture (src/ui/avatars.tsx). */
+  avatar?: string;
 }
 export interface ClientNotes {
   goal?: string;
@@ -322,7 +324,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
   }
   async function getProfile(userId: string): Promise<Profile | null> {
     const p = await first<Profile>(profileTable(userId));
-    return p ? { role: p.role, name: p.name, email: p.email } : null;
+    return p ? { role: p.role, name: p.name, email: p.email, ...(p.avatar ? { avatar: p.avatar } : {}) } : null;
   }
   const clientsOf = (trainerId: string) => listAll<ClientRecord>(clientsTable(trainerId));
   async function findClient(trainerId: string, clientId: string) {
@@ -1060,6 +1062,21 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
      * A role picked by mistake can be changed while the account is still empty:
      * a trainer without clients or programs, a client without trainers or workouts.
      */
+    /** The trainer's own picture (one of src/ui/avatars.tsx; empty for the initial letter). Clients see it too. */
+    'POST /api/profile/avatar': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const current = await first<Profile>(profileTable(ctx.user!.userId));
+        if (!current || current.role !== 'trainer') return error('Аватарку выбирает тренер.', 403);
+        const avatar = typeof ctx.body?.avatar === 'string' ? ctx.body.avatar : '';
+        if (avatar && !/^[a-z-]{1,24}$/.test(avatar)) return error('Нет такой аватарки.', 400);
+        const { id, avatar: _old, ...rest } = current;
+        const record: Profile = { ...rest, ...(avatar ? { avatar } : {}) };
+        const [ok] = await db.update(profileTable(ctx.user!.userId), [{ id, record }]);
+        return ok ? json({ profile: await getProfile(ctx.user!.userId) }) : error('Не удалось сохранить.', 500);
+      },
+    ],
+
     'POST /api/profile/role': [
       requireAuth(),
       async (ctx: Ctx) => {
@@ -1157,6 +1174,13 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
               programsTable(ctx.user!.userId),
               programs.map(({ id, ...record }) => ({ id, record: { ...record, clientName: patch.clientName! } })),
             );
+          // The client's own app shows the new name too.
+          const uid = client.userId === undefined ? client.clientId : client.userId;
+          const own = uid ? await first<Profile>(profileTable(uid)) : undefined;
+          if (uid && own && own.role === 'client' && own.name !== patch.clientName) {
+            const { id, ...record } = own;
+            await db.update(profileTable(uid), [{ id, record: { ...record, name: patch.clientName } }]);
+          }
         }
         return ok ? json({ saved: true }) : error('Не удалось сохранить.', 500);
       },
@@ -1968,9 +1992,11 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
               programs.push({ ...program, id: a.programId });
           }
           const client = await findClient(key.trainerId, key.clientId);
+          const trainerAvatar = (await getProfile(key.trainerId))?.avatar;
           coaches.push({
             trainerId: key.trainerId,
             trainerName: key.trainerName,
+            ...(trainerAvatar ? { trainerAvatar } : {}),
             checkedInAt: client?.checkedInAt || null,
             visits: client?.visits || [],
             ...(client?.avatar ? { avatar: client.avatar } : {}),

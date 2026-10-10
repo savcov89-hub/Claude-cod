@@ -8,6 +8,9 @@ import { Confetti, RecordList } from './Records';
 import type { PersonalRecord } from '../analytics';
 import { Avatar, Empty, Sheet, ago, autoFinishedText, clock, elapsed, fmtDate, useNow } from './common';
 
+/** What a client's journal reported, and when. */
+type GymActivity = JournalActivity & { at: number };
+
 interface Source {
   programId: string;
   dayId: string;
@@ -43,7 +46,7 @@ export function Gym({
   const present = presentClients(data.clients);
   const [active, setActive] = useState<string | null>(null);
   const [sources, setSources] = useState<Record<string, Source>>({});
-  const [activity, setActivity] = useState<Record<string, JournalActivity>>({});
+  const [activity, setActivity] = useState<Record<string, GymActivity>>({});
   const [finished, setFinished] = useState<Record<string, number>>({});
   const [picker, setPicker] = useState(false);
   const [leaving, setLeaving] = useState<string | null>(null);
@@ -103,7 +106,7 @@ export function Gym({
             const prev = cur[id];
             if (prev && prev.done === a.done && prev.total === a.total && prev.lastSetAt === a.lastSetAt && prev.current === a.current)
               return cur;
-            return { ...cur, [id]: a };
+            return { ...cur, [id]: { ...a, at: Date.now() } };
           }),
         register: (f) => {
           finishers.current[id] = f;
@@ -249,7 +252,9 @@ export function Gym({
     for (const c of shown) {
       const id = c.clientId;
       if (autoTried.current.has(id) || leaving === id) continue;
-      const a = activity[id];
+      // Reported before this visit's «Пришёл» (the app stayed open since the last visit): not this visit's workout.
+      const reported = activity[id];
+      const a = reported && c.checkedInAt && reported.at < new Date(c.checkedInAt).getTime() - 5000 ? undefined : reported;
       const idle = a?.lastSetAt && a.done > 0 && now - a.lastSetAt > IDLE_MS;
       // The last set was before this visit's «Пришёл» (a minute of slack for clocks).
       const leftover = !!idle && !!c.checkedInAt && a!.lastSetAt! < new Date(c.checkedInAt).getTime() - 60000;
@@ -333,6 +338,35 @@ export function Gym({
     for (const c of data.clients) if (c.autoFinished?.length) autoFinishedRef.current(c.clientId, c.autoFinished);
   }, [data.clients]);
   const [records, setRecords] = useState<Record<string, PersonalRecord[]>>({});
+  /**
+   * Nothing of an earlier visit stays with a client: when they are no longer in the gym (by «Ушёл», on another
+   * phone, or 12 hours on) the sets done, «Тренировка записана» and the day picked go; when they come again the
+   * same is checked once more. Otherwise, with the app left open for days, «Пришёл» showed the last visit's workout
+   * as if it were under way, and «час без новых подходов» took the client out of the gym.
+   */
+  const wasPresent = useRef<string[]>([]);
+  useEffect(() => {
+    const now = presentKey.split(',').filter(Boolean);
+    const gone = wasPresent.current.filter((id) => !now.includes(id));
+    const came = now.filter((id) => !wasPresent.current.includes(id));
+    wasPresent.current = now;
+    if (!gone.length && !came.length) return;
+    const drop =
+      (ids: string[]) =>
+      <T,>(m: Record<string, T>) => {
+        if (!ids.some((id) => id in m)) return m;
+        const next = { ...m };
+        for (const id of ids) delete next[id];
+        return next;
+      };
+    const all = [...gone, ...came];
+    setActivity(drop(all));
+    setFinished(drop(all));
+    setRecords(drop(all));
+    // The day picked stays for one who just came (a workout opened from the client card).
+    setSources(drop(gone));
+    for (const id of all) autoTried.current.delete(id);
+  }, [presentKey]);
   const onCompleted = useCallback(
     (clientId: string, sets: number, recs: PersonalRecord[] = []) => {
       setFinished((f) => ({ ...f, [clientId]: sets }));

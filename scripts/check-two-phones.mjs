@@ -289,6 +289,24 @@ const herSets = w2.draft?.exercises?.[2]?.sets?.filter((x) => x.reps > 0).length
 expect(herSets > 0, `her ticked sets are still there (${herSets})`, w2.draft?.exercises?.[2]);
 expect(w2.draft?.exercises?.[0]?.exerciseId === saved.exerciseId, 'and the open workout already has the new exercise', w2.draft?.exercises?.[0]);
 
+console.log('6. Клиентка на главном экране, тренер завершает — у неё сразу следующая тренировка; новое имя от тренера');
+await C.p.goto(APP);
+await C.p.waitForTimeout(3000);
+const homeBefore = (await C.p.innerText('.main')).replace(/\s+/g, ' ');
+expect(/Тренировка идёт/.test(homeBefore) && homeBefore.includes('Следующая: ' + dayNow.name), 'her home: the workout under way, «Следующая: ' + dayNow.name + '»', homeBefore.slice(0, 200));
+await journal(T.p).getByRole('button', { name: /Завершить тренировку/ }).click();
+await T.p.getByRole('button', { name: 'Завершить', exact: true }).click();
+await sleep(2500);
+await api(s.ct, 'POST', `/api/client/${s.clientId}/update`, { clientName: 'Ольга Новикова' });
+// She comes back to the app (it was in the background).
+await C.p.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+const nextDay = prog.days[(prog.days.findIndex((d) => d.id === dayNow.id) + 1) % prog.days.length];
+ms = await within(async () => {
+  const t = (await C.p.innerText('.main')).replace(/\s+/g, ' ');
+  return !/Тренировка идёт/.test(t) && t.includes('Следующая: ' + nextDay.name) && t.includes('Ольга Новикова');
+}, 8000);
+expect(ms >= 0, `at once: no «Тренировка идёт», «Следующая: ${nextDay.name}», her new name (${ms} ms)`, (await C.p.innerText('.main')).replace(/\s+/g, ' ').slice(0, 200));
+
 console.log(errs.length ? 'Замечания:\n  ' + errs.join('\n  ') : 'Ошибок страницы нет');
 console.log(`\n${checks} проверок, ошибок: ${failures}`);
 await browser.close();
