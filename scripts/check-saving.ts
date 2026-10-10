@@ -126,7 +126,7 @@ class Phone {
   }
 }
 
-async function setup(tag: string, exercises = ['leg-press', 'lat-pulldown', 'seated-leg-curl', 'lateral-raise']) {
+async function setup(tag: string, exercises = ['leg-press', 'lat-pulldown', 'seated-leg-curl', 'lateral-raise'], day2 = ['bench-press']) {
   const trainer = 'tr-' + tag;
   const clientUser = 'cl-' + tag;
   await call(trainer, 'POST', '/api/profile', { role: 'trainer', name: 'Тренер ' + tag });
@@ -139,7 +139,7 @@ async function setup(tag: string, exercises = ['leg-press', 'lat-pulldown', 'sea
     name: 'Программа',
     days: [
       { id: 'day-1', name: 'А', exercises: exercises.map((id) => ({ exerciseId: id, sets: 3, repMin: 8, repMax: 12, targetRir: 2 })) },
-      { id: 'day-2', name: 'Б', exercises: [{ exerciseId: 'bench-press', sets: 3, repMin: 6, repMax: 10, targetRir: 2 }] },
+      { id: 'day-2', name: 'Б', exercises: day2.map((id) => ({ exerciseId: id, sets: 3, repMin: 6, repMax: 10, targetRir: 2 })) },
     ],
   });
   const w = { trainerId: trainer, programId: program.id, dayId: 'day-1' };
@@ -503,6 +503,108 @@ async function main() {
     s.C.set('leg-press', 1, { weight: 80, reps: 9 });
     await s.C.save();
     expect(!!(await present()).checkedInAt, 'a new set marks her in the gym again');
+  }
+
+  const at = (iso: string) => setClockOffset(Date.parse(iso) - Date.now());
+  console.log('18. Тренировку бросили незавершённой: через 3 часа сервер записывает её сам');
+  {
+    const s = await setup('r');
+    await s.C.open();
+    s.C.set('leg-press', 0, { weight: 80, reps: 10 });
+    s.C.set('leg-press', 1, { weight: 80, reps: 9 });
+    s.C.fb = 'тяжело';
+    await s.C.save();
+    await s.T.open();
+    at('2026-10-02T09:59:00Z');
+    let mine = await call(s.clientUser, 'GET', '/api/my-programs');
+    expect(!mine.autoFinished && mine.live?.dayId === 'day-1', 'under 3 hours: still going on', mine.live);
+    expect((await history(s)).open.length === 1, 'under 3 hours: still open in the card');
+    at('2026-10-02T10:01:00Z');
+    mine = await call(s.clientUser, 'GET', '/api/my-programs');
+    const f = mine.autoFinished?.[0];
+    expect(mine.autoFinished?.length === 1 && f.dayId === 'day-1' && f.done === 2, 'over 3 hours: recorded by itself', mine.autoFinished);
+    expect(f && Math.abs(Date.parse(f.completedAt) - Date.parse('2026-10-02T07:00:00Z')) < 5000, 'dated to its last save', f?.completedAt);
+    expect(!mine.live, 'not going on any more', mine.live);
+    expect(mine.programs.find((p: any) => p.id === s.program.id)?.nextDayId === 'day-2', 'the next workout is the next day');
+    const h = await history(s);
+    expect(h.sessions.length === 1 && h.open.length === 0, 'in the history, nothing hanging', { sessions: h.sessions.length, open: h.open });
+    const rec = h.sessions[0];
+    expect(rec?.autoFinished === true && rec.recordedByRole === 'client' && rec.feedback === 'тяжело', 'marked as finished by itself', rec);
+    expect(doneOf(rec?.exercises || [])['leg-press']?.join() === '80x10,80x9', 'with its sets', rec?.exercises);
+    const again = await call(s.clientUser, 'GET', '/api/my-programs');
+    expect(!again.autoFinished, 'recorded once');
+    const prev = await call(s.trainer, 'GET', `/api/previous/${s.trainer}/${s.program.id}/leg-press`);
+    expect(prev.previousSets?.length === 2, 'the weight hints come from it', prev);
+    const c = (await call(s.trainer, 'GET', '/api/clients')).clients.find((x: any) => x.clientId === s.clientId);
+    expect(c.needsReview === true && (c.visits || []).includes('2026-10-02'), 'the trainer sees it to review, the visit counted', c);
+    // The trainer's phone still open on it: a late set goes into that record.
+    s.T.set('leg-press', 2, { weight: 80, reps: 8 });
+    const late = await s.T.save();
+    expect(!!late.closed && !!late.amended, 'a late set joins the recorded workout', late);
+    const h2 = await history(s);
+    expect(h2.sessions.length === 1 && doneOf(h2.sessions[0].exercises)['leg-press']?.length === 3, 'still one workout, with the late set', h2.sessions.map((x: any) => doneOf(x.exercises)));
+    const w = await call(s.trainer, 'GET', `/api/workout/${s.trainer}/${s.program.id}/day-1`);
+    expect(!w.draft && !w.autoFinished, 'the day opens anew', w.draft);
+    at('2026-10-02T07:00:00Z');
+  }
+
+  console.log('19. Старую брошенную записали после более новой: подсказки и следующий день — по новой');
+  {
+    const s = await setup('s', ['leg-press', 'lat-pulldown'], ['leg-press', 'bench-press']);
+    await s.T.open();
+    s.T.set('leg-press', 0, { weight: 100, reps: 10 });
+    await s.T.save();
+    at('2026-10-02T08:00:00Z');
+    const T2 = new Phone(s.trainer, { ...s.w, dayId: 'day-2' });
+    const w2 = await T2.open();
+    expect(!w2.autoFinished, 'an hour later the first one is not touched');
+    T2.set('leg-press', 0, { weight: 110, reps: 8 });
+    const fin = await T2.finish();
+    expect(!!fin.sessionId, 'the newer one finished', fin);
+    at('2026-10-02T11:30:00Z');
+    const h = await history(s);
+    expect(h.autoFinished?.length === 1 && h.autoFinished[0].dayId === 'day-1', 'the card records the old one', h.autoFinished);
+    expect(h.sessions.map((x: any) => x.dayId).join() === 'day-2,day-1', 'both in the history, newest first', h.sessions.map((x: any) => x.dayId));
+    const { programs } = await call(s.trainer, 'GET', '/api/programs');
+    expect(programs.find((p: any) => p.id === s.program.id)?.nextDayId === 'day-1', 'the next day follows the newer workout');
+    const prev = await call(s.trainer, 'GET', `/api/previous/${s.trainer}/${s.program.id}/leg-press`);
+    expect(prev.previousSets?.[0]?.weight === 110, 'the weight hint is the newer one', prev.previousSets);
+    const c = (await call(s.trainer, 'GET', '/api/clients')).clients.find((x: any) => x.clientId === s.clientId);
+    expect(c.latestSessionId === fin.sessionId, 'the latest workout stays the newer one', c.latestSessionId);
+    at('2026-10-02T07:00:00Z');
+  }
+
+  console.log('20. Пришёл с тренировкой, брошенной на прошлой неделе: её записывают, в зале — следующая');
+  {
+    const s = await setup('t');
+    await s.T.open();
+    s.T.set('leg-press', 0, { weight: 100, reps: 10 });
+    await s.T.save();
+    at('2026-10-09T07:00:00Z');
+    await call(s.trainer, 'POST', '/api/attendance', { clientId: s.clientId, present: true, localDate: '2026-10-09' });
+    const c = (await call(s.trainer, 'GET', '/api/clients')).clients.find((x: any) => x.clientId === s.clientId);
+    expect(c.autoFinished?.length === 1 && !c.live, 'recorded with the client list, nothing under way', { auto: c.autoFinished, live: c.live });
+    expect(!!c.checkedInAt, 'the client stays in the gym');
+    expect((c.visits || []).includes('2026-10-02') && (c.visits || []).includes('2026-10-09'), 'both visits counted', c.visits);
+    const { programs } = await call(s.trainer, 'GET', '/api/programs');
+    expect(programs.find((p: any) => p.id === s.program.id)?.nextDayId === 'day-2', 'the gym opens the next day');
+    const h = await history(s);
+    expect(Math.abs(Date.parse(h.sessions[0]?.completedAt) - Date.parse('2026-10-02T07:00:00Z')) < 5000, 'dated last week', h.sessions[0]?.completedAt);
+    at('2026-10-02T07:00:00Z');
+  }
+
+  console.log('21. Без выполненных подходов (только комментарий) ничего не записывается');
+  {
+    const s = await setup('u');
+    await s.C.open();
+    s.C.fb = 'опоздаю';
+    s.C.pending = true;
+    await s.C.save();
+    at('2026-10-02T12:00:00Z');
+    const mine = await call(s.clientUser, 'GET', '/api/my-programs');
+    expect(!mine.autoFinished, 'nothing recorded', mine.autoFinished);
+    expect((await history(s)).sessions.length === 0, 'the history stays empty');
+    at('2026-10-02T07:00:00Z');
   }
 
   console.log(`\n${checks} проверок, ошибок: ${failures}`);

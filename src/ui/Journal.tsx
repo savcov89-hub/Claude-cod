@@ -5,8 +5,8 @@ import { equipmentOf, fmtKg, isStack, suggestNext, weightUnit, type PersonalReco
 import { localDate } from '../clock';
 import { isNetworkError, isQueued } from '../offline';
 import { mergeEntries, mergeText } from '../draftMerge';
-import type { Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
-import { Confirm, Sheet, clock, elapsed, fmtDate, fmtSets, plural, useNow } from './common';
+import type { AutoFinished, Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
+import { Confirm, Sheet, autoFinishedText, clock, elapsed, fmtDate, fmtSets, plural, useNow } from './common';
 import { ExercisePicker } from './ProgramBuilder';
 import { ExerciseInfoSheet, ExerciseThumb } from './exerciseArt';
 
@@ -57,11 +57,14 @@ export function Journal({
   onDayChange,
   onRegisterFinish,
   onProgramChanged,
+  onAutoFinished,
   version = '',
   embedded = false,
 }: {
   /** Changes when the program changes; the journal then loads again (entries kept). */
   version?: string;
+  /** Workouts left open long ago that the server recorded as this one opened (the next day may have moved). */
+  onAutoFinished?: (list: AutoFinished[]) => void;
   onRegisterFinish?: (f: JournalFinisher | null) => void;
   /** The trainer changed the day's exercises in the program from the journal. */
   onProgramChanged?: () => void;
@@ -110,6 +113,7 @@ export function Journal({
       onDayChange={onDayChange}
       onRegisterFinish={onRegisterFinish}
       onProgramChanged={onProgramChanged}
+      onAutoFinished={onAutoFinished}
       onReload={() => setNonce((n) => n + 1)}
     />
   );
@@ -220,10 +224,12 @@ function JournalBody({
   onDayChange,
   onRegisterFinish,
   onProgramChanged,
+  onAutoFinished,
   onReload,
 }: {
   onRegisterFinish?: (f: JournalFinisher | null) => void;
   onProgramChanged?: () => void;
+  onAutoFinished?: (list: AutoFinished[]) => void;
   workout: WorkoutPayload;
   embedded: boolean;
   onBack?: () => void;
@@ -329,6 +335,12 @@ function JournalBody({
   const [stale, setStale] = useState(
     () => !!draftOf && draftDone > 0 && Date.now() - new Date(draftOf.updatedAt).getTime() > 8 * 3600000,
   );
+  // Workouts of this program left open long ago (no new sets for 3 hours), recorded by the server as this one opened.
+  const [autoNote, setAutoNote] = useState<AutoFinished[]>(() => workout.autoFinished || []);
+  useEffect(() => {
+    if (workout.autoFinished?.length) onAutoFinished?.(workout.autoFinished);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [nudge, setNudge] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [showRir, setShowRir] = useState(() => safeStorage.get('tl-show-rir') === '1');
@@ -1261,6 +1273,25 @@ function JournalBody({
       </div>
       {liveAt?.by && <LiveNote at={liveAt.at} by={liveAt.by} />}
 
+      {autoNote.length > 0 && (
+        <div className="stale auto-finished" role="status">
+          <span>{autoFinishedText(autoNote)}</span>
+          <div className="row gap">
+            {(() => {
+              const next = workout.days?.find((d) => d.id === workout.nextDayId);
+              const here = autoNote.some((f) => f.dayId === workout.day.id);
+              return here && next && next.id !== workout.day.id && onDayChange && !countDone(results) ? (
+                <button className="btn btn-sm btn-primary" onClick={() => void switchDay(next.id, null)}>
+                  Открыть «{next.name}»
+                </button>
+              ) : null;
+            })()}
+            <button className="btn btn-sm" onClick={() => setAutoNote([])}>
+              Понятно
+            </button>
+          </div>
+        </div>
+      )}
       {stale && !conflict && (
         <div className="stale">
           <span>
@@ -2207,7 +2238,9 @@ function SaveState({ status, since, lastSetAt }: { status: SaveStatus; since: nu
         {elapsed(now - since)}
       </span>
     );
-  return <span className={'save-dot ' + status}>{status === 'saving' ? 'сохр…' : lastSetAt ? clock(now - lastSetAt) : 'сохр.'}</span>;
+  // The pause since the last set; a workout left from an earlier day shows no «50 ч».
+  const pause = lastSetAt && now - lastSetAt < 12 * 3600000 ? now - lastSetAt : null;
+  return <span className={'save-dot ' + status}>{status === 'saving' ? 'сохр…' : pause !== null ? clock(pause) : 'сохр.'}</span>;
 }
 
 /** «Тренер записывает · обновлено 5 с назад» — entries coming from the other phone. */

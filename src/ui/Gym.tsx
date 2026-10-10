@@ -1,12 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, IdCard, LogOut, Plus, Search } from 'lucide-react';
-import type { ClientItem, OpenWorkout, Program } from '../types';
+import type { AutoFinished, ClientItem, OpenWorkout, Program } from '../types';
 import { api, readError } from '../transport';
 import { AUTO_FINISH_IDLE_MS, Journal, type JournalActivity, type JournalFinisher } from './Journal';
 import { activeClients, lastVisit, presentClients, programsOf, type TrainerData } from './data';
 import { Confetti, RecordList } from './Records';
 import type { PersonalRecord } from '../analytics';
-import { Avatar, Empty, Sheet, ago, clock, elapsed, fmtDate, useNow } from './common';
+import { Avatar, Empty, Sheet, ago, autoFinishedText, clock, elapsed, fmtDate, useNow } from './common';
 
 interface Source {
   programId: string;
@@ -315,6 +315,23 @@ export function Gym({
       return rest;
     });
   };
+  // Workouts left open long ago that the server recorded (as a journal opened, or with the client list): said
+  // once; when it was the one shown, the client's next workout opens.
+  const toldAuto = useRef(new Set<string>());
+  const autoFinishedRef = useRef<(clientId: string, list: AutoFinished[]) => void>(() => undefined);
+  autoFinishedRef.current = (clientId, list) => {
+    const fresh = list.filter((f) => !toldAuto.current.has(clientId + '/' + f.programId + '/' + f.dayId + '/' + f.completedAt));
+    if (!fresh.length) return;
+    for (const f of fresh) toldAuto.current.add(clientId + '/' + f.programId + '/' + f.dayId + '/' + f.completedAt);
+    const c = data.clients.find((x) => x.clientId === clientId);
+    const src = sourceOf(clientId);
+    const shownDone = !!src && fresh.some((f) => f.programId === src.programId && f.dayId === src.dayId);
+    setAutoClosed((l) => [...l, { id: clientId, name: c?.clientName || 'Клиент', text: autoFinishedText(fresh) + (shownDone ? ' Открыта следующая.' : '') }]);
+    void data.reload().then(() => shownDone && nextWorkout(clientId));
+  };
+  useEffect(() => {
+    for (const c of data.clients) if (c.autoFinished?.length) autoFinishedRef.current(c.clientId, c.autoFinished);
+  }, [data.clients]);
   const [records, setRecords] = useState<Record<string, PersonalRecord[]>>({});
   const onCompleted = useCallback(
     (clientId: string, sets: number, recs: PersonalRecord[] = []) => {
@@ -364,7 +381,7 @@ export function Gym({
   const notices = (going.length > 0 || autoClosed.length > 0) && (
     <div className="undo-stack" role="status">
       {autoClosed.map((n) => (
-        <div className="undo-toast" key={'auto-' + n.id}>
+        <div className="undo-toast" key={'auto-' + n.id + n.text}>
           <span>
             <strong>{n.name}</strong> · {n.text}
           </span>
@@ -549,6 +566,7 @@ export function Gym({
                 onDayChange={(dayId) => setSources((s) => ({ ...s, [c.clientId]: { programId: src.programId, dayId } }))}
                 onCompleted={onCompleted}
                 onProgramChanged={data.reload}
+                onAutoFinished={(list) => autoFinishedRef.current(c.clientId, list)}
               />
             )}
           </div>
@@ -591,6 +609,7 @@ const GymJournal = memo(
     onDayChange: (dayId: string) => void;
     onCompleted: (clientId: string, sets: number, records?: PersonalRecord[]) => void;
     onProgramChanged: () => void;
+    onAutoFinished: (list: AutoFinished[]) => void;
   }) {
     return (
       <Journal
@@ -602,6 +621,7 @@ const GymJournal = memo(
         onDayChange={props.onDayChange}
         onCompleted={({ sets, records }) => props.onCompleted(props.clientId, sets, records)}
         onProgramChanged={props.onProgramChanged}
+        onAutoFinished={props.onAutoFinished}
       />
     );
   },

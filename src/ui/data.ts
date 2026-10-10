@@ -27,7 +27,8 @@ export function useTrainerData(): TrainerData {
     try {
       const [c, p, e] = await Promise.all([api.get('/api/clients'), api.get('/api/programs'), api.get('/api/exercises')]);
       setClients(c.data.clients);
-      setPrograms(p.data.programs);
+      // A workout left open was recorded on the way (see /api/clients): its program's next day has moved.
+      setPrograms(c.data.clients.some((x: ClientItem) => x.autoFinished?.length) ? (await api.get('/api/programs')).data.programs : p.data.programs);
       setExercises(e.data.exercises);
       setErrorText('');
     } catch (err) {
@@ -40,6 +41,7 @@ export function useTrainerData(): TrainerData {
     try {
       const c = await api.get('/api/clients');
       setClients(c.data.clients);
+      if (c.data.clients.some((x: ClientItem) => x.autoFinished?.length)) setPrograms((await api.get('/api/programs')).data.programs);
     } catch (err) {
       setErrorText(readError(err));
     }

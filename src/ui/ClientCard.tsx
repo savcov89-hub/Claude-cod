@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Clipboard, Copy, Pencil, Plus, Smartphone, Archive, RotateCcw, Share2 } from 'lucide-react';
 import { api, inGym, readError } from '../transport';
 import { inviteLink } from '../invite';
-import type { OpenWorkout, Program, Session } from '../types';
+import type { AutoFinished, OpenWorkout, Program, Session } from '../types';
 import { activeClients, lastVisit, programsOf, visits30, type TrainerData } from './data';
-import { Avatar, Confirm, Empty, Sheet, VisitGrid, ago, fmtDate, fmtDateTime } from './common';
+import { Avatar, Confirm, Empty, Sheet, VisitGrid, ago, autoFinishedText, fmtDate, fmtDateTime } from './common';
 import { ProgressView } from './Progress';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
@@ -50,6 +50,7 @@ export function ClientCard({
   const [journal, setJournal] = useState<{ trainerId: string; programId: string; dayId: string } | null>(null);
   // Started and not finished (e.g. a free workout left when the app was closed): offered to open and finish.
   const [open, setOpen] = useState<OpenWorkout[]>([]);
+  const [autoDone, setAutoDone] = useState<AutoFinished[]>([]);
   // Renaming: the new name while the field is open.
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
@@ -70,6 +71,11 @@ export function ClientCard({
       const r = await api.get('/api/client/' + clientId + '/history');
       setSessions(r.data.sessions);
       setOpen(r.data.open || []);
+      // Left open long ago and recorded by the server just now: said once, the next workout moves on.
+      if (r.data.autoFinished?.length) {
+        setAutoDone(r.data.autoFinished);
+        void data.reload();
+      }
     } catch (e) {
       setErr(readError(e));
     } finally {
@@ -95,6 +101,7 @@ export function ClientCard({
         }}
         onDayChange={(dayId) => setJournal({ ...journal, dayId })}
         onProgramChanged={() => void data.reload()}
+        onAutoFinished={() => void data.reload()}
         onCompleted={async ({ records }) => {
           setJournal(null);
           if (records?.length) setNewRecords(records);
@@ -217,6 +224,14 @@ export function ClientCard({
         ))}
       </nav>
       {err && <div className="alert">{err}</div>}
+      {autoDone.length > 0 && (
+        <div className="review-bar" role="status">
+          <span>{autoFinishedText(autoDone)}</span>
+          <button className="btn btn-sm" onClick={() => setAutoDone([])}>
+            Понятно
+          </button>
+        </div>
+      )}
       {open.map((w) => (
         <div className="review-bar" key={w.programId + '/' + w.dayId}>
           <span>

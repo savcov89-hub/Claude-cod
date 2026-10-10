@@ -123,8 +123,10 @@ function SessionList({ sessions, onDelete }: { sessions: Session[]; onDelete?: (
           )}
           {s.recordedByRole && (
             <p className="muted small">
-              Записал {s.recordedByRole === 'trainer' ? 'тренер' : 'клиент'}
+              {s.autoFinished ? 'Подходы записал ' : 'Записал '}
+              {s.recordedByRole === 'trainer' ? 'тренер' : 'клиент'}
               {s.recordedByName ? ' · ' + s.recordedByName : ''}
+              {s.autoFinished ? ' · завершена сама: 3 часа без новых подходов' : ''}
             </p>
           )}
           {s.feedback && <p className="session-note">«{s.feedback}»</p>}

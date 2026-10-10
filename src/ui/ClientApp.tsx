@@ -8,7 +8,7 @@ import { Journal } from './Journal';
 import { ProgressView } from './Progress';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
-import { Avatar, Empty, VisitGrid, fmtDate } from './common';
+import { Avatar, Empty, VisitGrid, autoFinishedText, fmtDate } from './common';
 import { RecordsSheet } from './Records';
 import type { PersonalRecord } from '../analytics';
 
@@ -39,6 +39,8 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
       setPrograms(p.data.programs);
       setLive(p.data.live || null);
       setSessions(h.data.sessions);
+      // A workout left open long ago was recorded by the server just now.
+      if (p.data.autoFinished?.length) setJustDone(autoFinishedText(p.data.autoFinished));
       setErr('');
     } catch (e) {
       setErr(readError(e));
@@ -62,12 +64,17 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
         const p = await api.get('/api/my-programs');
         setLive(p.data.live || null);
         setArchived(!!p.data.archived);
+        // Recorded by the server meanwhile: the history and the next workout change.
+        if (p.data.autoFinished?.length) {
+          await load();
+          setJustDone(autoFinishedText(p.data.autoFinished));
+        }
       } catch {
         /* offline: keep what is shown */
       }
     }, 20000);
     return () => window.clearInterval(t);
-  }, [journal]);
+  }, [journal, load]);
   const liveProgram = live ? programs.find((p) => p.id === live.programId) : null;
 
   const connect = async () => {
@@ -131,6 +138,7 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
               void load(); // a set recorded there has marked her in the gym
             }}
             onDayChange={(dayId) => setJournal({ ...journal, dayId })}
+            onAutoFinished={() => void load()}
             onCompleted={async ({ records, by }) => {
               setJournal(null);
               setJustDone(by === 'trainer' ? 'Тренер завершил тренировку — ваши подходы в ней.' : 'Тренировка записана. Тренер увидит результат.');

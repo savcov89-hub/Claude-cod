@@ -11,6 +11,11 @@ export const fmtDateTime = (v: string) =>
   new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(
     new Date(v),
   );
+/** «Записана в историю: «Ноги» от 8 окт., 5 подх.» — workouts left open that the server recorded by itself. */
+export const autoFinishedText = (list: Array<{ dayName: string; completedAt: string; done: number }>) =>
+  (list.length > 1 ? 'Записаны в историю: ' : 'Записана в историю: ') +
+  list.map((f) => `«${f.dayName}» от ${fmtDate(f.completedAt)}, ${f.done} подх.`).join('; ') +
+  ' — 3 часа не было новых подходов.';
 export const fmtSets = (sets: SetEntry[]) =>
   sets.length ? sets.map((s) => fmtKg(s.weight) + '×' + s.reps).join('  ') : '—';
 

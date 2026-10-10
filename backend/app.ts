@@ -2,7 +2,7 @@ import { catalog } from '../src/catalog';
 import { groupMuscles, exerciseRules, programIssue } from '../src/trainingRules';
 import { clientInsights, sessionRecords, type ClientInsights } from '../src/analytics';
 import { nowIso } from '../src/clock';
-import type { OpenWorkout } from '../src/types';
+import type { AutoFinished, OpenWorkout } from '../src/types';
 import { doneDiffers, fitPlan, mergeEntries, mergeText } from '../src/draftMerge';
 import { mergeProgramDays } from '../src/programMerge';
 
@@ -186,6 +186,8 @@ interface ExtraPlan {
 interface SessionRecord {
   recordedByRole?: Role;
   recordedByName?: string;
+  /** Recorded by the server: left open, nothing saved for STALE_DRAFT_MS. */
+  autoFinished?: boolean;
   feedback?: string;
   trainerId: string;
   programId: string;
@@ -205,6 +207,10 @@ interface DraftRecord {
   /** A finished workout: its record, and when it was finished (entries from the other phone may still come in). */
   sessionId?: string;
   closedAt?: string;
+  /** The device's date at the last save: the visit's day when the workout is recorded by the server. */
+  localDate?: string;
+  /** Finished by the server after a long pause (see finishStale). */
+  autoClosed?: boolean;
 }
 
 const tableKey = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -254,6 +260,8 @@ interface BodyProfile {
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** A workout with sets done and nothing saved for this long is over: the server records it by itself. */
+const STALE_DRAFT_MS = 3 * 3600000;
 const cleanNumber = (value: unknown, fallback = 0) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -423,16 +431,29 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
 
   /**
    * Workouts of one client started with this trainer and not finished (sets done, draft still open), newest first:
-   * the gym opens the one under way, the client card offers to finish it.
+   * the gym opens the one under way, the client card offers to finish it. Those left open long ago are recorded
+   * on the way (see finishStale) and go to `finished` instead.
    */
-  async function openWorkouts(trainerId: string, clientId: string, maxAgeMs: number, all?: Array<ProgramRecord & { id: string }>) {
+  async function openWorkouts(
+    trainerId: string,
+    clientId: string,
+    maxAgeMs: number,
+    all?: Array<ProgramRecord & { id: string }>,
+    finished: AutoFinished[] = [],
+  ) {
     const programs = (all || (await listAll<ProgramRecord>(programsTable(trainerId)))).filter((p) => p.clientId === clientId && !p.archived);
     const nowMs = Date.parse(nowIso());
     const out: OpenWorkout[] = [];
     for (const p of programs)
       for (const d of p.days) {
-        const draft = await first<DraftRecord>(draftTable(clientId, p.id, d.id));
-        if (!draft || draft.closed || !(nowMs - Date.parse(draft.updatedAt) <= maxAgeMs)) continue;
+        const draft = await first<DraftRecord & { id: string }>(draftTable(clientId, p.id, d.id));
+        if (!draft || draft.closed) continue;
+        const recorded = await finishStale(p, p.id, d.id, draft);
+        if (recorded) {
+          finished.push(recorded);
+          continue;
+        }
+        if (!(nowMs - Date.parse(draft.updatedAt) <= maxAgeMs)) continue;
         const done = draft.exercises.reduce((n, e) => n + e.sets.filter((x) => x.reps > 0).length, 0);
         if (done)
           out.push({
@@ -502,6 +523,218 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
       if (muscles.length) (e as SessionExercise).muscles = muscles.slice(0, 6);
     }
     return performed;
+  }
+
+  /**
+   * Records a workout whose draft has just been closed with `sessionId`, and what follows from it: the last results
+   * behind the weight hints, the client's insights and visit, the program's next day. A workout dated before one
+   * recorded already (left open, finished later) joins the history without taking the later one's place.
+   * Null when the record could not be written: the draft is then opened again as it was.
+   */
+  async function recordWorkout(o: {
+    access: { program: ProgramRecord; ownerId: string; role: Role; name?: string };
+    table: string;
+    trainerId: string;
+    programId: string;
+    day: ProgramDay;
+    sessionId: string;
+    completedAt: string;
+    feedback: string;
+    matched: SessionExercise[];
+    performed: SessionExercise[];
+    before: (DraftRecord & { id: string }) | undefined;
+    localDate?: unknown;
+    /** Recorded by the server after a long pause, not by a person: nothing added in the gym joins the program. */
+    auto?: boolean;
+  }) {
+    const { access, table, trainerId, programId, day, sessionId, completedAt, feedback, matched, performed } = o;
+    const { program, ownerId } = access;
+    const dayId = day.id;
+    const session: SessionRecord = {
+      recordedByRole: access.role,
+      recordedByName: access.name,
+      ...(o.auto ? { autoFinished: true } : {}),
+      feedback,
+      trainerId,
+      programId,
+      programName: program.name,
+      dayId,
+      dayName: day.name,
+      completedAt,
+      exercises: performed,
+    };
+    // Personal records: against every earlier workout of this client (all trainers).
+    const earlier = (await listAll<SessionRecord>(sessionsTable(ownerId), 400)).filter((s) => s.completedAt < completedAt);
+    const equipmentOf = equipmentLookup(trainerId);
+    const withEquipment = await Promise.all(performed.map(async (e) => ({ ...e, equipment: await equipmentOf(e.exerciseId) })));
+    const records = sessionRecords(earlier, { exercises: withEquipment });
+    const [added] = await db.add(sessionsTable(ownerId), [session], [sessionId]).catch(() => [null]);
+    if (!added) {
+      // Not recorded: the workout is opened again as it was.
+      const now = await first<DraftRecord & { id: string }>(table);
+      if (now?.sessionId === sessionId) {
+        const { id: _id, ...restored } = o.before || ({ exercises: matched, updatedAt: nowIso() } as DraftRecord & { id: string });
+        await writeDraft(table, now, { ...restored, closed: false, revision: randomId() });
+      }
+      return null;
+    }
+    // The weight hints come from the latest workout with the exercise.
+    for (const e of performed) {
+      const lastT = lastResultTable(ownerId, e.exerciseId);
+      const last = await first<{ completedAt?: string }>(lastT);
+      if (last?.completedAt && last.completedAt > completedAt) continue;
+      await upsertSingle(lastT, { sets: e.sets, completedAt, ...(e.note ? { note: e.note } : {}) });
+    }
+    const client = await findClient(trainerId, ownerId);
+    const date = DATE_RE.test(String(o.localDate || '')) ? String(o.localDate) : completedAt.slice(0, 10);
+    const latest = !client?.latestCompletedAt || client.latestCompletedAt <= completedAt;
+    await refreshInsights(trainerId, ownerId, {
+      ...(latest ? { latestSessionId: sessionId, latestCompletedAt: completedAt, needsReview: access.role === 'client' } : {}),
+      visits: withVisit(client?.visits, date),
+    });
+    // The program as it is now: changed meanwhile (a replacement «насовсем» from the other phone, the editor),
+    // those changes stay — only the next day, the dates and the exercises joined here are written.
+    const [fresh] = await db.get<ProgramRecord>(programsTable(trainerId), [programId]);
+    const now = fresh || program;
+    const nowDay = now.days.find((d) => d.id === dayId) || day;
+    const idx = now.days.findIndex((d) => d.id === dayId);
+    const nextDayId = now.days[(idx + 1) % now.days.length].id;
+    // A later workout of this program was recorded already: the next day stays as that one set it.
+    const latestHere = !now.lastCompletedAt || now.lastCompletedAt <= completedAt;
+    // Exercises the trainer added in the gym and did join the program day, each after the planned
+    // exercise it followed in the journal; the planned ones keep their order.
+    const joined =
+      now.free || access.role !== 'trainer' || o.auto ? [] : matched.filter((e) => e.extra && !e.extra.once && performed.some((p) => p.exerciseId === e.exerciseId));
+    let days = now.days;
+    if (joined.length && idx >= 0 && nowDay.exercises.length + joined.length <= 30) {
+      const findKnown = knownExercises(trainerId);
+      const after = new Map<string, ProgramExercise[]>();
+      let prev = '';
+      for (const e of matched) {
+        if (!e.extra) prev = String(e.replaces || e.exerciseId);
+        else if (joined.includes(e)) {
+          const known = await findKnown(e.exerciseId);
+          if (known) after.set(prev, [...(after.get(prev) || []), toProgramExercise({ ...e.extra, sets: e.sets.length }, known)]);
+        }
+      }
+      const exercises = [...(after.get('') || []), ...nowDay.exercises.flatMap((p) => [p, ...(after.get(p.exerciseId) || [])])];
+      days = now.days.map((d) => (d.id === dayId ? { ...d, exercises } : d));
+    }
+    if (!latestHere && days === now.days) return { records, updated: true };
+    const { id: _drop, ...rest } = now as ProgramRecord & { id?: string };
+    const [updated] = await db.update(programsTable(trainerId), [
+      {
+        id: programId,
+        record: {
+          ...rest,
+          ...(days !== now.days ? { days, updatedAt: completedAt } : {}),
+          ...(latestHere
+            ? {
+                nextDayId,
+                lastCompletedAt: completedAt,
+                lastRecordedByRole: access.role,
+                // A free workout is remembered as the starting point of the next one.
+                ...(now.free
+                  ? {
+                      lastFree: matched
+                        .filter((e) => e.extra)
+                        .map((e) => ({
+                          exerciseId: e.exerciseId,
+                          exerciseName: e.exerciseName,
+                          sets: e.sets.length,
+                          repMin: e.extra!.repMin,
+                          repMax: e.extra!.repMax,
+                          targetRir: e.extra!.targetRir,
+                        })),
+                    }
+                  : {}),
+              }
+            : {}),
+        },
+      },
+    ]);
+    return { records, updated: !!updated };
+  }
+
+  /**
+   * A workout left open — sets done, nothing saved for STALE_DRAFT_MS: nobody pressed «Завершить», the client went
+   * home — is recorded by itself, dated to its last save. Done whenever its open draft is read on the way (the
+   * client's app, the client card, the gym, the journal), so it never hangs unfinished till next week.
+   * Null when there is nothing to record or it cannot be recorded as it is (left to the journal).
+   */
+  async function finishStale(
+    program: ProgramRecord,
+    programId: string,
+    dayId: string,
+    draft?: (DraftRecord & { id: string }) | null,
+  ): Promise<AutoFinished | null> {
+    const table = draftTable(program.clientId, programId, dayId);
+    const current = draft === undefined ? await first<DraftRecord & { id: string }>(table) : draft;
+    if (!current || current.closed || !doneCount(current.exercises)) return null;
+    const lastAt = Date.parse(current.updatedAt);
+    if (!(Date.parse(nowIso()) - lastAt > STALE_DRAFT_MS)) return null;
+    const day = program.days.find((d) => d.id === dayId);
+    if (!day) return null;
+    const trainerId = program.trainerId;
+    const matched = await matchPlan(trainerId, day, fitPlan(day.exercises, current.exercises || []));
+    if (!matched) return null;
+    const performed = await performedOf(trainerId, day, matched);
+    if (!performed.length) return null;
+    const completedAt = new Date(lastAt).toISOString();
+    const sessionId = randomId();
+    const role: Role = current.updatedByRole || 'client';
+    const feedback = current.feedback || '';
+    const closed: DraftRecord = {
+      exercises: matched.map((e) => ({ ...e, sets: e.sets.map(cleanSet) })),
+      updatedAt: completedAt,
+      closed: true,
+      revision: randomId(),
+      sessionId,
+      closedAt: nowIso(),
+      feedback,
+      updatedByRole: role,
+      autoClosed: true,
+    };
+    // Saved this very moment (somebody is recording after all), or recorded by another request: left as it is.
+    if (!(await writeDraft(table, current, closed))) return null;
+    const done = await recordWorkout({
+      access: { program, ownerId: program.clientId, role },
+      table,
+      trainerId,
+      programId,
+      day,
+      sessionId,
+      completedAt,
+      feedback,
+      matched,
+      performed,
+      before: current,
+      localDate: current.localDate,
+      auto: true,
+    });
+    return done ? { programId, dayId, dayName: day.name, completedAt, done: doneCount(performed) } : null;
+  }
+
+  /**
+   * Every workout of one program left open long ago, recorded (see finishStale). Those recorded by the server a moment
+   * ago are told too: by another request, or by an earlier load of this journal whose answer was dropped.
+   */
+  async function finishStaleOf(program: ProgramRecord, programId: string) {
+    const drafts = await Promise.all(program.days.map((d) => first<DraftRecord & { id: string }>(draftTable(program.clientId, programId, d.id))));
+    const nowMs = Date.parse(nowIso());
+    const out: AutoFinished[] = [];
+    for (const [i, d] of program.days.entries()) {
+      const draft = drafts[i];
+      if (!draft) continue;
+      if (draft.closed) {
+        if (draft.autoClosed && draft.sessionId && nowMs - Date.parse(draft.closedAt || '') < 2 * 60000)
+          out.push({ programId, dayId: d.id, dayName: d.name, completedAt: draft.updatedAt, done: doneCount(draft.exercises) });
+        continue;
+      }
+      const recorded = await finishStale(program, programId, d.id, draft);
+      if (recorded) out.push(recorded);
+    }
+    return out;
   }
 
   /** The entries a phone started from (sent with each save, so a save made from an older version is merged); null when unusable. */
@@ -857,8 +1090,15 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const present = clients.filter((c) => c.checkedInAt && nowMs - Date.parse(c.checkedInAt) < 12 * 3600000);
         const programs = present.length ? await listAll<ProgramRecord>(programsTable(trainerId)) : [];
         for (const c of present) {
-          const [live] = await openWorkouts(trainerId, c.clientId, 12 * 3600000, programs);
+          // A workout left from an earlier visit is recorded on the way: the gym opens the next one.
+          const finished: AutoFinished[] = [];
+          const [live] = await openWorkouts(trainerId, c.clientId, 12 * 3600000, programs, finished);
           if (live) c.live = live;
+          if (finished.length) {
+            c.autoFinished = finished;
+            const fresh = await findClient(trainerId, c.clientId);
+            if (fresh) for (const k of ['visits', 'latestSessionId', 'latestCompletedAt', 'needsReview', 'insights'] as const) c[k] = fresh[k];
+          }
         }
         return json({ clients });
       },
@@ -1106,12 +1346,14 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         if (!(await trainerOnly(ctx))) return error('Доступ только для тренера.', 403);
         const clientId = ctx.params.clientId;
         if (!(await findClient(ctx.user!.userId, clientId))) return error('Этот клиент не подключён к вам.', 403);
+        // Started and not finished (up to 14 days back, as far as a workout can be backdated); those left open long
+        // ago are recorded first, so the history has them.
+        const autoFinished: AutoFinished[] = [];
+        const open = await openWorkouts(ctx.user!.userId, clientId, 14 * 86400000, undefined, autoFinished);
         const sessions = (await listAll<SessionRecord>(sessionsTable(clientId), 400))
           .filter((s) => s.trainerId === ctx.user!.userId)
           .sort((a, b) => b.completedAt.localeCompare(a.completedAt));
-        // Started and not finished (up to 14 days back, as far as a workout can be backdated).
-        const open = await openWorkouts(ctx.user!.userId, clientId, 14 * 86400000);
-        return json({ sessions, open });
+        return json({ sessions, open, ...(autoFinished.length ? { autoFinished } : {}) });
       },
     ],
 
@@ -1736,17 +1978,32 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         }
         programs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         // A workout going on right now (sets done in the last 3 hours, not finished): the client can follow it.
+        // One left open longer is recorded by itself (see finishStale), and its program shows the next day.
         const nowMs = Date.parse(nowIso());
         let live: { programId: string; dayId: string; dayName: string; updatedAt: string; updatedByRole?: Role } | null = null;
-        for (const p of programs)
+        const autoFinished: AutoFinished[] = [];
+        for (const [i, p] of programs.entries()) {
+          let recorded = false;
           for (const d of p.days) {
-            const draft = await first<DraftRecord>(draftTable(p.clientId, p.id, d.id));
-            if (!draft || draft.closed || nowMs - Date.parse(draft.updatedAt) > 3 * 3600000) continue;
+            const draft = await first<DraftRecord & { id: string }>(draftTable(p.clientId, p.id, d.id));
+            if (!draft || draft.closed) continue;
+            const done = await finishStale(p, p.id, d.id, draft);
+            if (done) {
+              autoFinished.push(done);
+              recorded = true;
+              continue;
+            }
+            if (nowMs - Date.parse(draft.updatedAt) > STALE_DRAFT_MS) continue;
             if (!draft.exercises.some((e) => e.sets.some((x) => x.reps > 0))) continue;
             if (!live || draft.updatedAt > live.updatedAt)
               live = { programId: p.id, dayId: d.id, dayName: d.name, updatedAt: draft.updatedAt, updatedByRole: draft.updatedByRole };
           }
-        return json({ coaches, programs, live });
+          if (recorded) {
+            const [fresh] = await db.get<ProgramRecord>(programsTable(p.trainerId), [p.id]);
+            if (fresh) programs[i] = { ...fresh, id: p.id };
+          }
+        }
+        return json({ coaches, programs, live, ...(autoFinished.length ? { autoFinished } : {}) });
       },
     ],
 
@@ -1756,7 +2013,13 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const { trainerId, programId, dayId } = ctx.params;
         const access = await workoutOwner(ctx.user!.userId, trainerId, programId);
         if (!access) return error('Нет доступа к тренировке.', 403);
-        const { program, ownerId } = access;
+        const { ownerId } = access;
+        let { program } = access;
+        if (!program.days.some((d) => d.id === dayId)) return error('Тренировка не найдена.', 404);
+        // Workouts of this program left open long ago are recorded first: this one opens anew, its hints and the
+        // next day follow them.
+        const autoFinished = await finishStaleOf(program, programId);
+        if (autoFinished.length) program = (await db.get<ProgramRecord>(programsTable(trainerId), [programId]))[0] || program;
         const day = program.days.find((d) => d.id === dayId);
         if (!day) return error('Тренировка не найдена.', 404);
         const equipmentOf = equipmentLookup(trainerId);
@@ -1790,6 +2053,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           days: program.days.map((d) => ({ id: d.id, name: d.name })),
           nextDayId: program.nextDayId || program.days[0]?.id,
           day: { ...day, exercises },
+          ...(autoFinished.length ? { autoFinished } : {}),
           ...(program.free ? { lastFree: program.lastFree || [] } : {}),
         });
       },
@@ -1868,7 +2132,15 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           const updatedAt = nowIso();
           const revision = randomId();
           const saved = exercises.map((e) => ({ ...e, sets: e.sets.map(cleanSet) }));
-          const record: DraftRecord = { exercises: saved, updatedAt, revision, closed: false, feedback, updatedByRole: access.role };
+          const record: DraftRecord = {
+            exercises: saved,
+            updatedAt,
+            revision,
+            closed: false,
+            feedback,
+            updatedByRole: access.role,
+            ...(DATE_RE.test(String(b.localDate || '')) ? { localDate: String(b.localDate) } : {}),
+          };
           if (!(await writeDraft(table, current, record))) {
             // The other phone saved in the same moment: read again and merge with it.
             if (attempt < 5) continue;
@@ -1955,100 +2227,25 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           // The other phone saved (or finished) in the same moment: read again.
           if (attempt >= 5) return error('Не удалось сохранить: телефоны сохраняют одновременно. Повторите.', 503);
         }
-        const session: SessionRecord = {
-          recordedByRole: access.role,
-          recordedByName: access.name,
-          feedback,
+        const done = await recordWorkout({
+          access,
+          table,
           trainerId,
           programId,
-          programName: program.name,
-          dayId,
-          dayName: day.name,
+          day,
+          sessionId,
           completedAt,
-          exercises: performed,
-        };
-        // Personal records: against every earlier workout of this client (all trainers).
-        const earlier = await listAll<SessionRecord>(sessionsTable(ownerId), 400);
-        const equipmentOf = equipmentLookup(trainerId);
-        const withEquipment = await Promise.all(performed.map(async (e) => ({ ...e, equipment: await equipmentOf(e.exerciseId) })));
-        const records = sessionRecords(earlier, { exercises: withEquipment });
-        const [added] = await db.add(sessionsTable(ownerId), [session], [sessionId]).catch(() => [null]);
-        if (!added) {
-          // Not recorded: the workout is opened again as it was.
-          const now = await first<DraftRecord & { id: string }>(table);
-          if (now?.sessionId === sessionId) {
-            const { id: _id, ...restored } = before || ({ exercises: matched!, updatedAt: nowIso() } as DraftRecord & { id: string });
-            await writeDraft(table, now, { ...restored, closed: false, revision: randomId() });
-          }
-          return error('Не удалось сохранить тренировку.', 500);
-        }
-        for (const e of performed)
-          await upsertSingle(lastResultTable(ownerId, e.exerciseId), { sets: e.sets, completedAt, ...(e.note ? { note: e.note } : {}) });
-        const client = await findClient(trainerId, ownerId);
-        const date = DATE_RE.test(b.localDate || '') ? b.localDate : completedAt.slice(0, 10);
-        await refreshInsights(trainerId, ownerId, {
-          latestSessionId: sessionId,
-          latestCompletedAt: completedAt,
-          needsReview: access.role === 'client',
-          visits: withVisit(client?.visits, date),
+          feedback,
+          matched: matched!,
+          performed,
+          before,
+          localDate: b.localDate,
         });
-        // The program as it is now: changed meanwhile (a replacement «насовсем» from the other phone, the editor),
-        // those changes stay — only the next day, the dates and the exercises joined here are written.
-        const [fresh] = await db.get<ProgramRecord>(programsTable(trainerId), [programId]);
-        const now = fresh || program;
-        const nowDay = now.days.find((d) => d.id === dayId) || day;
-        const idx = now.days.findIndex((d) => d.id === dayId);
-        const nextDayId = now.days[(idx + 1) % now.days.length].id;
-        // Exercises the trainer added in the gym and did join the program day, each after the planned
-        // exercise it followed in the journal; the planned ones keep their order.
-        const joined = now.free || access.role !== 'trainer' ? [] : matched!.filter((e) => e.extra && !e.extra.once && performed.some((p) => p.exerciseId === e.exerciseId));
-        let days = now.days;
-        if (joined.length && idx >= 0 && nowDay.exercises.length + joined.length <= 30) {
-          const findKnown = knownExercises(trainerId);
-          const after = new Map<string, ProgramExercise[]>();
-          let prev = '';
-          for (const e of matched!) {
-            if (!e.extra) prev = String(e.replaces || e.exerciseId);
-            else if (joined.includes(e)) {
-              const known = await findKnown(e.exerciseId);
-              if (known) after.set(prev, [...(after.get(prev) || []), toProgramExercise({ ...e.extra, sets: e.sets.length }, known)]);
-            }
-          }
-          const exercises = [...(after.get('') || []), ...nowDay.exercises.flatMap((p) => [p, ...(after.get(p.exerciseId) || [])])];
-          days = now.days.map((d) => (d.id === dayId ? { ...d, exercises } : d));
-        }
-        const { id: _drop, ...rest } = now as ProgramRecord & { id?: string };
-        const [updated] = await db.update(programsTable(trainerId), [
-          {
-            id: programId,
-            record: {
-              ...rest,
-              ...(days !== now.days ? { days, updatedAt: completedAt } : {}),
-              nextDayId,
-              lastCompletedAt: completedAt,
-              lastRecordedByRole: access.role,
-              // A free workout is remembered as the starting point of the next one.
-              ...(now.free
-                ? {
-                    lastFree: matched!
-                      .filter((e) => e.extra)
-                      .map((e) => ({
-                        exerciseId: e.exerciseId,
-                        exerciseName: e.exerciseName,
-                        sets: e.sets.length,
-                        repMin: e.extra!.repMin,
-                        repMax: e.extra!.repMax,
-                        targetRir: e.extra!.targetRir,
-                      })),
-                  }
-                : {}),
-            },
-          },
-        ]);
+        if (!done) return error('Не удалось сохранить тренировку.', 500);
         return json(
-          updated
-            ? { saved: true, sessionId, records }
-            : { saved: true, sessionId, records, warning: 'Результат сохранён. Следующий день выберите вручную.' },
+          done.updated
+            ? { saved: true, sessionId, records: done.records }
+            : { saved: true, sessionId, records: done.records, warning: 'Результат сохранён. Следующий день выберите вручную.' },
           201,
         );
       },

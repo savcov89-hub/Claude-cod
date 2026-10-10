@@ -31,6 +31,17 @@ export interface ClientItem {
   avatar?: string;
   /** In the gym: the workout under way (sets done, not finished). */
   live?: OpenWorkout;
+  /** Workouts left open long ago that the server has just recorded by itself. */
+  autoFinished?: AutoFinished[];
+}
+/** A workout left open (sets done, nothing saved for 3 hours) that the server recorded by itself. */
+export interface AutoFinished {
+  programId: string;
+  dayId: string;
+  dayName: string;
+  /** Its date: the time of its last save. */
+  completedAt: string;
+  done: number;
 }
 /** A workout started and not finished: sets done, still open. */
 export interface OpenWorkout {
@@ -105,6 +116,8 @@ export interface Session {
   id: string;
   recordedByRole?: Role;
   recordedByName?: string;
+  /** Recorded by the server: left open, nothing saved for 3 hours. */
+  autoFinished?: boolean;
   feedback?: string;
   programName: string;
   dayName: string;
@@ -140,6 +153,8 @@ export interface WorkoutPayload {
   days?: Array<{ id: string; name: string }>;
   nextDayId?: string;
   day: { id: string; name: string; exercises: WorkoutExercise[] };
+  /** Workouts of this program left open long ago, recorded by the server as this one was opened. */
+  autoFinished?: AutoFinished[];
   /** Free workout only: what was done last time, to start "как в прошлый раз". */
   lastFree?: Array<{ exerciseId: string; exerciseName: string; sets: number; repMin: number; repMax: number; targetRir: number }>;
 }

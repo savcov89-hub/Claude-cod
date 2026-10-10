@@ -2282,6 +2282,11 @@ h2 {
 .stale .row {
   justify-content: flex-end;
 }
+/* recorded by the server: news, not a warning */
+.stale.auto-finished {
+  background: var(--info-soft);
+  color: var(--info);
+}
 
 /* single-column grids must never grow past the screen */
 .main,
