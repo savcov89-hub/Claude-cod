@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Training Log</title>
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-title" content="Training Log" />
+    <meta name="theme-color" content="#f3f2ef" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'" />
+    <script type="module" crossorigin src="./assets/index-BDafCRAd.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-1hpsITlm.css">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // If the app has not drawn anything after a while (a file failed to load, an error before the first screen),
+      // a way out instead of a blank page: open again, or load the app afresh without the copy kept on the phone.
+      setTimeout(function () {
+        var root = document.getElementById('root');
+        if (!root || root.childNodes.length) return;
+        root.innerHTML =
+          '<div style="max-width:420px;margin:0 auto;padding:48px 16px;font-family:system-ui,sans-serif;display:grid;gap:12px">' +
+          '<h2 style="margin:0">Приложение не загрузилось</h2>' +
+          '<p style="margin:0;opacity:.7">Проверьте интернет и попробуйте ещё раз. Записанные подходы не потеряны.</p>' +
+          '<button id="boot-retry" style="padding:14px;font-size:16px;border-radius:12px;border:0;background:#cf2e24;color:#fff">Открыть заново</button>' +
+          '<button id="boot-fresh" style="padding:14px;font-size:16px;border-radius:12px;border:1px solid #bbb;background:none;color:inherit">Загрузить приложение заново</button>' +
+          '</div>';
+        document.getElementById('boot-retry').onclick = function () { location.reload(); };
+        document.getElementById('boot-fresh').onclick = function () {
+          var done = function () { location.reload(); };
+          var jobs = [];
+          if (navigator.serviceWorker) jobs.push(navigator.serviceWorker.getRegistrations().then(function (r) { return Promise.all(r.map(function (x) { return x.unregister(); })); }));
+          if (window.caches) jobs.push(caches.keys().then(function (k) { return Promise.all(k.map(function (x) { return caches.delete(x); })); }));
+          Promise.all(jobs).then(done, done);
+        };
+      }, 12000);
+    </script>
+  </body>
+</html>
