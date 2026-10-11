@@ -1,17 +1,19 @@
 import { Fragment, useMemo, useState } from 'react';
-import { Pencil, Plus, Search } from 'lucide-react';
+import { Image as ImageIcon, Pencil, Plus, Search } from 'lucide-react';
 import { EQUIPMENT_TYPES, unitNote } from '../analytics';
 import { api, readError } from '../transport';
 import { exerciseRules, muscleNames } from '../trainingRules';
 import type { Exercise } from '../types';
 import { Sheet, searchKey } from './common';
-import { ExerciseFigures, ExerciseThumb } from './exerciseArt';
+import { ArtPicker, ExerciseFigures, ExerciseThumb } from './exerciseArt';
 
 export function Library({ exercises, onCreated }: { exercises: Exercise[]; onCreated: () => Promise<void> }) {
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Exercise | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  // Picking another drawing (icon and movement) for this exercise.
+  const [artFor, setArtFor] = useState<Exercise | null>(null);
   const list = useMemo(() => {
     const s = searchKey(q.trim());
     return exercises.filter((e) => !s || searchKey(e.name + ' ' + e.muscleGroup + ' ' + e.equipment).includes(s));
@@ -61,15 +63,33 @@ export function Library({ exercises, onCreated }: { exercises: Exercise[]; onCre
                   <ExerciseFigures exercise={e} />
                 </div>
               )}
-              {e.custom && open === e.id && (
-                <button className="btn btn-quiet btn-sm lib-edit" onClick={() => setEditing(e)}>
-                  <Pencil size={14} /> Изменить
-                </button>
+              {open === e.id && (
+                <div className="lib-actions">
+                  <button className="btn btn-quiet btn-sm" onClick={() => setArtFor(e)}>
+                    <ImageIcon size={14} /> Сменить картинку
+                  </button>
+                  {e.custom && (
+                    <button className="btn btn-quiet btn-sm" onClick={() => setEditing(e)}>
+                      <Pencil size={14} /> Изменить
+                    </button>
+                  )}
+                </div>
               )}
             </Fragment>
           );
         })}
       </div>
+      {artFor && (
+        <ArtPicker
+          exercise={artFor}
+          name={artFor.name}
+          onClose={() => setArtFor(null)}
+          onSaved={async () => {
+            setArtFor(null);
+            await onCreated();
+          }}
+        />
+      )}
       {adding && <AddExercise onClose={() => setAdding(false)} onCreated={async () => { setAdding(false); await onCreated(); }} />}
       {editing && (
         <AddExercise

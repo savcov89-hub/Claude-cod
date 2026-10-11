@@ -970,6 +970,78 @@ await scenario('29. Тренер поменял имя клиентки — в �
   if (anna) await call('post', '/api/client/' + anna.clientId + '/update', { clientName: 'Анна' });
 });
 
+await scenario('30. Тренер меняет картинку упражнения: в базе, в журнале и у клиента', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  await p.locator('.nav').getByRole('button', { name: 'База' }).click();
+  await p.waitForTimeout(500);
+  await p.locator('#library-search').fill('Жим ногами');
+  await p.waitForTimeout(400);
+  const item = () => p.locator('.lib-item').filter({ has: p.locator('strong', { hasText: /^Жим ногами$/ }) }).first();
+  const before = await item().locator('.xa-thumb svg').innerHTML();
+  await item().click();
+  await p.waitForTimeout(400);
+  await p.getByRole('button', { name: 'Сменить картинку' }).first().click();
+  await p.waitForTimeout(500);
+  const sheet = p.locator('.sheet').last();
+  await sheet.locator('#art-search').fill('Гакк');
+  await p.waitForTimeout(300);
+  await sheet.getByRole('button', { name: 'Рисунок: Гакк-присед', exact: true }).click();
+  await p.waitForTimeout(300);
+  const top = (await sheet.locator('.art-preview').innerText()).replace(/\s+/g, ' ');
+  expect(/Рисунок: Гакк-присед/.test(top), 'the pick moves at the top before it is saved', top);
+  const picked = await sheet.locator('.art-choice.on .xa-thumb svg').innerHTML();
+  await sheet.getByRole('button', { name: 'Сохранить' }).click();
+  await p.waitForTimeout(1500);
+  expect(!(await p.locator('.sheet').count()), 'saved, the window closes');
+  const after = await item().locator('.xa-thumb svg').innerHTML();
+  expect(after !== before && after === picked, 'the icon in «База» is the new drawing');
+  // Her workout with this exercise shows it too.
+  const { clients } = await call('get', '/api/clients');
+  const { programs } = await call('get', '/api/programs');
+  const users = { Александр: 1, Мария: 1, Дмитрий: 1, Анна: 1 };
+  const pr = programs.find((x) => !x.archived && users[x.clientName] && x.days.some((d) => d.exercises.some((e) => e.exerciseId === 'leg-press')));
+  if (pr) {
+    const day = pr.days.find((d) => d.exercises.some((e) => e.exerciseId === 'leg-press'));
+    await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
+    await p.waitForTimeout(1000);
+    await p.locator('#demo-client').selectOption({ label: pr.clientName });
+    await p.waitForTimeout(1200);
+    const w = await call('get', '/api/workout/' + pr.trainerId + '/' + pr.id + '/' + day.id);
+    expect(w.day.exercises.find((e) => e.exerciseId === 'leg-press')?.art === 'hack-squat', 'the client (' + pr.clientName + ') gets the new drawing in her workout');
+    await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+    await p.waitForTimeout(800);
+  } else expect(false, 'a client with «Жим ногами» in the program', clients.length);
+  // In the gym: «Как выполнять» → «Сменить картинку» → the journal shows it at once.
+  await goGym();
+  await p.locator('.gym-tab').first().click();
+  await p.waitForTimeout(800);
+  const art = pane().getByRole('button', { name: /^Как выполнять/ }).first();
+  const was = await art.locator('svg').innerHTML();
+  await art.click();
+  await p.waitForTimeout(500);
+  await p.locator('.sheet').last().getByRole('button', { name: 'Сменить картинку' }).click();
+  await p.waitForTimeout(500);
+  const sheet2 = p.locator('.sheet').last();
+  await sheet2.locator('#art-search').fill('Становая');
+  await p.waitForTimeout(300);
+  await sheet2.getByRole('button', { name: 'Рисунок: Становая тяга', exact: true }).click();
+  const chosen = await sheet2.locator('.art-choice.on .xa-thumb svg').innerHTML();
+  await sheet2.getByRole('button', { name: 'Сохранить' }).click();
+  await p.waitForTimeout(1200);
+  const now = await pane().getByRole('button', { name: /^Как выполнять/ }).first().locator('svg').innerHTML();
+  expect(now !== was && now === chosen, 'the journal shows the new drawing at once');
+  // Back on «Как выполнять» with the new drawing; closed.
+  const info = p.locator('.sheet').last();
+  expect((await info.locator('.xa-motion').count()) > 0 && (await info.getByRole('button', { name: 'Сменить картинку' }).count()) > 0, 'back on «Как выполнять» after saving');
+  await info.getByRole('button', { name: 'Закрыть' }).click();
+  await p.waitForTimeout(300);
+  // «Как было» brings each one's own drawing back.
+  for (const e of (await call('get', '/api/exercises')).exercises.filter((x) => x.art)) await call('post', '/api/exercises/' + encodeURIComponent(e.id) + '/art', { art: '' });
+  const ex = (await call('get', '/api/exercises')).exercises.filter((e) => e.art);
+  expect(!ex.length, 'back to their own drawings', ex.map((e) => e.id));
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

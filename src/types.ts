@@ -64,6 +64,8 @@ export interface Exercise {
   equipment: string;
   muscles?: string[];
   custom?: boolean;
+  /** The drawing the trainer picked for it (id of the catalog exercise drawn). */
+  art?: string;
 }
 export interface ProgramExercise {
   muscles?: string[];
@@ -129,6 +131,8 @@ export interface Session {
 export interface WorkoutExercise extends ProgramExercise {
   /** Decides plates or kilograms; sent by the server for catalog and own exercises. */
   equipment?: string;
+  /** The drawing the trainer picked for it. */
+  art?: string;
   previousSets: SetEntry[];
   previousAt?: string | null;
   /** Comment left on this exercise last time. */

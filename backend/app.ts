@@ -223,6 +223,8 @@ const programsTable = (trainerId: string) => 'programs:' + tableKey(trainerId);
 const assignmentsTable = (clientId: string) => 'assignments:' + tableKey(clientId);
 const sessionsTable = (clientId: string) => 'sessions:' + tableKey(clientId);
 const customExercisesTable = (trainerId: string) => 'custom_exercises:' + tableKey(trainerId);
+/** One row: the drawing the trainer picked for an exercise (exercise id → id of the catalog exercise drawn). */
+const exerciseArtTable = (trainerId: string) => 'exercise_art:' + tableKey(trainerId);
 const inviteTable = (code: string) => 'invite:' + tableKey(code);
 const lastResultTable = (clientId: string, exerciseId: string) =>
   'last:' + tableKey(clientId) + ':' + tableKey(exerciseId);
@@ -815,6 +817,14 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
       return (await custom).find((c) => c.id === id);
     };
   }
+  /** The drawings a trainer picked for exercises (shown to the trainer and the trainer's clients). */
+  async function artOf(trainerId: string): Promise<Record<string, string>> {
+    return (await first<{ map?: Record<string, string> }>(exerciseArtTable(trainerId)))?.map || {};
+  }
+  const withArt = <T extends { id?: string; exerciseId?: string }>(e: T, art: Record<string, string>): T => {
+    const a = art[e.exerciseId || e.id || ''];
+    return a ? { ...e, art: a } : e;
+  };
   /** Program entry for `known` with the submitted targets; muscles from the rules, the trainer's choice or the group. */
   const toProgramExercise = (e: any, known: Exercise): ProgramExercise => ({
     exerciseId: known.id,
@@ -1607,8 +1617,34 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
       async (ctx: Ctx) => {
         const profile = await getProfile(ctx.user!.userId);
         if (!profile) return error('Сначала создайте профиль.', 400);
-        if (profile.role !== 'trainer') return json({ exercises: catalog });
-        return json({ exercises: [...catalog, ...(await customExercises(ctx.user!.userId))] });
+        if (profile.role !== 'trainer') {
+          // The drawings her trainers picked (the first one's when two picked for the same exercise).
+          const art: Record<string, string> = {};
+          for (const k of [...(await activeKeysOf(ctx.user!.userId))].reverse()) Object.assign(art, await artOf(k.trainerId));
+          return json({ exercises: catalog.map((e) => withArt(e, art)) });
+        }
+        const art = await artOf(ctx.user!.userId);
+        return json({ exercises: [...catalog, ...(await customExercises(ctx.user!.userId))].map((e) => withArt(e, art)) });
+      },
+    ],
+
+    /**
+     * The drawing of an exercise (its icon and the movement) for this trainer and the trainer's clients: one of the
+     * catalog's drawings; empty or the exercise's own — back to its own (an own exercise: picked by its group).
+     */
+    'POST /api/exercises/:id/art': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        if (!(await trainerOnly(ctx))) return error('Доступ только для тренера.', 403);
+        const trainerId = ctx.user!.userId;
+        const id = ctx.params.id;
+        if (!(await knownExercises(trainerId)(id))) return error('Упражнение не найдено.', 404);
+        const art = typeof ctx.body?.art === 'string' ? ctx.body.art : '';
+        if (art && !catalog.some((c) => c.id === art)) return error('Нет такого рисунка.', 400);
+        const { [id]: _old, ...rest } = await artOf(trainerId);
+        const map = art && art !== id ? { ...rest, [id]: art } : rest;
+        await upsertSingle(exerciseArtTable(trainerId), { map });
+        return json({ exerciseId: id, art: map[id] || null });
       },
     ],
 
@@ -2049,11 +2085,12 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const day = program.days.find((d) => d.id === dayId);
         if (!day) return error('Тренировка не найдена.', 404);
         const equipmentOf = equipmentLookup(trainerId);
+        const art = await artOf(trainerId);
         const exercises = await Promise.all(
           day.exercises.map(async (e) => {
             const last = await first<{ sets: SetEntry[]; completedAt?: string; note?: string }>(lastResultTable(ownerId, e.exerciseId));
             return {
-              ...e,
+              ...withArt(e, art),
               equipment: await equipmentOf(e.exerciseId),
               previousSets: last?.sets || [],
               previousAt: last?.completedAt || null,
@@ -2092,8 +2129,10 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const access = await workoutOwner(ctx.user!.userId, trainerId, programId);
         if (!access) return error('Нет доступа к тренировке.', 403);
         const last = await first<{ sets: SetEntry[]; completedAt?: string; note?: string }>(lastResultTable(access.ownerId, exerciseId));
+        const art = (await artOf(trainerId))[exerciseId];
         return json({
           equipment: await equipmentLookup(trainerId)(exerciseId),
+          ...(art ? { art } : {}),
           previousSets: last?.sets || [],
           previousAt: last?.completedAt || null,
           ...(last?.note ? { previousNote: last.note } : {}),

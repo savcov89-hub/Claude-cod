@@ -8,9 +8,11 @@ import { mergeEntries, mergeText } from '../draftMerge';
 import type { AutoFinished, Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
 import { Confirm, Sheet, autoFinishedText, clock, elapsed, fmtDate, fmtSets, plural, useNow } from './common';
 import { ExercisePicker } from './ProgramBuilder';
-import { ExerciseInfoSheet, ExerciseThumb } from './exerciseArt';
+import { ArtPicker, ExerciseInfoSheet, ExerciseThumb } from './exerciseArt';
 
 let exerciseList: Promise<Exercise[]> | null = null;
+// A drawing picked for an exercise (src/ui/exerciseArt.tsx): the list is read again.
+if (typeof window !== 'undefined') window.addEventListener('tl-exercises-changed', () => (exerciseList = null));
 const loadExercises = () =>
   (exerciseList ||= api.get('/api/exercises').then(
     (r) => r.data.exercises as Exercise[],
@@ -23,6 +25,7 @@ const loadExercises = () =>
 const slotOf = (e: SessionExercise) => e.replaces || e.exerciseId;
 interface Previous {
   equipment?: string;
+  art?: string;
   previousSets: SetEntry[];
   previousAt: string | null;
   previousNote?: string;
@@ -475,6 +478,7 @@ function JournalBody({
             sets: r.sets.length,
             ...r.extra,
             equipment: info?.equipment,
+            ...(info?.art ? { art: info.art } : {}),
             previousSets: info?.previousSets || [],
             previousAt: info?.previousAt || null,
             previousNote: info?.previousNote,
@@ -486,6 +490,7 @@ function JournalBody({
           exerciseId: r.exerciseId,
           exerciseName: r.exerciseName,
           equipment: info?.equipment,
+          art: info?.art,
           previousSets: info?.previousSets || [],
           previousAt: info?.previousAt || null,
           previousNote: info?.previousNote,
@@ -493,6 +498,11 @@ function JournalBody({
       }),
     [workout, results, swapInfo],
   );
+  // Drawings the trainer picked here (exercise id → drawing; '' — back to its own), shown at once.
+  const [artNow, setArtNow] = useState<Record<string, string>>({});
+  const [artFor, setArtFor] = useState<WorkoutExercise | null>(null);
+  const drawnAs = <T extends { exerciseId: string; art?: string }>(e: T): T =>
+    e.exerciseId in artNow ? { ...e, art: artNow[e.exerciseId] || undefined } : e;
   const planSuggestions = useMemo(() => plan.map((e) => suggestNext(e, e.previousSets)), [plan]);
   const fetchPrevious = (exerciseId: string) =>
     api
@@ -1412,7 +1422,7 @@ function JournalBody({
                     setHowTo(e);
                   }}
                 >
-                  <ExerciseThumb exercise={e} size={40} />
+                  <ExerciseThumb exercise={drawnAs(e)} size={40} />
                   <span className="ex-num num">{ei + 1}</span>
                 </button>
                 <div className="ex-name">
@@ -1594,7 +1604,25 @@ function JournalBody({
         )}
       </fieldset>
 
-      {howTo && <ExerciseInfoSheet exercise={howTo} name={howTo.exerciseName} onClose={() => setHowTo(null)} />}
+      {howTo && !artFor && (
+        <ExerciseInfoSheet
+          exercise={drawnAs(howTo)}
+          name={howTo.exerciseName}
+          onClose={() => setHowTo(null)}
+          onChangeArt={workout.actorRole === 'trainer' ? () => setArtFor(drawnAs(howTo)) : undefined}
+        />
+      )}
+      {artFor && (
+        <ArtPicker
+          exercise={artFor}
+          name={artFor.exerciseName}
+          onClose={() => setArtFor(null)}
+          onSaved={(art) => {
+            setArtNow((cur) => ({ ...cur, [artFor.exerciseId]: art || '' }));
+            setArtFor(null);
+          }}
+        />
+      )}
       {swapping && (
         <ExercisePicker
           title={'Замена: ' + plan[swapping.ei].exerciseName}

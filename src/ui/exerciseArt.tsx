@@ -1,9 +1,12 @@
 // Exercise pictures in the app: a small one for lists and journal cards, and how an exercise is done (the movement,
 // the start and the end, the muscles). The drawings themselves are in src/ui/figure (checked by scripts/check-figures.tsx).
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { Search } from 'lucide-react';
+import { catalog } from '../catalog';
 import { exerciseRules, muscleNames } from '../trainingRules';
 import { TECHNIQUE } from '../exerciseTechnique';
-import { Sheet } from './common';
+import { api, readError } from '../transport';
+import { Sheet, searchKey } from './common';
 import { FigureMotion, FigurePose, MOVES, type AnyMove } from './figure';
 
 export interface ArtSubject {
@@ -12,6 +15,8 @@ export interface ArtSubject {
   muscleGroup?: string;
   equipment?: string;
   muscles?: string[];
+  /** The drawing the trainer picked (id of the catalog exercise drawn). */
+  art?: string;
 }
 
 /** Muscle group of an own exercise from its first muscle (when the group is not known). */
@@ -34,6 +39,7 @@ const GROUP_OF: Record<string, string> = {
 
 /** The picture of an exercise: its own, or a typical one of its muscle group and equipment (the trainer's own). */
 export function moveFor(e: ArtSubject): AnyMove {
+  if (e.art && MOVES[e.art]) return MOVES[e.art];
   const id = e.exerciseId || e.id || '';
   if (MOVES[id]) return MOVES[id];
   const g = e.muscleGroup || GROUP_OF[e.muscles?.[0] || ''] || '';
@@ -84,6 +90,7 @@ export const ExerciseThumb = memo(
   (a, b) =>
     a.size === b.size &&
     (a.exercise.exerciseId || a.exercise.id) === (b.exercise.exerciseId || b.exercise.id) &&
+    a.exercise.art === b.exercise.art &&
     a.exercise.equipment === b.exercise.equipment &&
     a.exercise.muscleGroup === b.exercise.muscleGroup &&
     (a.exercise.muscles || []).join() === (b.exercise.muscles || []).join(),
@@ -148,13 +155,31 @@ function TechniqueText({ id }: { id: string }) {
   );
 }
 
-/** How an exercise is done: the pictures, the technique, the body position and the muscles it works. */
-export function ExerciseInfoSheet({ exercise, name, onClose }: { exercise: ArtSubject; name: string; onClose: () => void }) {
+/**
+ * How an exercise is done: the pictures, the technique, the body position and the muscles it works.
+ * `onChangeArt` (the trainer): a button to pick another drawing.
+ */
+export function ExerciseInfoSheet({
+  exercise,
+  name,
+  onClose,
+  onChangeArt,
+}: {
+  exercise: ArtSubject;
+  name: string;
+  onClose: () => void;
+  onChangeArt?: () => void;
+}) {
   const id = exercise.exerciseId || exercise.id || '';
   const rule = exerciseRules[id];
   return (
     <Sheet title={name} onClose={onClose}>
       <ExerciseFigures exercise={exercise} />
+      {onChangeArt && (
+        <button className="btn btn-sm btn-quiet art-change" onClick={onChangeArt}>
+          Сменить картинку
+        </button>
+      )}
       <TechniqueText id={id} />
       {rule ? (
         <p className="small xa-note">
@@ -170,6 +195,107 @@ export function ExerciseInfoSheet({ exercise, name, onClose }: { exercise: ArtSu
           <p className="small muted xa-note">{[exercise.muscleGroup, exercise.equipment].filter(Boolean).join(' · ')}</p>
         )
       )}
+    </Sheet>
+  );
+}
+
+/** Saves the drawing picked for an exercise ('' — back to its own); the answer is the drawing now in use. */
+export async function saveExerciseArt(exerciseId: string, art: string): Promise<string | undefined> {
+  const r = await api.post('/api/exercises/' + encodeURIComponent(exerciseId) + '/art', { art });
+  // Lists of exercises loaded before (the journal's) are read again.
+  window.dispatchEvent(new Event('tl-exercises-changed'));
+  return r.data.art || undefined;
+}
+
+/**
+ * The trainer picks the drawing of an exercise among all the app's drawings: its icon and the movement change
+ * for the trainer and the trainer's clients. The pick is shown moving at the top before it is saved.
+ */
+export function ArtPicker({
+  exercise,
+  name,
+  onClose,
+  onSaved,
+}: {
+  exercise: ArtSubject;
+  name: string;
+  onClose: () => void;
+  onSaved: (art: string | undefined) => void;
+}) {
+  const id = exercise.exerciseId || exercise.id || '';
+  // A catalog exercise has a drawing of its own; an own one is drawn by its muscle group ('').
+  const own = MOVES[id] ? id : '';
+  const current = exercise.art || own;
+  const [pick, setPick] = useState(current);
+  const [q, setQ] = useState('');
+  const [group, setGroup] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const groups = useMemo(() => Array.from(new Set(catalog.map((c) => c.muscleGroup))), []);
+  const list = useMemo(() => {
+    const k = searchKey(q.trim());
+    return catalog.filter((c) => (!group || c.muscleGroup === group) && (!k || searchKey(c.name + ' ' + c.equipment).includes(k)));
+  }, [q, group]);
+  const save = async (art: string) => {
+    setBusy(true);
+    setErr('');
+    try {
+      onSaved(await saveExerciseArt(id, art));
+    } catch (e) {
+      setErr(readError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const pickName = pick ? catalog.find((c) => c.id === pick)?.name || pick : 'по группе мышц';
+  return (
+    <Sheet title="Картинка упражнения" onClose={onClose}>
+      <div className="art-preview">
+        <span className="xa-motion">
+          <FigureMotion move={moveFor({ ...exercise, art: pick || undefined })} size={128} />
+        </span>
+        <div className="grow">
+          <strong className="art-for">{name}</strong>
+          <span className="muted small">
+            Рисунок: {pickName}
+            {pick === own && own ? ' (свой)' : ''}
+          </span>
+          <div className="row gap wrap">
+            <button className="btn btn-primary btn-sm" disabled={busy || pick === current} onClick={() => void save(pick === own ? '' : pick)}>
+              {busy ? 'Сохраняем…' : 'Сохранить'}
+            </button>
+            {exercise.art && (
+              <button className="btn btn-sm" disabled={busy} onClick={() => void save('')}>
+                Как было
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+      {err && <div className="alert">{err}</div>}
+      <label className="search">
+        <Search size={16} />
+        <input id="art-search" placeholder="Найти рисунок: жим, тяга, присед…" value={q} onChange={(e) => setQ(e.target.value)} />
+      </label>
+      <div className="filters">
+        <button className={'filter' + (!group ? ' on' : '')} onClick={() => setGroup('')}>
+          Все
+        </button>
+        {groups.map((g) => (
+          <button key={g} className={'filter' + (group === g ? ' on' : '')} onClick={() => setGroup(g)}>
+            {g}
+          </button>
+        ))}
+      </div>
+      <div className="art-grid">
+        {list.map((c) => (
+          <button key={c.id} className={'art-choice' + (pick === c.id ? ' on' : '')} aria-pressed={pick === c.id} aria-label={'Рисунок: ' + c.name} onClick={() => setPick(c.id)}>
+            <ExerciseThumb exercise={{ id: c.id }} size={56} />
+            <small>{c.name}</small>
+          </button>
+        ))}
+        {!list.length && <p className="muted small center-text">Ничего не найдено.</p>}
+      </div>
     </Sheet>
   );
 }

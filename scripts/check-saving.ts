@@ -611,6 +611,34 @@ async function main() {
     at('2026-10-02T07:00:00Z');
   }
 
+  console.log('22. Тренер меняет картинку упражнения: у него и у клиента, сброс, чужим нельзя');
+  {
+    const s = await setup('v');
+    const r = await handle('POST', '/api/exercises/leg-press/art', { art: 'hack-squat' }, who(s.trainer));
+    expect(r.status === 200 && r.data.art === 'hack-squat', 'saved', r.data);
+    const mine = (await call(s.trainer, 'GET', '/api/exercises')).exercises.find((e: any) => e.id === 'leg-press');
+    expect(mine?.art === 'hack-squat', "the trainer's exercise list has it", mine);
+    const w = await call(s.clientUser, 'GET', `/api/workout/${s.trainer}/${s.program.id}/day-1`);
+    expect(w.day.exercises.find((e: any) => e.exerciseId === 'leg-press')?.art === 'hack-squat', "the client's workout shows it", w.day.exercises[0]);
+    const hers = (await call(s.clientUser, 'GET', '/api/exercises')).exercises.find((e: any) => e.id === 'leg-press');
+    expect(hers?.art === 'hack-squat', "the client's exercise list too", hers);
+    const prev = await call(s.clientUser, 'GET', `/api/previous/${s.trainer}/${s.program.id}/leg-press`);
+    expect(prev.art === 'hack-squat', 'and the answer for a replacement', prev);
+    const other = await setup('w');
+    const theirs = await call(other.trainer, 'GET', `/api/workout/${other.trainer}/${other.program.id}/day-1`);
+    expect(!theirs.day.exercises.find((e: any) => e.exerciseId === 'leg-press')?.art, "another trainer's clients are not affected");
+    const bad = await handle('POST', '/api/exercises/leg-press/art', { art: 'no-such' }, who(s.trainer));
+    expect(bad.status === 400, 'an unknown drawing is refused', bad.status);
+    const byClient = await handle('POST', '/api/exercises/leg-press/art', { art: 'rdl' }, who(s.clientUser));
+    expect(byClient.status === 403, 'a client cannot change it', byClient.status);
+    const unknown = await handle('POST', '/api/exercises/custom%3Anope/art', { art: 'rdl' }, who(s.trainer));
+    expect(unknown.status === 404, 'an exercise the trainer does not have: refused', unknown.status);
+    const own = await handle('POST', '/api/exercises/leg-press/art', { art: 'leg-press' }, who(s.trainer));
+    expect(own.status === 200 && own.data.art === null, 'its own drawing again: the pick is removed', own.data);
+    const after = (await call(s.trainer, 'GET', '/api/exercises')).exercises.find((e: any) => e.id === 'leg-press');
+    expect(!after?.art, 'back to its own drawing', after);
+  }
+
   console.log(`\n${checks} проверок, ошибок: ${failures}`);
   process.exit(failures ? 1 : 0);
 }
