@@ -5,7 +5,6 @@ import { ExerciseThumb } from './exerciseArt';
 import { DAY_FOCUS, DEFAULT_SETS, focusDay, refreshExercises, roleOf, templateDays, templates } from '../templates';
 import {
   SESSION_SOFT_LIMIT,
-  cycleLoad,
   exerciseRules,
   groupMuscles,
   muscleLoad,
@@ -17,6 +16,7 @@ import { fmtKg } from '../analytics';
 import type { ClientItem, Exercise, Program, ProgramDay, ProgramExercise } from '../types';
 import { Confirm, Sheet, plural, searchKey } from './common';
 import { AddExercise } from './Library';
+import { MuscleChips, PlanVolume } from './Volume';
 
 export interface BuilderOptions {
   clientId?: string;
@@ -51,6 +51,8 @@ export function ProgramBuilder({
       : [{ id: 'day-1', name: 'Тренировка A', exercises: [] }],
   );
   const [activeDay, setActiveDay] = useState(0);
+  // Workouts a week when not every workout of the program is done each week (undefined — each once).
+  const [perWeek, setPerWeek] = useState<number | undefined>(options.program?.perWeek);
   // Focus of a workout (muscle groups): asking before replacing exercises; the same focus again gives other exercises.
   const [focusAsk, setFocusAsk] = useState<{ key: string; label: string } | null>(null);
   const [lastFocus, setLastFocus] = useState<{ dayId: string; key: string; variant: number } | null>(null);
@@ -66,7 +68,6 @@ export function ProgramBuilder({
 
   const day = days[Math.min(activeDay, days.length - 1)];
   const dayLoad = muscleLoad(day.exercises);
-  const cycle = useMemo(() => cycleLoad(days), [days]);
   const warnings = programWarnings(days);
   const issue = programIssue(days);
 
@@ -74,6 +75,7 @@ export function ProgramBuilder({
     setUndo({ days, name });
     setDays(templateDays(t, c, v, abs));
     setName(templates[t].name);
+    setPerWeek(undefined);
     setTemplate(t);
     setCount(c);
     setVariant(v);
@@ -155,9 +157,10 @@ export function ProgramBuilder({
         await api.post('/api/programs/' + options.program!.id, {
           name: name.trim(),
           days,
+          perWeek: perWeek ?? null,
           base: { updatedAt: options.program!.updatedAt || options.program!.createdAt, days: options.program!.days },
         });
-      else await api.post('/api/programs', { clientId, name: name.trim(), days });
+      else await api.post('/api/programs', { clientId, name: name.trim(), days, ...(perWeek ? { perWeek } : {}) });
       await onSaved();
     } catch (e) {
       setErrorText(readError(e));
@@ -438,21 +441,10 @@ export function ProgramBuilder({
                 {info ? (
                   <p className="muted small b-note">{info.note}</p>
                 ) : (
-                  <label className="field">
-                    <span>Мышцы (для подсчёта объёма)</span>
-                    <select
-                      multiple
-                      className="muscle-select"
-                      value={e.muscles || []}
-                      onChange={(ev) => patchExercise(i, { muscles: Array.from(ev.target.selectedOptions, (o) => o.value) })}
-                    >
-                      {Object.entries(muscleNames).map(([k, label]) => (
-                        <option key={k} value={k}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="field">
+                    <span>Мышцы для подсчёта объёма: нажатие — 1 подход, ещё раз — ½</span>
+                    <MuscleChips value={e.muscles || []} onChange={(muscles) => patchExercise(i, { muscles })} />
+                  </div>
                 )}
                 <div className="rx">
                   {(
@@ -489,19 +481,7 @@ export function ProgramBuilder({
         </button>
       </div>
 
-      <section className="block">
-        <h4>Объём за цикл ({days.length} {days.length === 1 ? 'тренировка' : days.length < 5 ? 'тренировки' : 'тренировок'})</h4>
-        <p className="muted small">Если цикл проходится за неделю — это недельный объём. Косвенное участие считается как 0,5 подхода. Ориентир для роста — 10–20.</p>
-        <div className="chips">
-          {Object.entries(cycle)
-            .sort((a, b) => b[1].total - a[1].total)
-            .map(([m, v]) => (
-              <span key={m} className={'chip ' + (v.total < 6 ? 'chip-muted' : v.total <= 20 ? 'chip-good' : 'chip-warn')}>
-                {muscleNames[m]} {fmtKg(v.total)}
-              </span>
-            ))}
-        </div>
-      </section>
+      <PlanVolume days={days} perWeek={perWeek} onPerWeek={setPerWeek} />
 
       {warnings.length > 0 && (
         <div className="warn-list">

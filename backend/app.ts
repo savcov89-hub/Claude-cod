@@ -1,5 +1,6 @@
 import { catalog } from '../src/catalog';
 import { groupMuscles, exerciseRules, programIssue } from '../src/trainingRules';
+import { cleanMuscles } from '../src/volume';
 import { clientInsights, sessionRecords, type ClientInsights } from '../src/analytics';
 import { nowIso } from '../src/clock';
 import type { AutoFinished, OpenWorkout } from '../src/types';
@@ -133,6 +134,8 @@ interface ProgramRecord {
   createdAt: string;
   updatedAt?: string;
   archived?: boolean;
+  /** Workouts a week (1–7) when not every workout of the program is done each week: the plan of the weekly volume. */
+  perWeek?: number;
   /** Hidden per-client program for workouts made up in the gym ("Свободная тренировка"). */
   free?: boolean;
   /** Free program only: exercises of the last free workout, to start the next one "как в прошлый раз". */
@@ -381,7 +384,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     name,
     muscleGroup: text(body?.muscleGroup, 60) || 'Другое',
     equipment: text(body?.equipment, 60) || 'Другое',
-    muscles: Array.isArray(body?.muscles) ? body.muscles.map(String).slice(0, 6) : [],
+    muscles: cleanMuscles(body?.muscles),
   });
 
   async function customExercises(trainerId: string): Promise<Exercise[]> {
@@ -524,7 +527,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
       const planned = day?.exercises.find((p) => p.exerciseId === e.exerciseId)?.muscles;
       const known = planned?.length ? null : await findKnown(e.exerciseId);
       const muscles = planned?.length ? planned : known?.muscles?.length ? known.muscles : groupMuscles(known?.muscleGroup);
-      if (muscles.length) (e as SessionExercise).muscles = muscles.slice(0, 6);
+      if (muscles.length) (e as SessionExercise).muscles = cleanMuscles(muscles);
     }
     return performed;
   }
@@ -825,14 +828,19 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     const a = art[e.exerciseId || e.id || ''];
     return a ? { ...e, art: a } : e;
   };
+  /** Workouts a week, kept only when it differs from the number of workouts in the program. */
+  const perWeekOf = (v: unknown, days: number) => {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) && n >= 1 && n <= 7 && n !== Math.min(days, 7) ? n : undefined;
+  };
   /** Program entry for `known` with the submitted targets; muscles from the rules, the trainer's choice or the group. */
   const toProgramExercise = (e: any, known: Exercise): ProgramExercise => ({
     exerciseId: known.id,
     exerciseName: known.name,
     muscles:
       exerciseRules[known.id]?.primary ||
-      (Array.isArray(e.muscles) && e.muscles.length
-        ? e.muscles.map(String).slice(0, 6)
+      (cleanMuscles(e.muscles).length
+        ? cleanMuscles(e.muscles)
         : known.muscles?.length
           ? known.muscles
           : groupMuscles(known.muscleGroup)),
@@ -1707,6 +1715,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const days = await cleanDays(ctx.user!.userId, ctx.body?.days);
         if (typeof days === 'string') return error(days, 400);
         const at = nowIso();
+        const perWeek = perWeekOf(ctx.body?.perWeek, days.length);
         const record: ProgramRecord = {
           trainerId: ctx.user!.userId,
           trainerName: profile.name,
@@ -1716,6 +1725,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           days,
           createdAt: at,
           updatedAt: at,
+          ...(perWeek ? { perWeek } : {}),
         };
         const [programId] = await db.add(programsTable(ctx.user!.userId), [record]);
         if (!programId) return error('Не удалось сохранить программу.', 500);
@@ -1762,7 +1772,10 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const after = lastIdx >= 0 ? days[lastIdx + 1] : undefined;
         if (program.lastCompletedAt && program.nextDayId === program.days[0]?.id && after && !program.days.some((d) => d.id === after.id))
           nextDayId = after.id;
-        const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
+        const { id: _drop, perWeek: oldPerWeek, ...kept } = program as ProgramRecord & { id?: string };
+        // Sent by the editor; a request without it keeps what there was.
+        const perWeek = ctx.body && 'perWeek' in ctx.body ? perWeekOf(ctx.body.perWeek, days.length) : perWeekOf(oldPerWeek, days.length);
+        const rest: Omit<ProgramRecord, 'name' | 'days' | 'nextDayId'> = { ...kept, ...(perWeek ? { perWeek } : {}) };
         const [ok] = await db.update(programsTable(trainerId), [
           { id: programId, record: { ...rest, name, days, nextDayId, updatedAt: nowIso() } },
         ]);

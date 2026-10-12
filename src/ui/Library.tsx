@@ -2,10 +2,12 @@ import { Fragment, useMemo, useState } from 'react';
 import { Image as ImageIcon, Pencil, Plus, Search } from 'lucide-react';
 import { EQUIPMENT_TYPES, unitNote } from '../analytics';
 import { api, readError } from '../transport';
-import { exerciseRules, muscleNames } from '../trainingRules';
+import { exerciseRules, groupMuscles } from '../trainingRules';
+import { exerciseLoad, loadText, ownLoad } from '../volume';
 import type { Exercise } from '../types';
 import { Sheet, searchKey } from './common';
 import { ArtPicker, ExerciseFigures, ExerciseThumb } from './exerciseArt';
+import { MuscleChips } from './Volume';
 
 export function Library({ exercises, onCreated }: { exercises: Exercise[]; onCreated: () => Promise<void> }) {
   const [q, setQ] = useState('');
@@ -51,8 +53,13 @@ export function Library({ exercises, onCreated }: { exercises: Exercise[]; onCre
                     <span className="lib-detail small">
                       <b>{info.position}.</b> {info.note}
                       <br />
-                      Основные: {info.primary.map((m) => muscleNames[m]).join(', ')}
-                      {info.secondary.length ? ' · косвенно: ' + info.secondary.map((m) => muscleNames[m]).join(', ') : ''}
+                      Один подход в объёме недели: {loadText(exerciseLoad(e.id))}
+                    </span>
+                  )}
+                  {open === e.id && !info && (
+                    <span className="lib-detail small">
+                      {loadText(ownLoad(e.muscles?.length ? e.muscles : groupMuscles(e.muscleGroup))) ||
+                        'Мышцы не указаны — упражнение не попадёт в объём недели. Укажите их в «Изменить».'}
                     </span>
                   )}
                 </span>
@@ -164,18 +171,8 @@ export function AddExercise({
         </div>
       </div>
       <div className="field">
-        <span>Основные мышцы — для подсчёта объёма</span>
-        <div className="chips">
-          {Object.entries(muscleNames).map(([k, label]) => (
-            <button
-              key={k}
-              className={'filter' + (muscles.includes(k) ? ' on' : '')}
-              onClick={() => setMuscles(muscles.includes(k) ? muscles.filter((m) => m !== k) : [...muscles, k])}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <span>Мышцы для объёма недели: нажатие — основная работа (1 подход), ещё раз — участие (½)</span>
+        <MuscleChips value={muscles} onChange={setMuscles} />
       </div>
       <button className="btn btn-primary btn-block" disabled={busy} onClick={add}>
         {busy ? 'Сохраняем…' : exercise ? 'Сохранить' : 'Добавить в базу'}

@@ -1,19 +1,5 @@
-export const muscleNames: Record<string, string> = {
-  chest: 'Грудь',
-  lats: 'Широчайшие',
-  upperBack: 'Верх спины',
-  delts: 'Дельты',
-  biceps: 'Сгибатели локтя',
-  triceps: 'Трицепс',
-  quads: 'Квадрицепс',
-  hamstrings: 'Задняя поверхность бедра',
-  glutes: 'Большая ягодичная',
-  abductors: 'Отводящие бедра',
-  adductors: 'Приводящие бедра',
-  calves: 'Икроножные / камбаловидная',
-  abs: 'Пресс',
-  erectors: 'Разгибатели спины',
-};
+import { exerciseLoad, groupOfKey, muscleNames } from './volume';
+export { muscleNames };
 export interface ExerciseRule {
   primary: string[];
   secondary: string[];
@@ -463,7 +449,6 @@ export const groupMuscles = (group = ''): string[] => {
 };
 /** Per-session soft limit. Secondary participation counts as half a set. */
 export const SESSION_SOFT_LIMIT = 9;
-export const INDIRECT_FACTOR = 0.5;
 export const musclesOf = (exerciseId: string, fallback?: string[]) => {
   const info = exerciseRules[exerciseId];
   return {
@@ -487,21 +472,19 @@ export function muscleResolver(
   for (const p of programs) for (const d of p.days) for (const e of d.exercises) if (e.muscles?.length) known.set(e.exerciseId, e.muscles);
   return (exerciseId: string, own?: string[]) => (own?.length ? own : known.get(exerciseId));
 }
+/** Sets per muscle group (see `src/volume.ts`: ½ for taking part); exercises with no muscles known. */
 export function muscleLoad(exercises: VolumeExercise[]) {
-  const load: Record<
-    string,
-    { direct: number; indirect: number; total: number }
-  > = {};
+  const load: Record<string, { total: number }> = {};
   const unknown: string[] = [];
   for (const e of exercises) {
-    const { primary, secondary } = musclesOf(e.exerciseId, e.muscles);
-    if (!primary.length) unknown.push(e.exerciseName);
-    for (const m of new Set([...primary, ...secondary])) {
-      const entry = (load[m] ||= { direct: 0, indirect: 0, total: 0 });
-      if (primary.includes(m)) entry.direct += e.sets;
-      else entry.indirect += e.sets * INDIRECT_FACTOR;
-      entry.total = entry.direct + entry.indirect;
+    const parts = exerciseLoad(e.exerciseId, e.muscles);
+    const groups: Record<string, number> = {};
+    for (const [id, f] of Object.entries(parts)) {
+      const g = groupOfKey(id);
+      if (g) groups[g] = Math.max(groups[g] || 0, f);
     }
+    if (!Object.keys(groups).length) unknown.push(e.exerciseName);
+    for (const [g, f] of Object.entries(groups)) (load[g] ||= { total: 0 }).total += f * e.sets;
   }
   return {
     load,
@@ -550,8 +533,4 @@ export function programWarnings(
       );
   }
   return out;
-}
-/** Sets per muscle over the whole program cycle (each day once). */
-export function cycleLoad(days: Array<{ exercises: VolumeExercise[] }>) {
-  return muscleLoad(days.flatMap((d) => d.exercises)).load;
 }

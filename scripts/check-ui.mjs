@@ -1042,6 +1042,53 @@ await scenario('30. Тренер меняет картинку упражнен�
   expect(!ex.length, 'back to their own drawings', ex.map((e) => e.id));
 });
 
+await scenario('31. Объём недели: Пн–Вс, сделано и план; «тренировок в неделю» в программе', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: 'Павел' }).first().locator('.client-open').click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('tab', { name: 'Прогресс' }).click();
+  await p.waitForTimeout(800);
+  const box = p.locator('.week-volume');
+  const sessions = (await call('get', `/api/client/${idOf('Павел')}/history`)).sessions;
+  const mon = new Date();
+  mon.setHours(0, 0, 0, 0);
+  mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
+  const thisWeek = sessions.filter((x) => new Date(x.completedAt) >= mon);
+  const text = await box.innerText();
+  expect(/Эта неделя/.test(text) && new RegExp('^' + thisWeek.length + ' тренировк', 'm').test(text), 'this week (from Monday): ' + thisWeek.length + ' workouts', text.slice(0, 160));
+  const chest = (await box.locator('.vol-row', { hasText: /^Грудь/ }).first().innerText()).replace(/\s+/g, ' ');
+  expect(/Грудь \d+(,5)? \/ \d+(,5)?/.test(chest), 'a muscle row shows done / planned', chest);
+  const tri = await box.locator('.vol-row', { hasText: 'Длинная головка' }).count();
+  expect(tri === 1, 'the long head of the triceps is counted apart', tri);
+  await box.getByRole('button', { name: 'Прошлая неделя' }).click();
+  await p.waitForTimeout(300);
+  expect(!/Эта неделя/.test(await box.innerText()), '‹ shows the week before');
+  // Workouts a week: 2 of the 3 workouts of the program.
+  await p.getByRole('tab', { name: 'Программы' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('article.program footer').getByRole('button', { name: 'Изменить' }).first().click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('group', { name: 'Тренировок в неделю' }).getByRole('button', { name: '2', exact: true }).click();
+  expect(/в среднем 67%/.test(await p.locator('.week-volume').innerText()), 'the editor explains: 2 of 3 a week — 67 % of the program');
+  await p.getByRole('button', { name: 'Сохранить изменения' }).click();
+  await p.waitForTimeout(1200);
+  expect((await programOf('Павел')).perWeek === 2, 'the program keeps 2 workouts a week', (await programOf('Павел')).perWeek);
+  await p.getByRole('tab', { name: 'Прогресс' }).click();
+  await p.waitForTimeout(600);
+  expect(/тренировк\S* из 2 /.test(await p.locator('.week-volume').innerText()), 'the weekly plan is for 2 workouts');
+  await p.getByRole('tab', { name: 'Программы' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('article.program footer').getByRole('button', { name: 'Изменить' }).first().click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('group', { name: 'Тренировок в неделю' }).getByRole('button', { name: '3', exact: true }).click();
+  await p.getByRole('button', { name: 'Сохранить изменения' }).click();
+  await p.waitForTimeout(1200);
+  expect((await programOf('Павел')).perWeek === undefined, 'back to each workout once a week', (await programOf('Павел')).perWeek);
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

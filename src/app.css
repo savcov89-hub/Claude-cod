@@ -1488,52 +1488,150 @@ table {
   white-space: normal;
 }
 
-/* progress */
-.muscle-bars {
+/* progress: weekly volume per muscle — done over the planned segment, the 10–20 band dashed */
+.week-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.week-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.week-nav .icon-btn:disabled {
+  opacity: 0.3;
+}
+.vol-bars {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+.vol-group {
   display: grid;
   gap: 6px;
 }
-.muscle-bar {
+.vol-row {
   display: grid;
-  grid-template-columns: minmax(96px, 150px) 1fr 34px;
-  gap: 10px;
-  align-items: center;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: 'name num' 'bar bar';
+  gap: 4px 10px;
+  align-items: end;
   font-size: 13px;
 }
-.muscle-bar strong {
-  text-align: right;
+.vol-name {
+  grid-area: name;
+  line-height: 1.25;
 }
-.bar {
+.vol-row .vol-bar {
+  grid-area: bar;
+}
+.vol-row.vol-whole .vol-name {
+  font-weight: 600;
+}
+.vol-row.vol-part {
+  margin-left: 2px;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.vol-joints {
+  opacity: 0.8;
+}
+.vol-bar {
   position: relative;
   height: 10px;
   border-radius: 5px;
   background: var(--surface-2);
 }
-.bar i {
+.vol-row.vol-part .vol-bar {
+  height: 6px;
+  border-radius: 3px;
+}
+.vol-bar i {
   position: absolute;
   inset: 0 auto 0 0;
-  border-radius: 5px;
+  border-radius: inherit;
 }
-.bar i.low {
-  background: var(--ink-2);
-  opacity: 0.5;
+.vol-plan {
+  background: var(--info-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--info) 45%, transparent);
 }
-.bar i.ok {
-  background: var(--good);
+.vol-done {
+  background: var(--info);
 }
-.bar i.high {
-  background: var(--warn);
-}
-/* target band 10–20 sets on a 0–24 scale */
-.band {
+.vol-band {
   position: absolute;
   top: -3px;
   bottom: -3px;
-  left: 41.6%;
-  width: 41.7%;
   border: 1px dashed var(--ink-2);
   border-radius: 4px;
   opacity: 0.45;
+  pointer-events: none;
+}
+.vol-num {
+  grid-area: num;
+  text-align: right;
+  white-space: nowrap;
+}
+.vol-ok {
+  color: var(--good);
+  font-weight: 700;
+}
+.vol-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 12px;
+}
+.vol-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.vol-legend .vol-rule {
+  display: block;
+  flex-basis: 100%;
+  line-height: 1.35;
+}
+.sw {
+  display: inline-block;
+  width: 14px;
+  height: 8px;
+  border-radius: 3px;
+}
+.sw.done {
+  background: var(--info);
+}
+.sw.plan {
+  background: var(--info-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--info) 45%, transparent);
+}
+.sw.band {
+  border: 1px dashed var(--ink-2);
+}
+/* muscles of an own exercise: on — 1 set, half — ½ */
+.muscle-chips {
+  display: grid;
+  gap: 6px;
+}
+.muscle-chip-row {
+  display: grid;
+  gap: 2px;
+}
+.muscle-chips .filter small {
+  margin-left: 6px;
+  font-weight: 700;
+}
+.filter.half {
+  background: var(--info-soft);
+  border-color: var(--info);
+  color: var(--info);
 }
 .trend-list {
   display: grid;

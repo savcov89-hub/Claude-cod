@@ -3,7 +3,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import { catalog } from '../catalog';
-import { exerciseRules, muscleNames } from '../trainingRules';
+import { exerciseRules } from '../trainingRules';
+import { exerciseLoad, loadText } from '../volume';
 import { TECHNIQUE } from '../exerciseTechnique';
 import { api, readError } from '../transport';
 import { Sheet, searchKey } from './common';
@@ -185,10 +186,7 @@ export function ExerciseInfoSheet({
         <p className="small xa-note">
           <b>{rule.position}.</b> {rule.note}
           <br />
-          <span className="muted">
-            Основные: {rule.primary.map((m) => muscleNames[m]).join(', ')}
-            {rule.secondary.length ? ' · косвенно: ' + rule.secondary.map((m) => muscleNames[m]).join(', ') : ''}
-          </span>
+          <span className="muted">Один подход в объёме недели: {loadText(exerciseLoad(id))}</span>
         </p>
       ) : (
         (exercise.muscleGroup || exercise.equipment) && (

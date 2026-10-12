@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
-import { allTrends, fmtKg, recentMuscleSets, type ExerciseTrend } from '../analytics';
-import { muscleNames, muscleResolver } from '../trainingRules';
+import { allTrends, fmtKg, type ExerciseTrend } from '../analytics';
 import type { Exercise, Program, Session } from '../types';
 import { Empty, Sparkline, TrendChip, fmtDate, fmtSets, plural } from './common';
 import { PersonalBests } from './Records';
+import { WeekVolume } from './Volume';
 
 const order: Record<string, number> = { down: 0, stall: 1, pr: 2, up: 3, flat: 4, new: 5 };
 
@@ -26,10 +26,6 @@ export function ProgressView({
           b.series[b.series.length - 1].date.localeCompare(a.series[a.series.length - 1].date),
       ),
     [sessions],
-  );
-  const muscles = useMemo(
-    () => recentMuscleSets(sessions, 7, Date.now(), muscleResolver(programs, exercises)),
-    [sessions, programs, exercises],
   );
   if (!sessions.length)
     return <Empty title="Пока нет завершённых тренировок" text="Прогресс появится после первой записанной тренировки." />;
@@ -57,28 +53,9 @@ export function ProgressView({
         </div>
       </div>
 
-      <PersonalBests sessions={sessions} />
+      <WeekVolume sessions={sessions} programs={programs} exercises={exercises} />
 
-      {Object.keys(muscles).length > 0 && (
-        <section className="block">
-          <h4>Подходов на мышцу за 7 дней</h4>
-          <p className="muted small">Косвенное участие считается как половина подхода. Ориентир для роста — 10–20 в неделю.</p>
-          <div className="muscle-bars">
-            {Object.entries(muscles)
-              .sort((a, b) => b[1] - a[1])
-              .map(([m, v]) => (
-                <div className="muscle-bar" key={m}>
-                  <span>{muscleNames[m] || m}</span>
-                  <div className="bar">
-                    <i className={v < 6 ? 'low' : v <= 20 ? 'ok' : 'high'} style={{ width: Math.min(100, (v / 24) * 100) + '%' }} />
-                    <b className="band" aria-hidden="true" />
-                  </div>
-                  <strong className="num">{fmtKg(Math.round(v * 2) / 2)}</strong>
-                </div>
-              ))}
-          </div>
-        </section>
-      )}
+      <PersonalBests sessions={sessions} />
 
       <section className="block">
         <h4>Упражнения</h4>

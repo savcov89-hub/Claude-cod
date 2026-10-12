@@ -3,6 +3,7 @@ import { Trash2 } from 'lucide-react';
 import { weightUnit } from '../analytics';
 import { safeStorage } from '../transport';
 import { exerciseRules, groupMuscles } from '../trainingRules';
+import { groupOfKey } from '../volume';
 import type { Exercise, Program, Session, SetEntry } from '../types';
 import { Confirm, Empty, fmtDate, fmtDateTime, fmtSets } from './common';
 
@@ -21,7 +22,10 @@ const SEGMENTS: Array<[string, string[]]> = [
   ['Пресс', ['abs']],
 ];
 const OTHER = 'Другое';
-const segmentOf = (muscle?: string) => SEGMENTS.find(([, list]) => muscle && list.includes(muscle))?.[0] || OTHER;
+const segmentOf = (muscle?: string) => {
+  const group = groupOfKey(muscle);
+  return SEGMENTS.find(([, list]) => group && list.includes(group))?.[0] || OTHER;
+};
 
 interface Entry {
   sessionId: string;

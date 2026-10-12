@@ -143,6 +143,8 @@ export async function seed(call: Call) {
       clientId: client.clientId,
       name: templates[tIndex].name,
       days: templateDays(tIndex, 6, 0, true),
+      // Workouts a week as the client goes (the trial week of every day aside).
+      ...(plan.weekdays.length && plan.weekdays.length < 7 ? { perWeek: plan.weekdays.length } : {}),
     });
 
     const dates: Date[] = [];

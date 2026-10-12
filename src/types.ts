@@ -95,6 +95,8 @@ export interface Program {
   createdAt: string;
   updatedAt?: string;
   archived?: boolean;
+  /** Workouts a week, when it differs from the number of workouts in the program (plan of the weekly volume). */
+  perWeek?: number;
 }
 export interface SetEntry {
   weight: number;
