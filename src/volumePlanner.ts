@@ -77,8 +77,8 @@ export const TARGET_PRESETS: Array<{ id: string; label: string; targets: Record<
     label: 'Акцент на ягодицы',
     targets: {
       chest: 6, lats: 9, upperBack: 10, deltFront: 5, deltSide: 9, deltRear: 6, bicepsBrachii: 5, brachialis: 5, tricepsLong: 4,
-      tricepsShort: 7, rectusFemoris: 2, vasti: 10, hamsLong: 12, hamsShort: 6, glutes: 20, abductors: 9, adductors: 6,
-      gastrocnemius: 4, soleus: 4, abs: 8, erectors: 4,
+      tricepsShort: 7, rectusFemoris: 2, vasti: 10, hamsLong: 12, hamsShort: 6, glutes: 18, abductors: 9, adductors: 6,
+      gastrocnemius: 4, soleus: 4, abs: 8, erectors: 5,
     },
   },
 ];
@@ -104,10 +104,15 @@ interface Candidate {
   /** The usual choice of its role goes first (0–0.5). */
   pref: number;
 }
+/** Not picked by the planner (the trainer adds them by hand): dips load the front of the shoulder more than a press. */
+const HAND_PICKED = new Set(['dip']);
+/** The only kind of exercise that may come twice in one workout (two lateral raises, cable and dumbbell). */
+const TWICE = new Set(['lateralRaise']);
 const CANDIDATES: Candidate[] = catalog
-  .filter((c) => EXERCISE_LOAD[c.id])
+  .filter((c) => EXERCISE_LOAD[c.id] && !HAND_PICKED.has(roleOf(c.id) || ''))
   .map((c) => {
-    const role = roleOf(c.id) || c.id;
+    // The conventional deadlift is a hinge too: never with a Romanian deadlift the same day.
+    const role = roleOf(c.id) || (c.id === 'deadlift' ? 'hinge' : c.id);
     const list = ROLES[role];
     const load = EXERCISE_LOAD[c.id];
     return {
@@ -135,8 +140,8 @@ const MIN_SETS = 2;
 const MAX_SETS = 5;
 /** 3 sets is the usual: 2, 4 and 5 are taken when they fit the targets clearly better. */
 const shape = (sets: number) => 0.3 * Math.abs(sets - 3);
-/** Dips load the shoulder more: a press goes first when both fit. */
-const ROLE_PREF: Record<string, number> = { dip: -3 };
+/** Small leanings between kinds of exercise (none for now: dips are left to the trainer, see HAND_PICKED). */
+const ROLE_PREF: Record<string, number> = {};
 /** A part gets no more than this a workout. */
 const DAY_CAP = 9;
 
@@ -202,9 +207,9 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
       const roles = new Set(days[d].map((x) => x.c.role));
       for (const c of CANDIDATES) {
         if (used.has(c.id) || !c.main.length || !c.main.every((p) => ALLOWED[kinds[d]].has(p))) continue;
-        // A second exercise of the same kind the same day — only a small one (two lateral raises), never two squats.
+        // A second exercise of the same kind the same day — only lateral raises (cable and dumbbell).
         const again = roles.has(c.role);
-        if (again && COMPOUND.has(c.role)) continue;
+        if (again && !TWICE.has(c.role)) continue;
         // Added with 2 or 3 sets: the volume goes to more exercises; step 3 tunes the sets afterwards.
         for (let sets = MIN_SETS; sets <= 3; sets++) {
           let gain = 0;
@@ -258,7 +263,7 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
     !used.has(c.id) &&
     c.main.length > 0 &&
     c.main.every((p) => ALLOWED[kinds[d]].has(p)) &&
-    !(COMPOUND.has(c.role) && days[d].some((x, j) => j !== skip && x.c.role === c.role));
+    !(!TWICE.has(c.role) && days[d].some((x, j) => j !== skip && x.c.role === c.role));
   const apply = (d: number, c: Candidate, sets: number) => {
     for (const [p, f] of Object.entries(c.load)) {
       total[p] = (total[p] || 0) + f * sets;

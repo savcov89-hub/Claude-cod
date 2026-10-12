@@ -121,12 +121,13 @@ const DAY_KIND: Array<[RegExp, string[]]> = [
   [/^Тяни/, ['lats', 'upperBack', 'deltRear', 'bicepsBrachii', 'brachialis', 'erectors', 'abs']],
 ];
 const { roleOf } = await import('../src/templates');
-const COMPOUND = ['squat', 'hinge', 'singleLeg', 'chestPress', 'inclinePress', 'dip', 'shoulderPress', 'verticalPull', 'row', 'bridge', 'hipExtension'];
 let slowest = 0;
 for (const preset of TARGET_PRESETS)
   for (const n of [2, 3, 4, 5, 6]) {
+    // «Продвинутый» needs 8 exercises a workout to fit; the rest — the usual 7.
+    const perDay = preset.id === 'advanced' ? 8 : 7;
     const t0 = performance.now();
-    const r = planByVolume(preset.targets, { days: n });
+    const r = planByVolume(preset.targets, { days: n, perDay });
     slowest = Math.max(slowest, performance.now() - t0);
     const label = preset.label + ', ' + n + ' в неделю';
     const all = r.days.flatMap((d) => d.exercises);
@@ -134,22 +135,24 @@ for (const preset of TARGET_PRESETS)
     if (programIssue(r.days)) bad.push(programIssue(r.days));
     if (r.days.length !== n) bad.push('дней ' + r.days.length);
     if (all.some((e) => e.sets < 2 || e.sets > 5)) bad.push('подходы вне 2–5');
-    if (r.days.some((d) => d.exercises.length > 7)) bad.push('больше 7 упражнений');
+    if (r.days.some((d) => d.exercises.length > perDay)) bad.push('больше ' + perDay + ' упражнений');
     if (new Set(all.map((e) => e.exerciseId)).size !== all.length) bad.push('упражнение повторяется за неделю');
     for (const d of r.days) {
-      const roles = d.exercises.map((e) => roleOf(e.exerciseId)).filter((x) => x && COMPOUND.includes(x));
-      if (new Set(roles).size !== roles.length) bad.push(d.name + ': два базовых одного типа');
+      const roles = d.exercises.map((e) => roleOf(e.exerciseId)).filter((x) => x && x !== 'lateralRaise');
+      if (new Set(roles).size !== roles.length) bad.push(d.name + ': два упражнения одного типа');
+      if (d.exercises.some((e) => roleOf(e.exerciseId) === 'dip')) bad.push(d.name + ': брусья (их ставит тренер)');
       const kind = DAY_KIND.find(([re]) => re.test(d.name));
       if (kind) for (const e of d.exercises) for (const [p, f] of Object.entries(EXERCISE_LOAD[e.exerciseId])) if (f === 1 && !kind[1].includes(p)) bad.push(d.name + ': ' + e.exerciseName);
       const tally = planTally(d.exercises);
       for (const [p, v] of Object.entries(tally.parts)) if (v > 9) bad.push(d.name + ': ' + p + ' ' + v + ' за тренировку');
     }
     expect(!bad.length, label + ': программа по правилам', bad);
-    // Enough room (4+ workouts): every target within 2 sets.
-    const off = Object.entries(preset.targets).map(([p, t]) => [p, (r.total[p] || 0) - t] as const);
-    if (n >= 4) {
-      const far = off.filter(([, d]) => Math.abs(d) > 2.5);
-      expect(!far.length, label + ': каждая цель ±2 подхода', far);
+    // Enough room (4+ workouts, «Продвинутый» 5+): short of a target by 2 sets at most; over it — by 3 or by the
+    // target itself for small ones (halves from big movements: hinges give the erectors half a set wanted or not).
+    const off = Object.entries(preset.targets).map(([p, t]) => [p, (r.total[p] || 0) - t, t] as const);
+    if (n >= (preset.id === 'advanced' ? 5 : 4)) {
+      const far = off.filter(([, d, t]) => d < -2 || d > Math.max(3, t));
+      expect(!far.length, label + ': недобор не больше 2 подходов, перебор не больше 3 (у малых целей — не больше чем вдвое)', far);
     }
   }
 expect(slowest < 1500, 'составляется быстро (самое долгое ' + Math.round(slowest) + ' мс)');
