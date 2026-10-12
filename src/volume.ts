@@ -298,23 +298,50 @@ export interface VolumeRow {
   name: string;
   done: number;
   plan: number;
-  parts: Array<{ id: string; name: string; joints?: string; done: number; plan: number }>;
+  /** The trainer's weekly target (a muscle that is not split into parts). */
+  target?: number;
+  parts: Array<{ id: string; name: string; joints?: string; done: number; plan: number; target?: number }>;
 }
-/** Rows of the weekly table: groups worked or planned, their parts when a group is split. */
-export function volumeRows(done: Tally, plan: Tally): VolumeRow[] {
-  return GROUPS.filter((g) => done.groups[g] || plan.groups[g]).map((g) => {
+/** Rows of the weekly table: groups worked, planned or with a target, their parts when a group is split. */
+export function volumeRows(done: Tally, plan: Tally, targets: Record<string, number> = {}): VolumeRow[] {
+  return GROUPS.filter((g) => done.groups[g] || plan.groups[g] || partsOfGroup(g).some((p) => targets[p.id])).map((g) => {
     const parts = partsOfGroup(g);
     return {
       id: g,
       name: muscleNames[g],
       done: done.groups[g] || 0,
       plan: plan.groups[g] || 0,
+      ...(parts.length === 1 && targets[g] ? { target: targets[g] } : {}),
       parts:
         parts.length > 1
-          ? parts.map((p) => ({ id: p.id, name: p.name, joints: p.joints, done: done.parts[p.id] || 0, plan: plan.parts[p.id] || 0 }))
+          ? parts.map((p) => ({
+              id: p.id,
+              name: p.name,
+              joints: p.joints,
+              done: done.parts[p.id] || 0,
+              plan: plan.parts[p.id] || 0,
+              ...(targets[p.id] ? { target: targets[p.id] } : {}),
+            }))
           : [],
     };
   });
+}
+
+/** Weekly targets as stored with a program: known parts, whole sets 1–40. */
+export function cleanTargets(v: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!v || typeof v !== 'object') return out;
+  for (const p of PARTS) {
+    const n = Math.round(Number((v as Record<string, unknown>)[p.id]));
+    if (Number.isFinite(n) && n >= 1) out[p.id] = Math.min(n, 40);
+  }
+  return out;
+}
+/** Targets of several programs together. */
+export function sumTargets(list: Array<Record<string, number> | undefined>) {
+  const out: Record<string, number> = {};
+  for (const t of list) for (const [p, n] of Object.entries(t || {})) out[p] = (out[p] || 0) + n;
+  return out;
 }
 
 /** What one set of an exercise counts for: «Грудь 1 · Передняя дельта ½ · Трицепс: латеральная и медиальная головки ½». */

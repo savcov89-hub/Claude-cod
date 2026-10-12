@@ -1574,6 +1574,23 @@ table {
   opacity: 0.45;
   pointer-events: none;
 }
+/* the trainer's target: a thin mark across the bar */
+.vol-target {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--ink);
+  pointer-events: none;
+}
+.sw.target {
+  width: 3px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--ink);
+}
 .vol-num {
   grid-area: num;
   text-align: right;
@@ -1614,6 +1631,60 @@ table {
 }
 .sw.band {
   border: 1px dashed var(--ink-2);
+}
+/* «По объёму»: weekly targets per muscle part */
+.pv {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+}
+.pv-targets {
+  display: grid;
+  gap: 8px;
+}
+.pv-group {
+  display: grid;
+  gap: 2px;
+}
+.pv-group-name {
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.pv-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 40px;
+  font-size: 14px;
+}
+.pv-row:not(.pv-part) .pv-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+.pv-part {
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+  margin-left: 2px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.pv-step {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pv-step input {
+  color: var(--ink);
+  width: 44px;
+  height: 36px;
+  text-align: center;
+  padding: 0;
+}
+.pv-report {
+  display: grid;
+  gap: 6px;
 }
 /* muscles of an own exercise: on — 1 set, half — ½ */
 .muscle-chips {

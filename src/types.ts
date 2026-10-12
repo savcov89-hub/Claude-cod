@@ -97,6 +97,8 @@ export interface Program {
   archived?: boolean;
   /** Workouts a week, when it differs from the number of workouts in the program (plan of the weekly volume). */
   perWeek?: number;
+  /** Weekly sets per muscle part the trainer aims at (the program made «По объёму»). */
+  targets?: Record<string, number>;
 }
 export interface SetEntry {
   weight: number;

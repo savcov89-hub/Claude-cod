@@ -1095,6 +1095,37 @@ await scenario('31. Объём недели: Пн–Вс, сделано и пл
   expect((await programOf('Павел')).perWeek === undefined, 'back to each workout once a week', (await programOf('Павел')).perWeek);
 });
 
+await scenario('32. Программа по объёму: подходы на мышцы → тренировки', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: 'Павел' }).first().locator('.client-open').click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('tab', { name: 'Программы' }).click();
+  await p.waitForTimeout(600);
+  await p.getByRole('button', { name: 'Новая программа' }).click();
+  await p.waitForTimeout(1000);
+  await p.locator('.plan-volume .block-toggle').click();
+  await p.getByRole('group', { name: 'Готовые цели' }).getByRole('button', { name: 'Средний' }).click();
+  await p.getByRole('group', { name: 'Тренировок в неделю для составления' }).getByRole('button', { name: '4', exact: true }).click();
+  await p.getByRole('button', { name: 'Больше: Задняя дельта' }).click();
+  expect((await p.getByRole('textbox', { name: 'Подходов в неделю: Задняя дельта' }).inputValue()) === '9', '«+» adds a set to the target');
+  await p.getByRole('button', { name: 'Составить программу' }).click();
+  await p.locator('.pv-report').waitFor({ timeout: 5000 });
+  const tabs = (await p.locator('.day-tabs [role="tab"]').allInnerTexts()).map((x) => x.trim());
+  expect(JSON.stringify(tabs) === JSON.stringify(['Верх A', 'Низ A', 'Верх B', 'Низ B']), 'upper / lower, 4 workouts', tabs);
+  const vol = await p.locator('.week-volume').innerText();
+  expect(/цель тренера/.test(vol) && /Задняя дельта\s+\S+ · цель 9/.test(vol), 'the weekly volume shows the targets', vol.slice(0, 200));
+  expect((await p.locator('#builder-name').inputValue()).startsWith('По объёму'), 'the program is named by how it was made');
+  await p.getByRole('button', { name: 'Назначить клиенту' }).click();
+  await p.waitForTimeout(1500);
+  const made = (await call('get', '/api/programs')).programs.find((x) => x.clientId === idOf('Павел') && x.name.startsWith('По объёму'));
+  expect(made?.days.length === 4 && made.targets?.deltRear === 9 && made.targets?.chest === 12, 'saved with its targets', made && { days: made.days.length, t: made.targets });
+  if (made) await call('post', '/api/programs/' + made.id + '/archive', { archived: true });
+  await p.keyboard.press('Escape').catch(() => {});
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

@@ -1,4 +1,4 @@
-import { exerciseLoad, groupOfKey, muscleNames } from './volume';
+import { PARTS, exerciseLoad, groupOfKey, muscleNames, planTally } from './volume';
 export { muscleNames };
 export interface ExerciseRule {
   primary: string[];
@@ -486,12 +486,18 @@ export function muscleLoad(exercises: VolumeExercise[]) {
     if (!Object.keys(groups).length) unknown.push(e.exerciseName);
     for (const [g, f] of Object.entries(groups)) (load[g] ||= { total: 0 }).total += f * e.sets;
   }
+  // The limit is for one muscle part: the three heads of the delts are three muscles, not one.
+  const parts = planTally(exercises);
   return {
     load,
     unknown,
-    over: Object.entries(load)
-      .filter(([, v]) => v.total > SESSION_SOFT_LIMIT)
-      .map(([m]) => muscleNames[m]),
+    over: Object.keys(muscleNames).flatMap((g) => {
+      const all = PARTS.filter((p) => p.group === g);
+      const over = all.filter((p) => (parts.parts[p.id] || 0) > SESSION_SOFT_LIMIT);
+      if (!over.length) return [];
+      if (over.length === all.length && g !== 'delts') return [muscleNames[g]];
+      return over.map((p) => (p.group === p.id || g === 'delts' ? p.name : muscleNames[g] + ': ' + p.name.toLowerCase()));
+    }),
   };
 }
 /** Blocking structural problems only. Volume is advisory (see programWarnings). */

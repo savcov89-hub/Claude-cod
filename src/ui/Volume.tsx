@@ -12,6 +12,7 @@ import {
   ownLoad,
   partsOfGroup,
   planTally,
+  sumTargets,
   volumeRows,
   weekPlan,
   weekStart,
@@ -43,7 +44,8 @@ export function WeekVolume({ sessions, programs = [], exercises = [] }: { sessio
   const resolve = useMemo(() => muscleResolver(programs, exercises), [programs, exercises]);
   const week = useMemo(() => inWeek(sessions, start), [sessions, start.getTime()]);
   const planned = useMemo(() => weekPlan(active), [active]);
-  const rows = useMemo(() => volumeRows(doneTally(week, resolve), planTally(planned, resolve)), [week, planned, resolve]);
+  const targets = useMemo(() => sumTargets(active.map((p) => p.targets)), [active]);
+  const rows = useMemo(() => volumeRows(doneTally(week, resolve), planTally(planned, resolve), targets), [week, planned, resolve, targets]);
   const setsDone = week.reduce((n, s) => n + s.exercises.reduce((k, e) => k + e.sets.filter((x) => x.reps > 0).length, 0), 0);
   const setsPlan = Math.round(planned.reduce((n, e) => n + e.sets, 0));
   const workouts = active.reduce((n, p) => n + perWeekOf(p), 0);
@@ -71,19 +73,30 @@ export function WeekVolume({ sessions, programs = [], exercises = [] }: { sessio
         {workouts ? ` из ${setsPlan} по плану` : ''}
       </p>
       {rows.length ? <VolumeBars rows={rows} plan={workouts > 0} /> : <p className="muted small">На этой неделе тренировок не было.</p>}
-      <VolumeLegend plan={workouts > 0} />
+      <VolumeLegend plan={workouts > 0} targets={Object.keys(targets).length > 0} />
     </section>
   );
 }
 
 /** Planned weekly volume of a program — in the program editor, with how many times a week it is done. */
-export function PlanVolume({ days, perWeek, onPerWeek }: { days: Program['days']; perWeek?: number; onPerWeek: (n: number | undefined) => void }) {
+export function PlanVolume({
+  days,
+  perWeek,
+  onPerWeek,
+  targets = {},
+}: {
+  days: Program['days'];
+  perWeek?: number;
+  onPerWeek: (n: number | undefined) => void;
+  targets?: Record<string, number>;
+}) {
   const times = perWeek || Math.min(days.length, 7);
   const rows = useMemo(
     // Shown as the done bar: there is nothing else to compare with.
-    () => volumeRows(planTally(weekPlan([{ days, perWeek }])), { parts: {}, groups: {} }),
-    [days, perWeek],
+    () => volumeRows(planTally(weekPlan([{ days, perWeek }])), { parts: {}, groups: {} }, targets),
+    [days, perWeek, targets],
   );
+  const hasTargets = Object.keys(targets).length > 0;
   return (
     <section className="block week-volume">
       <h4>Объём за неделю</h4>
@@ -105,12 +118,12 @@ export function PlanVolume({ days, perWeek, onPerWeek }: { days: Program['days']
             : `${times} в неделю при ${days.length} в программе: тренировки повторяются чаще раза в неделю.`}
       </p>
       {rows.length ? <VolumeBars rows={rows} plan={false} /> : <p className="muted small">Добавьте упражнения.</p>}
-      <VolumeLegend plan={false} />
+      <VolumeLegend plan={false} targets={hasTargets} />
     </section>
   );
 }
 
-function VolumeLegend({ plan }: { plan: boolean }) {
+function VolumeLegend({ plan, targets }: { plan: boolean; targets?: boolean }) {
   return (
     <div className="vol-legend small muted">
       <span>
@@ -119,6 +132,11 @@ function VolumeLegend({ plan }: { plan: boolean }) {
       {plan && (
         <span>
           <i className="sw plan" /> по плану
+        </span>
+      )}
+      {targets && (
+        <span>
+          <i className="sw target" /> цель тренера
         </span>
       )}
       <span>
@@ -133,25 +151,31 @@ function VolumeLegend({ plan }: { plan: boolean }) {
 }
 
 function VolumeBars({ rows, plan }: { rows: VolumeRow[]; plan: boolean }) {
-  const max = Math.max(BAND[1] + 4, ...rows.map((r) => Math.max(r.done, r.plan)));
+  const max = Math.max(BAND[1] + 4, ...rows.flatMap((r) => [r.done, r.plan, r.target || 0, ...r.parts.map((p) => p.target || 0)]));
   const pct = (v: number) => Math.min(100, (v / max) * 100) + '%';
-  const line = (r: { done: number; plan: number }, cls: string, label: string, band: boolean, joints?: string) => {
-    const reached = plan && r.plan > 0 && r.done >= r.plan;
+  const line = (r: { done: number; plan: number; target?: number }, cls: string, label: string, band: boolean, joints?: string) => {
+    // Week: done against the plan. Editor: the plan (shown as done) against the trainer's target, ±1 set.
+    const reached = plan ? r.plan > 0 && r.done >= r.plan : !!r.target && Math.abs(r.done - r.target) <= 1;
+    const title =
+      (plan ? `${label}: сделано ${num(r.done)} из ${num(r.plan)} по плану` : `${label}: ${num(r.done)} в неделю`) +
+      (r.target ? `, цель ${r.target}` : '');
     return (
-      <div className={'vol-row ' + cls} title={plan ? `${label}: сделано ${num(r.done)} из ${num(r.plan)} по плану` : `${label}: ${num(r.done)} в неделю`}>
+      <div className={'vol-row ' + cls} title={title}>
         <span className="vol-name">
           {label}
           {joints && <span className="vol-joints"> · {joints}</span>}
         </span>
         <div className="vol-bar">
-          {band && <b className="vol-band" style={{ left: pct(BAND[0]), width: `calc(${pct(BAND[1])} - ${pct(BAND[0])})` }} aria-hidden="true" />}
+          {band && !r.target && <b className="vol-band" style={{ left: pct(BAND[0]), width: `calc(${pct(BAND[1])} - ${pct(BAND[0])})` }} aria-hidden="true" />}
           {plan && r.plan > 0 && <i className="vol-plan" style={{ width: pct(r.plan) }} />}
           {r.done > 0 && <i className="vol-done" style={{ width: pct(r.done) }} />}
+          {!!r.target && <b className="vol-target" style={{ left: pct(r.target) }} aria-hidden="true" />}
         </div>
         <span className="vol-num num">
           {num(r.done)}
           {plan && <span className="muted"> / {num(r.plan)}</span>}
-          {reached && <span className="vol-ok" aria-label="план выполнен"> ✓</span>}
+          {!plan && !!r.target && <span className="muted"> · цель {r.target}</span>}
+          {reached && <span className="vol-ok" aria-label={plan ? 'план выполнен' : 'в цели'}> ✓</span>}
         </span>
       </div>
     );

@@ -17,6 +17,7 @@ import type { ClientItem, Exercise, Program, ProgramDay, ProgramExercise } from 
 import { Confirm, Sheet, plural, searchKey } from './common';
 import { AddExercise } from './Library';
 import { MuscleChips, PlanVolume } from './Volume';
+import { PlanByVolume } from './PlanByVolume';
 
 export interface BuilderOptions {
   clientId?: string;
@@ -53,6 +54,8 @@ export function ProgramBuilder({
   const [activeDay, setActiveDay] = useState(0);
   // Workouts a week when not every workout of the program is done each week (undefined — each once).
   const [perWeek, setPerWeek] = useState<number | undefined>(options.program?.perWeek);
+  // Weekly sets per muscle part the program is made for («По объёму»); kept with the program.
+  const [targets, setTargets] = useState<Record<string, number>>(options.program?.targets || {});
   // Focus of a workout (muscle groups): asking before replacing exercises; the same focus again gives other exercises.
   const [focusAsk, setFocusAsk] = useState<{ key: string; label: string } | null>(null);
   const [lastFocus, setLastFocus] = useState<{ dayId: string; key: string; variant: number } | null>(null);
@@ -158,9 +161,17 @@ export function ProgramBuilder({
           name: name.trim(),
           days,
           perWeek: perWeek ?? null,
+          targets,
           base: { updatedAt: options.program!.updatedAt || options.program!.createdAt, days: options.program!.days },
         });
-      else await api.post('/api/programs', { clientId, name: name.trim(), days, ...(perWeek ? { perWeek } : {}) });
+      else
+        await api.post('/api/programs', {
+          clientId,
+          name: name.trim(),
+          days,
+          ...(perWeek ? { perWeek } : {}),
+          ...(Object.keys(targets).length ? { targets } : {}),
+        });
       await onSaved();
     } catch (e) {
       setErrorText(readError(e));
@@ -271,6 +282,32 @@ export function ProgramBuilder({
           </div>
         )}
       </section>
+
+      <PlanByVolume
+        days={days}
+        targets={targets}
+        onTargets={setTargets}
+        onMake={(made, splitLabel, times) => {
+          setUndo({ days, name });
+          setDays(made);
+          setActiveDay(0);
+          setTemplate(null);
+          setShowTemplates(false);
+          setPerWeek(undefined);
+          const generic = !name.trim() || name === 'Новая программа' || name.startsWith('По объёму') || templates.some((t) => t.name === name);
+          if (generic) setName(`По объёму · ${splitLabel} ${times}×`);
+        }}
+        onUndo={
+          undo
+            ? () => {
+                setDays(undo.days);
+                setName(undo.name);
+                setUndo(null);
+                setActiveDay(0);
+              }
+            : undefined
+        }
+      />
 
       {totalExercises > 0 && (
         <div className="field">
@@ -481,7 +518,7 @@ export function ProgramBuilder({
         </button>
       </div>
 
-      <PlanVolume days={days} perWeek={perWeek} onPerWeek={setPerWeek} />
+      <PlanVolume days={days} perWeek={perWeek} onPerWeek={setPerWeek} targets={targets} />
 
       {warnings.length > 0 && (
         <div className="warn-list">

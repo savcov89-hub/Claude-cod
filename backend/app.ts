@@ -1,6 +1,6 @@
 import { catalog } from '../src/catalog';
 import { groupMuscles, exerciseRules, programIssue } from '../src/trainingRules';
-import { cleanMuscles } from '../src/volume';
+import { cleanMuscles, cleanTargets } from '../src/volume';
 import { clientInsights, sessionRecords, type ClientInsights } from '../src/analytics';
 import { nowIso } from '../src/clock';
 import type { AutoFinished, OpenWorkout } from '../src/types';
@@ -136,6 +136,8 @@ interface ProgramRecord {
   archived?: boolean;
   /** Workouts a week (1–7) when not every workout of the program is done each week: the plan of the weekly volume. */
   perWeek?: number;
+  /** Weekly sets per muscle part the trainer aims at (the program made «По объёму»). */
+  targets?: Record<string, number>;
   /** Hidden per-client program for workouts made up in the gym ("Свободная тренировка"). */
   free?: boolean;
   /** Free program only: exercises of the last free workout, to start the next one "как в прошлый раз". */
@@ -1716,6 +1718,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         if (typeof days === 'string') return error(days, 400);
         const at = nowIso();
         const perWeek = perWeekOf(ctx.body?.perWeek, days.length);
+        const targets = cleanTargets(ctx.body?.targets);
         const record: ProgramRecord = {
           trainerId: ctx.user!.userId,
           trainerName: profile.name,
@@ -1726,6 +1729,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           createdAt: at,
           updatedAt: at,
           ...(perWeek ? { perWeek } : {}),
+          ...(Object.keys(targets).length ? { targets } : {}),
         };
         const [programId] = await db.add(programsTable(ctx.user!.userId), [record]);
         if (!programId) return error('Не удалось сохранить программу.', 500);
@@ -1772,10 +1776,16 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const after = lastIdx >= 0 ? days[lastIdx + 1] : undefined;
         if (program.lastCompletedAt && program.nextDayId === program.days[0]?.id && after && !program.days.some((d) => d.id === after.id))
           nextDayId = after.id;
-        const { id: _drop, perWeek: oldPerWeek, ...kept } = program as ProgramRecord & { id?: string };
-        // Sent by the editor; a request without it keeps what there was.
-        const perWeek = ctx.body && 'perWeek' in ctx.body ? perWeekOf(ctx.body.perWeek, days.length) : perWeekOf(oldPerWeek, days.length);
-        const rest: Omit<ProgramRecord, 'name' | 'days' | 'nextDayId'> = { ...kept, ...(perWeek ? { perWeek } : {}) };
+        const { id: _drop, perWeek: oldPerWeek, targets: oldTargets, ...kept } = program as ProgramRecord & { id?: string };
+        // Sent by the editor; a request without them keeps what there was.
+        const given = (k: string) => !!ctx.body && typeof ctx.body === 'object' && k in ctx.body;
+        const perWeek = perWeekOf(given('perWeek') ? ctx.body.perWeek : oldPerWeek, days.length);
+        const targets = cleanTargets(given('targets') ? ctx.body.targets : oldTargets);
+        const rest: Omit<ProgramRecord, 'name' | 'days' | 'nextDayId'> = {
+          ...kept,
+          ...(perWeek ? { perWeek } : {}),
+          ...(Object.keys(targets).length ? { targets } : {}),
+        };
         const [ok] = await db.update(programsTable(trainerId), [
           { id: programId, record: { ...rest, name, days, nextDayId, updatedAt: nowIso() } },
         ]);

@@ -2,9 +2,10 @@
 // done fewer times a week than it has workouts, own exercises with halves and older records with whole groups.
 //   npx tsx scripts/check-volume.ts
 import { catalog } from '../src/catalog';
-import { muscleLoad } from '../src/trainingRules';
+import { muscleLoad, programIssue } from '../src/trainingRules';
 import { EXERCISE_LOAD, PARTS, cleanMuscles, doneTally, inWeek, loadKeys, ownLoad, planTally, volumeRows, weekPlan, weekStart } from '../src/volume';
 import { createHandler } from '../backend/app';
+import { TARGET_PRESETS, autoSplit, planByVolume } from '../src/volumePlanner';
 import { sdk } from '../src/local/sdk';
 
 let failures = 0;
@@ -104,6 +105,70 @@ saved = (await call('POST', '/api/programs/' + created.id, { name: 'Верх / �
 expect(saved.perWeek === undefined, 'больше 7 — не принимается', saved.perWeek);
 const own = await call('POST', '/api/exercises', { name: 'Жим Арнольда', muscleGroup: 'Плечи', equipment: 'Штанга / гантели', muscles: ['deltFront', 'deltSide:0.5', 'triceps:0.5', 'bogus'] });
 expect(same(own.exercise?.muscles, ['deltFront', 'deltSide:0.5', 'triceps:0.5']), 'своё упражнение сохраняет части и половинки', own.exercise);
+
+saved = (await call('POST', '/api/programs/' + created.id, { name: 'Верх / низ', days, targets: { chest: 12, deltSide: 10.4, bogus: 5, lats: 0 } })).program;
+expect(same(saved.targets, { chest: 12, deltSide: 10 }), 'цели программы: известные части, целые подходы', saved.targets);
+saved = (await call('POST', '/api/programs/' + created.id, { name: 'Верх / низ', days })).program;
+expect(same(saved.targets, { chest: 12, deltSide: 10 }), 'изменение без целей их не сбрасывает', saved.targets);
+saved = (await call('POST', '/api/programs/' + created.id, { name: 'Верх / низ', days, targets: {} })).program;
+expect(saved.targets === undefined, 'пустые цели убираются', saved.targets);
+
+console.log('7. Программа по объёму');
+const DAY_KIND: Array<[RegExp, string[]]> = [
+  [/^Верх/, ['chest', 'lats', 'upperBack', 'deltFront', 'deltSide', 'deltRear', 'bicepsBrachii', 'brachialis', 'tricepsLong', 'tricepsShort', 'abs']],
+  [/^(Низ|Ноги)/, ['rectusFemoris', 'vasti', 'hamsLong', 'hamsShort', 'glutes', 'abductors', 'adductors', 'gastrocnemius', 'soleus', 'erectors', 'abs']],
+  [/^Толкай/, ['chest', 'deltFront', 'deltSide', 'tricepsLong', 'tricepsShort', 'abs']],
+  [/^Тяни/, ['lats', 'upperBack', 'deltRear', 'bicepsBrachii', 'brachialis', 'erectors', 'abs']],
+];
+const { roleOf } = await import('../src/templates');
+const COMPOUND = ['squat', 'hinge', 'singleLeg', 'chestPress', 'inclinePress', 'dip', 'shoulderPress', 'verticalPull', 'row', 'bridge', 'hipExtension'];
+let slowest = 0;
+for (const preset of TARGET_PRESETS)
+  for (const n of [2, 3, 4, 5, 6]) {
+    const t0 = performance.now();
+    const r = planByVolume(preset.targets, { days: n });
+    slowest = Math.max(slowest, performance.now() - t0);
+    const label = preset.label + ', ' + n + ' в неделю';
+    const all = r.days.flatMap((d) => d.exercises);
+    const bad: string[] = [];
+    if (programIssue(r.days)) bad.push(programIssue(r.days));
+    if (r.days.length !== n) bad.push('дней ' + r.days.length);
+    if (all.some((e) => e.sets < 2 || e.sets > 5)) bad.push('подходы вне 2–5');
+    if (r.days.some((d) => d.exercises.length > 7)) bad.push('больше 7 упражнений');
+    if (new Set(all.map((e) => e.exerciseId)).size !== all.length) bad.push('упражнение повторяется за неделю');
+    for (const d of r.days) {
+      const roles = d.exercises.map((e) => roleOf(e.exerciseId)).filter((x) => x && COMPOUND.includes(x));
+      if (new Set(roles).size !== roles.length) bad.push(d.name + ': два базовых одного типа');
+      const kind = DAY_KIND.find(([re]) => re.test(d.name));
+      if (kind) for (const e of d.exercises) for (const [p, f] of Object.entries(EXERCISE_LOAD[e.exerciseId])) if (f === 1 && !kind[1].includes(p)) bad.push(d.name + ': ' + e.exerciseName);
+      const tally = planTally(d.exercises);
+      for (const [p, v] of Object.entries(tally.parts)) if (v > 9) bad.push(d.name + ': ' + p + ' ' + v + ' за тренировку');
+    }
+    expect(!bad.length, label + ': программа по правилам', bad);
+    // Enough room (4+ workouts): every target within 2 sets.
+    const off = Object.entries(preset.targets).map(([p, t]) => [p, (r.total[p] || 0) - t] as const);
+    if (n >= 4) {
+      const far = off.filter(([, d]) => Math.abs(d) > 2.5);
+      expect(!far.length, label + ': каждая цель ±2 подхода', far);
+    }
+  }
+expect(slowest < 1500, 'составляется быстро (самое долгое ' + Math.round(slowest) + ' мс)');
+const once = planByVolume(TARGET_PRESETS[1].targets, { days: 4 });
+const again = planByVolume(TARGET_PRESETS[1].targets, { days: 4 });
+const other = planByVolume(TARGET_PRESETS[1].targets, { days: 4, variant: 1 });
+expect(same(once.days, again.days), 'те же цели — та же программа');
+const ids = (r: typeof once) => r.days.flatMap((d) => d.exercises.map((e) => e.exerciseId)).sort().join();
+expect(ids(once) !== ids(other), '«Другой вариант» — другие упражнения');
+expect(planByVolume({}, { days: 3 }).days.length === 0, 'без целей — пусто');
+const upperOnly = planByVolume({ chest: 9, lats: 9, deltSide: 6 }, { days: 4 });
+expect(upperOnly.days.length === 2 && upperOnly.days.every((d) => /^Верх/.test(d.name)), 'цели только на верх: дни низа не появляются', upperOnly.days.map((d) => d.name));
+const hinge = planByVolume({ hamsLong: 6, glutes: 6 }, { days: 2 });
+expect((hinge.total.hamsShort || 0) <= 1 && hinge.total.hamsLong >= 5, 'двусуставные задней поверхности — наклоны, без сгибаний голени', hinge.days.map((d) => d.exercises.map((e) => e.exerciseId)));
+const curlOnly = planByVolume({ hamsShort: 6, hamsLong: 6 }, { days: 2 });
+expect(curlOnly.total.hamsShort >= 5, 'короткая головка — сгибания голени', curlOnly.total);
+const longHead = planByVolume({ tricepsLong: 6 }, { days: 2 });
+expect(longHead.total.tricepsLong >= 5, 'длинная головка трицепса закрывается разгибаниями', longHead.days.map((d) => d.exercises.map((e) => e.exerciseId)));
+expect(planByVolume(TARGET_PRESETS[1].targets, { days: 3, split: 'ppl' }).split === 'ppl' && autoSplit(4) === 'upperLower', 'схема: выбранная или по числу тренировок');
 
 console.log(`\n${checks} проверок, ошибок: ${failures}`);
 process.exit(failures ? 1 : 0);
