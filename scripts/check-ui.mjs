@@ -8,6 +8,8 @@ const APP = process.env.APP || 'http://127.0.0.1:5173/?demo=1';
 const arg = (k, d) => (process.argv.find((a) => a.startsWith('--' + k + '=')) || '').split('=')[1] || d;
 const SLOW = Number(arg('slow', 4));
 const SHOTS = arg('shots', '');
+// --only=30,31: just these numbered scenarios (after the first four, which set the day up).
+const ONLY = arg('only', '').split(',').filter(Boolean);
 
 let failures = 0;
 let checks = 0;
@@ -271,6 +273,7 @@ async function pick(name) {
   await p.waitForTimeout(400);
 }
 const scenario = async (title, fn) => {
+  if (ONLY.length && !ONLY.includes(title.split('.')[0])) return;
   console.log(title);
   try {
     await fn();
@@ -1061,11 +1064,14 @@ await scenario('31. Объём недели: Пн–Вс, сделано и пл
   expect(/Эта неделя/.test(text) && new RegExp('^' + thisWeek.length + ' тренировк', 'm').test(text), 'this week (from Monday): ' + thisWeek.length + ' workouts', text.slice(0, 160));
   const chest = (await box.locator('.vol-row', { hasText: /^Грудь/ }).first().innerText()).replace(/\s+/g, ' ');
   expect(/Грудь \d+(,5)? \/ \d+(,5)?/.test(chest), 'a muscle row shows done / planned', chest);
-  const tri = await box.locator('.vol-row', { hasText: 'Длинная головка' }).count();
+  const tri = await box.locator('.vol-row', { hasText: /^Длинная головка/ }).count();
   expect(tri === 1, 'the long head of the triceps is counted apart', tri);
-  await box.getByRole('button', { name: 'Прошлая неделя' }).click();
-  await p.waitForTimeout(300);
-  expect(!/Эта неделя/.test(await box.innerText()), '‹ shows the week before');
+  const back = box.getByRole('button', { name: 'Прошлая неделя' });
+  if (sessions.some((x) => new Date(x.completedAt) < mon)) {
+    await back.click();
+    await p.waitForTimeout(300);
+    expect(!/Эта неделя/.test(await box.innerText()), '‹ shows the week before');
+  } else expect(await back.isDisabled(), 'no workouts before this week — ‹ is off');
   // Workouts a week: 2 of the 3 workouts of the program.
   await p.getByRole('tab', { name: 'Программы' }).click();
   await p.waitForTimeout(600);

@@ -1874,9 +1874,6 @@ table {
 .b-note {
   line-height: 1.4;
 }
-.muscle-select {
-  min-height: 120px;
-}
 .rx {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

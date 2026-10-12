@@ -9,6 +9,8 @@ import { Sheet, searchKey } from './common';
 import { ArtPicker, ExerciseFigures, ExerciseThumb } from './exerciseArt';
 import { MuscleChips } from './Volume';
 
+const ownText = (e: Exercise) => loadText(ownLoad(e.muscles?.length ? e.muscles : groupMuscles(e.muscleGroup)));
+
 export function Library({ exercises, onCreated }: { exercises: Exercise[]; onCreated: () => Promise<void> }) {
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(false);
@@ -58,8 +60,7 @@ export function Library({ exercises, onCreated }: { exercises: Exercise[]; onCre
                   )}
                   {open === e.id && !info && (
                     <span className="lib-detail small">
-                      {loadText(ownLoad(e.muscles?.length ? e.muscles : groupMuscles(e.muscleGroup))) ||
-                        'Мышцы не указаны — упражнение не попадёт в объём недели. Укажите их в «Изменить».'}
+                      {ownText(e) ? 'Один подход в объёме недели: ' + ownText(e) : 'Мышцы не указаны — упражнение не попадёт в объём недели. Укажите их в «Изменить».'}
                     </span>
                   )}
                 </span>
