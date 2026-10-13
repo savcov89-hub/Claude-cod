@@ -14,7 +14,7 @@ import {
 } from '../trainingRules';
 import { fmtKg } from '../analytics';
 import type { ClientItem, Exercise, Program, ProgramDay, ProgramExercise } from '../types';
-import { Confirm, Sheet, plural, searchKey } from './common';
+import { Confirm, Sheet, nextDayName, plural, searchKey, tidyDayNames } from './common';
 import { AddExercise } from './Library';
 import { MuscleChips, PlanVolume } from './Volume';
 import { PlanByVolume } from './PlanByVolume';
@@ -47,8 +47,9 @@ export function ProgramBuilder({
   const [clientId, setClientId] = useState(options.clientId || active[0]?.clientId || '');
   const [name, setName] = useState(options.program ? options.program.name + (options.copy ? ' (копия)' : '') : 'Новая программа');
   const [days, setDays] = useState<ProgramDay[]>(
+    // A program made before the letters («Тренировка A», «Тренировка 2»…) gets them when opened; saved with the program.
     options.program
-      ? JSON.parse(JSON.stringify(options.program.days))
+      ? tidyDayNames(JSON.parse(JSON.stringify(options.program.days)))
       : [{ id: 'day-1', name: 'Тренировка A', exercises: [] }],
   );
   const [activeDay, setActiveDay] = useState(0);
@@ -361,7 +362,7 @@ export function ProgramBuilder({
           aria-label="Добавить тренировку"
           disabled={days.length >= 14}
           onClick={() => {
-            setDays([...days, { id: newDayId(), name: 'Тренировка ' + (days.length + 1), exercises: [] }]);
+            setDays([...days, { id: newDayId(), name: nextDayName(days.map((d) => d.name)), exercises: [] }]);
             setActiveDay(days.length);
           }}
         >

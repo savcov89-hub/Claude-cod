@@ -1126,6 +1126,21 @@ await scenario('32. Программа по объёму: подходы на м
   await p.keyboard.press('Escape').catch(() => {});
 });
 
+await scenario('33. Новые тренировки программы называются буквами: A, B, C', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  await p.locator('.nav').getByRole('button', { name: 'Программы' }).click();
+  await p.waitForTimeout(500);
+  await p.getByRole('button', { name: 'Программа', exact: true }).click();
+  await p.waitForTimeout(800);
+  await p.getByRole('button', { name: 'Добавить тренировку' }).click();
+  await p.getByRole('button', { name: 'Добавить тренировку' }).click();
+  const tabs = (await p.locator('.day-tabs [role="tab"]').allInnerTexts()).map((x) => x.trim());
+  expect(JSON.stringify(tabs) === JSON.stringify(['Тренировка A', 'Тренировка B', 'Тренировка C']), 'A, B, C — not A, 2, 3', tabs);
+  await p.getByRole('button', { name: 'Закрыть конструктор' }).click();
+  await p.waitForTimeout(400);
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

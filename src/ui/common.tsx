@@ -5,6 +5,20 @@ import type { SeriesPoint, Trend } from '../analytics';
 import { fmtKg, trendLabel } from '../analytics';
 import type { SetEntry } from '../types';
 
+/** Workouts named by letters, as in the templates: «Тренировка A», «B», «C»… — the first letter not taken. */
+const LETTERS = 'ABCDEFGHIJKLMN';
+export const nextDayName = (names: string[]) => {
+  const taken = new Set(names.map((n) => n.trim()));
+  const free = [...LETTERS].find((l) => !taken.has('Тренировка ' + l));
+  return 'Тренировка ' + (free || names.length + 1);
+};
+/** Placeholder names mixed as «Тренировка A», «Тренировка 2», «Тренировка 3» become letters by their place. */
+export function tidyDayNames<T extends { name: string }>(days: T[]): T[] {
+  const generic = (n: string) => /^Тренировка ([A-Z]|\d+)$/.test(n.trim());
+  const marks = days.filter((d) => generic(d.name)).map((d) => d.name.trim().slice(11));
+  if (!marks.some((m) => /\d/.test(m)) || !marks.some((m) => /[A-Z]/.test(m))) return days;
+  return days.map((d, i) => (generic(d.name) && LETTERS[i] ? { ...d, name: 'Тренировка ' + LETTERS[i] } : d));
+}
 export const fmtDate = (v: string) =>
   new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(new Date(v));
 export const fmtDateTime = (v: string) =>

@@ -6,7 +6,7 @@ import { localDate } from '../clock';
 import { isNetworkError, isQueued } from '../offline';
 import { mergeEntries, mergeText } from '../draftMerge';
 import type { AutoFinished, Exercise, SessionExercise, SetEntry, WorkoutExercise, WorkoutPayload } from '../types';
-import { Confirm, Sheet, autoFinishedText, clock, elapsed, fmtDate, fmtSets, plural, useNow } from './common';
+import { Confirm, Sheet, autoFinishedText, clock, elapsed, fmtDate, fmtSets, nextDayName, plural, useNow } from './common';
 import { ExercisePicker } from './ProgramBuilder';
 import { ArtPicker, ExerciseInfoSheet, ExerciseThumb } from './exerciseArt';
 
@@ -2028,10 +2028,10 @@ function SaveAsDay({
   onClose: () => void;
   onSaved: (text: string) => void;
 }) {
-  const [programs, setPrograms] = useState<Array<{ id: string; name: string; days: Array<{ id: string }> }> | null>(null);
+  const [programs, setPrograms] = useState<Array<{ id: string; name: string; days: Array<{ id: string; name: string }> }> | null>(null);
   const [target, setTarget] = useState('');
   const [programName, setProgramName] = useState('Программа');
-  const [dayName, setDayName] = useState('Тренировка 1');
+  const [dayName, setDayName] = useState('Тренировка A');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   useEffect(() => {
@@ -2042,7 +2042,7 @@ function SaveAsDay({
         setPrograms(list);
         if (list[0]) {
           setTarget(list[0].id);
-          setDayName('Тренировка ' + (list[0].days.length + 1));
+          setDayName(nextDayName(list[0].days.map((d: { name: string }) => d.name)));
         }
       })
       .catch((e) => setErr(readError(e)));
@@ -2050,7 +2050,7 @@ function SaveAsDay({
   const pickTarget = (id: string) => {
     setTarget(id);
     const p = programs?.find((x) => x.id === id);
-    setDayName('Тренировка ' + ((p?.days.length || 0) + 1));
+    setDayName(nextDayName((p?.days || []).map((d) => d.name)));
   };
   const save = async () => {
     setBusy(true);
