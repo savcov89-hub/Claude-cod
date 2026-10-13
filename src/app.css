@@ -1682,6 +1682,20 @@ table {
   text-align: center;
   padding: 0;
 }
+.pv-accent {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--info-soft);
+  color: var(--info);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+.pv .filter small {
+  margin-left: 6px;
+  font-weight: 700;
+}
 .pv-report {
   display: grid;
   gap: 6px;

@@ -99,6 +99,8 @@ export interface Program {
   perWeek?: number;
   /** Weekly sets per muscle part the trainer aims at (the program made «По объёму»). */
   targets?: Record<string, number>;
+  /** The client's experience and the accents (specialisation) the targets were made from. */
+  focus?: { level: 'novice' | 'middle' | 'advanced'; accents: string[] };
 }
 export interface SetEntry {
   weight: number;

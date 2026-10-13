@@ -1,6 +1,6 @@
 import { catalog } from './catalog';
 import { ROLES, roleOf } from './templates';
-import { EXERCISE_LOAD, PARTS, cleanTargets, type Load } from './volume';
+import { EXERCISE_LOAD, PARTS, accentParts, cleanTargets, type Level, type Load } from './volume';
 import type { ProgramDay } from './types';
 
 /**
@@ -10,26 +10,50 @@ import type { ProgramDay } from './types';
  *    because they cover several parts, halves included (a press gives the front delt and the triceps half a set).
  * 3. Sets (2–5) are tuned so the week comes as close to the targets as it can.
  */
-export type SplitKind = 'full' | 'upperLower' | 'ppl' | 'hybrid';
+export type SplitKind = 'full' | 'upperLower' | 'lowerUpper' | 'ppl' | 'hybrid';
 export const SPLITS: Array<{ id: SplitKind; label: string }> = [
   { id: 'full', label: 'Всё тело' },
   { id: 'upperLower', label: 'Верх / низ' },
+  { id: 'lowerUpper', label: 'Низ / верх' },
   { id: 'ppl', label: 'Толкай / тяни / ноги' },
   { id: 'hybrid', label: 'Верх / низ + толкай / тяни / ноги' },
 ];
-/** 2–3 workouts — the whole body each time, 4 — upper and lower, 5 — upper/lower + push/pull/legs, 6–7 — push/pull/legs. */
-export const autoSplit = (n: number): SplitKind => (n <= 3 ? 'full' : n === 4 ? 'upperLower' : n === 5 ? 'hybrid' : 'ppl');
+const LOWER_ACCENTS = new Set(['quads', 'hamstrings', 'glutes', 'calves']);
+/**
+ * 2–3 workouts — the whole body each time, 4 — upper and lower, 5 — upper/lower + push/pull/legs, 6–7 — push/pull/legs.
+ * Accents on the legs only (4+ workouts): lower and upper starting with the lower — 3 leg days of 5, not 2.
+ */
+export const autoSplit = (n: number, accents: string[] = []): SplitKind =>
+  n <= 3
+    ? 'full'
+    : accents.length && accents.every((a) => LOWER_ACCENTS.has(a))
+      ? 'lowerUpper'
+      : n === 4
+        ? 'upperLower'
+        : n === 5
+          ? 'hybrid'
+          : 'ppl';
 
 type DayKind = 'full' | 'upper' | 'lower' | 'push' | 'pull' | 'legs';
 const SEQUENCE: Record<SplitKind, DayKind[]> = {
   full: ['full'],
   upperLower: ['upper', 'lower'],
+  lowerUpper: ['lower', 'upper'],
   ppl: ['push', 'pull', 'legs'],
   hybrid: ['upper', 'lower', 'push', 'pull', 'legs'],
 };
 const DAY_NAME: Record<DayKind, string> = { full: 'Всё тело', upper: 'Верх', lower: 'Низ', push: 'Толкай', pull: 'Тяни', legs: 'Ноги' };
 const UPPER = ['chest', 'lats', 'upperBack', 'deltFront', 'deltSide', 'deltRear', 'bicepsBrachii', 'brachialis', 'tricepsLong', 'tricepsShort'];
 const LOWER = ['rectusFemoris', 'vasti', 'hamsLong', 'hamsShort', 'glutes', 'abductors', 'adductors', 'gastrocnemius', 'soleus', 'erectors'];
+/** The half of the body a day works: an accent of that half may come on any such day (lateral raises on a pull day). */
+const HALF: Record<DayKind, Set<string>> = {
+  full: new Set(PARTS.map((p) => p.id)),
+  upper: new Set(UPPER),
+  push: new Set(UPPER),
+  pull: new Set(UPPER),
+  lower: new Set(LOWER),
+  legs: new Set(LOWER),
+};
 /** Parts a day may work as main work (abs any day). */
 const ALLOWED: Record<DayKind, Set<string>> = {
   full: new Set(PARTS.map((p) => p.id)),
@@ -41,47 +65,39 @@ const ALLOWED: Record<DayKind, Set<string>> = {
 };
 
 /**
- * Ready-made weekly targets, sets per part. They are kept reachable: presses give the front delt and the short heads
- * of the triceps half a set each, so those targets are lower or higher than the muscle's isolation alone would ask.
+ * Weekly sets per part for growth by the client's experience. They are kept reachable: presses give the front delt and
+ * the short heads of the triceps half a set each, so those targets are lower or higher than isolation alone would ask.
  */
-export const TARGET_PRESETS: Array<{ id: string; label: string; targets: Record<string, number> }> = [
-  {
-    id: 'novice',
-    label: 'Новичок',
-    targets: {
-      chest: 8, lats: 8, upperBack: 8, deltFront: 5, deltSide: 8, deltRear: 6, bicepsBrachii: 6, brachialis: 6, tricepsLong: 5,
-      tricepsShort: 8, rectusFemoris: 3, vasti: 8, hamsLong: 8, hamsShort: 4, glutes: 8, adductors: 3, gastrocnemius: 4, soleus: 4,
-      abs: 6,
-    },
+export const GROWTH: Record<Level, Record<string, number>> = {
+  novice: {
+    chest: 8, lats: 8, upperBack: 8, deltFront: 5, deltSide: 8, deltRear: 6, bicepsBrachii: 6, brachialis: 6, tricepsLong: 5,
+    tricepsShort: 8, rectusFemoris: 3, vasti: 8, hamsLong: 8, hamsShort: 4, glutes: 8, abductors: 3, adductors: 3,
+    gastrocnemius: 4, soleus: 4, abs: 6, erectors: 2,
   },
-  {
-    id: 'middle',
-    label: 'Средний',
-    targets: {
-      chest: 12, lats: 12, upperBack: 12, deltFront: 7, deltSide: 12, deltRear: 8, bicepsBrachii: 9, brachialis: 9, tricepsLong: 8,
-      tricepsShort: 12, rectusFemoris: 4, vasti: 12, hamsLong: 12, hamsShort: 6, glutes: 12, abductors: 4, adductors: 5,
-      gastrocnemius: 6, soleus: 6, abs: 8, erectors: 3,
-    },
+  middle: {
+    chest: 12, lats: 12, upperBack: 12, deltFront: 7, deltSide: 12, deltRear: 8, bicepsBrachii: 9, brachialis: 9, tricepsLong: 8,
+    tricepsShort: 12, rectusFemoris: 4, vasti: 12, hamsLong: 12, hamsShort: 6, glutes: 12, abductors: 4, adductors: 5,
+    gastrocnemius: 6, soleus: 6, abs: 8, erectors: 3,
   },
-  {
-    id: 'advanced',
-    label: 'Продвинутый',
-    targets: {
-      chest: 16, lats: 16, upperBack: 16, deltFront: 9, deltSide: 16, deltRear: 12, bicepsBrachii: 12, brachialis: 12,
-      tricepsLong: 10, tricepsShort: 15, rectusFemoris: 6, vasti: 16, hamsLong: 14, hamsShort: 8, glutes: 14, abductors: 6,
-      adductors: 7, gastrocnemius: 8, soleus: 8, abs: 10, erectors: 4,
-    },
+  advanced: {
+    chest: 16, lats: 16, upperBack: 16, deltFront: 9, deltSide: 16, deltRear: 12, bicepsBrachii: 12, brachialis: 12,
+    tricepsLong: 10, tricepsShort: 15, rectusFemoris: 6, vasti: 16, hamsLong: 14, hamsShort: 8, glutes: 14, abductors: 6,
+    adductors: 7, gastrocnemius: 8, soleus: 8, abs: 10, erectors: 4,
   },
-  {
-    id: 'glutes',
-    label: 'Акцент на ягодицы',
-    targets: {
-      chest: 6, lats: 9, upperBack: 10, deltFront: 5, deltSide: 9, deltRear: 6, bicepsBrachii: 5, brachialis: 5, tricepsLong: 4,
-      tricepsShort: 7, rectusFemoris: 2, vasti: 10, hamsLong: 12, hamsShort: 6, glutes: 18, abductors: 9, adductors: 6,
-      gastrocnemius: 4, soleus: 4, abs: 8, erectors: 5,
-    },
-  },
-];
+};
+/** Specialisation: an accent gets 1,4 of the growth volume, the other muscles half of it (maintenance). */
+export const ACCENT_FACTOR = 1.4;
+export const MAINTAIN_FACTOR = 0.5;
+/** Weekly targets for the experience and accents; no accents — every muscle for growth. */
+export function targetsFor(level: Level, accents: string[] = []): Record<string, number> {
+  const marked = accentParts(accents);
+  const out: Record<string, number> = {};
+  for (const [p, t] of Object.entries(GROWTH[level])) {
+    const n = Math.round(!accents.length ? t : marked.has(p) ? t * ACCENT_FACTOR : t * MAINTAIN_FACTOR);
+    if (n >= 1) out[p] = n;
+  }
+  return out;
+}
 
 const COMPOUND = new Set(['squat', 'hinge', 'singleLeg', 'chestPress', 'inclinePress', 'dip', 'shoulderPress', 'verticalPull', 'row', 'bridge', 'hipExtension']);
 const HEAVY = new Set(['bench-press', 'back-squat', 'front-squat', 'deadlift', 'barbell-row', 'overhead-press', 'rdl']);
@@ -104,12 +120,17 @@ interface Candidate {
   /** The usual choice of its role goes first (0–0.5). */
   pref: number;
 }
-/** Not picked by the planner (the trainer adds them by hand): dips load the front of the shoulder more than a press. */
-const HAND_PICKED = new Set(['dip']);
+/** Small leanings between exercises of the same kind. */
+const ID_PREF: Record<string, number> = {};
+/**
+ * Not picked by the planner (the trainer adds them by hand): dips load the front of the shoulder more than a press,
+ * the conventional deadlift asks the most of technique (a Romanian deadlift, a bridge or a lever machine instead).
+ */
+const HAND_PICKED = new Set(['dip', 'deadlift']);
 /** The only kind of exercise that may come twice in one workout (two lateral raises, cable and dumbbell). */
 const TWICE = new Set(['lateralRaise']);
 const CANDIDATES: Candidate[] = catalog
-  .filter((c) => EXERCISE_LOAD[c.id] && !HAND_PICKED.has(roleOf(c.id) || ''))
+  .filter((c) => EXERCISE_LOAD[c.id] && !HAND_PICKED.has(roleOf(c.id) || c.id))
   .map((c) => {
     // The conventional deadlift is a hinge too: never with a Romanian deadlift the same day.
     const role = roleOf(c.id) || (c.id === 'deadlift' ? 'hinge' : c.id);
@@ -121,7 +142,7 @@ const CANDIDATES: Candidate[] = catalog
       role,
       load,
       main: Object.keys(load).filter((p) => load[p] === 1),
-      pref: list ? 0.5 * (1 - list.indexOf(c.id) / list.length) : 0,
+      pref: (list ? 0.5 * (1 - list.indexOf(c.id) / list.length) : 0) + (ID_PREF[c.id] || 0),
     };
   });
 
@@ -153,6 +174,8 @@ export interface PlanOptions {
   perDay?: number;
   /** 0 — the usual exercises; other numbers — other picks of the same kind. */
   variant?: number;
+  /** Accents in their order: their targets are met first, their exercises open every workout they are in. */
+  accents?: string[];
 }
 export interface PlanResult {
   days: ProgramDay[];
@@ -164,15 +187,23 @@ export interface PlanResult {
 export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions): PlanResult {
   const targets = cleanTargets(targetsIn);
   const n = Math.max(1, Math.min(7, Math.round(o.days)));
-  const split = o.split || autoSplit(n);
+  const split = o.split || autoSplit(n, o.accents);
   const perDay = Math.max(2, Math.min(12, o.perDay || 7));
   const kinds = Array.from({ length: n }, (_, i) => SEQUENCE[split][i % SEQUENCE[split].length]);
+  const accent = accentParts(o.accents);
+  /** An accent counts more: when there is not room for everything, maintenance gives way. */
+  const weight = (p: string) => (accent.has(p) ? 1.6 : 1);
+  const allows = (d: number, p: string) => ALLOWED[kinds[d]].has(p) || (accent.has(p) && HALF[kinds[d]].has(p));
+  /** An exercise fits a day by its main work; on a day of another kind an accent comes only in small exercises
+   * (lateral raises on a pull day — not a press). */
+  const suits = (c: Candidate, d: number) =>
+    c.main.length > 0 && (c.main.every((p) => ALLOWED[kinds[d]].has(p)) || (!COMPOUND.has(c.role) && c.main.every((p) => allows(d, p))));
 
-  // 1. Days of each part: biggest targets first, onto the least loaded days, spread evenly over the week.
+  // 1. Days of each part: accents and the biggest targets first, onto the least loaded days, spread evenly over the week.
   const dayTarget: Array<Record<string, number>> = kinds.map(() => ({}));
   const dayLoad = kinds.map(() => 0);
-  for (const [p, t] of Object.entries(targets).sort((a, b) => b[1] - a[1])) {
-    const eligible = kinds.map((_, i) => i).filter((i) => ALLOWED[kinds[i]].has(p));
+  for (const [p, t] of Object.entries(targets).sort((a, b) => Number(accent.has(b[0])) - Number(accent.has(a[0])) || b[1] - a[1])) {
+    const eligible = kinds.map((_, i) => i).filter((i) => allows(i, p));
     if (!eligible.length) continue;
     const k = Math.min(eligible.length, Math.max(Math.ceil(t / 6), t >= 4 ? 2 : 1));
     let best: number[] = [];
@@ -206,7 +237,7 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
       if (days[d].length >= perDay) continue;
       const roles = new Set(days[d].map((x) => x.c.role));
       for (const c of CANDIDATES) {
-        if (used.has(c.id) || !c.main.length || !c.main.every((p) => ALLOWED[kinds[d]].has(p))) continue;
+        if (used.has(c.id) || !suits(c, d)) continue;
         // A second exercise of the same kind the same day — only lateral raises (cable and dumbbell).
         const again = roles.has(c.role);
         if (again && !TWICE.has(c.role)) continue;
@@ -221,7 +252,7 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
             const week = Math.max(0, (targets[p] || 0) - (total[p] || 0));
             const day = Math.max(0, (dayTarget[d][p] || 0) - (dayGot[d][p] || 0));
             // A part far from its target goes first: a muscle with nothing yet beats one almost done.
-            gain += Math.min(add, day, week) * (1 + (targets[p] ? (0.5 * week) / targets[p] : 0));
+            gain += Math.min(add, day, week) * (1 + (targets[p] ? (0.5 * week) / targets[p] : 0)) * weight(p);
             waste += Math.max(0, add - week);
           }
           if (capped) continue;
@@ -246,7 +277,7 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
   // (over a part with no target — a little).
   const miss = (p: string, v: number) => {
     const t = targets[p] || 0;
-    return v < t ? (t - v) * (1 + (t - v) / t) : (v - t) * (t ? 0.5 : 0.15);
+    return v < t ? (t - v) * (1 + (t - v) / t) * weight(p) : (v - t) * (t ? 0.5 : 0.15);
   };
   /** How much closer to the targets: `changes` are [load, sets added (negative — taken away)] on day `d`. */
   const better = (d: number, changes: Array<[Load, number]>) => {
@@ -261,8 +292,7 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
   };
   const fits = (c: Candidate, d: number, skip = -1) =>
     !used.has(c.id) &&
-    c.main.length > 0 &&
-    c.main.every((p) => ALLOWED[kinds[d]].has(p)) &&
+    suits(c, d) &&
     !(!TWICE.has(c.role) && days[d].some((x, j) => j !== skip && x.c.role === c.role));
   const apply = (d: number, c: Candidate, sets: number) => {
     for (const [p, f] of Object.entries(c.load)) {
@@ -315,9 +345,11 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
     }
   }
 
-  // 4. Big movements first, then the rest by how much they load, abs last; empty days are left out.
-  const weight = (x: { c: Candidate }) =>
-    (x.c.role === 'abs' ? -100 : 0) + (COMPOUND.has(x.c.role) ? 10 : 0) + Object.values(x.c.load).reduce((s, f) => s + f, 0);
+  // 4. Order: exercises of the accents first (the first accent before the second), then big movements, then the rest
+  // by how much they load, abs last; empty days are left out.
+  const rankOf = (c: Candidate) => Math.min(...c.main.map((p) => accent.get(p) ?? 9));
+  const order = (x: { c: Candidate }) =>
+    (9 - rankOf(x.c)) * 1000 + (x.c.role === 'abs' ? -100 : 0) + (COMPOUND.has(x.c.role) ? 10 : 0) + Object.values(x.c.load).reduce((s, f) => s + f, 0);
   const count: Record<string, number> = {};
   kinds.forEach((k) => (count[k] = (count[k] || 0) + 1));
   const seen: Record<string, number> = {};
@@ -329,7 +361,7 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
       id: 'day-' + (out.length + 1),
       name: DAY_NAME[k] + letter,
       exercises: [...days[d]]
-        .sort((a, b) => weight(b) - weight(a))
+        .sort((a, b) => order(b) - order(a))
         .map(({ c, sets }) => {
           const [repMin, repMax, targetRir] = targetsOf(c.id, c.role);
           return { exerciseId: c.id, exerciseName: c.name, sets, repMin, repMax, targetRir };

@@ -5,7 +5,8 @@ import { catalog } from '../src/catalog';
 import { muscleLoad, programIssue } from '../src/trainingRules';
 import { EXERCISE_LOAD, PARTS, cleanMuscles, doneTally, inWeek, loadKeys, ownLoad, planTally, volumeRows, weekPlan, weekStart } from '../src/volume';
 import { createHandler } from '../backend/app';
-import { TARGET_PRESETS, autoSplit, planByVolume } from '../src/volumePlanner';
+import { GROWTH, autoSplit, planByVolume, targetsFor } from '../src/volumePlanner';
+import { ACCENTS, LEVELS, accentParts, cleanFocus } from '../src/volume';
 import { sdk } from '../src/local/sdk';
 
 let failures = 0;
@@ -112,6 +113,12 @@ saved = (await call('POST', '/api/programs/' + created.id, { name: 'Верх / �
 expect(same(saved.targets, { chest: 12, deltSide: 10 }), 'изменение без целей их не сбрасывает', saved.targets);
 saved = (await call('POST', '/api/programs/' + created.id, { name: 'Верх / низ', days, targets: {} })).program;
 expect(saved.targets === undefined, 'пустые цели убираются', saved.targets);
+saved = (await call('POST', '/api/programs/' + created.id, { name: 'Верх / низ', days, focus: { level: 'advanced', accents: ['glutes', 'x'] } })).program;
+expect(same(saved.focus, { level: 'advanced', accents: ['glutes'] }), 'опыт и акценты сохраняются в программе', saved.focus);
+saved = (await call('POST', '/api/programs/' + created.id, { name: 'Верх / низ', days })).program;
+expect(same(saved.focus, { level: 'advanced', accents: ['glutes'] }), 'изменение без них их не сбрасывает', saved.focus);
+saved = (await call('POST', '/api/programs/' + created.id, { name: 'Верх / низ', days, focus: null })).program;
+expect(saved.focus === undefined, '«Очистить» убирает их', saved.focus);
 
 console.log('7. Программа по объёму');
 const DAY_KIND: Array<[RegExp, string[]]> = [
@@ -122,7 +129,8 @@ const DAY_KIND: Array<[RegExp, string[]]> = [
 ];
 const { roleOf } = await import('../src/templates');
 let slowest = 0;
-for (const preset of TARGET_PRESETS)
+const PRESETS = LEVELS.map((l) => ({ id: l.id, label: l.label, targets: targetsFor(l.id) }));
+for (const preset of PRESETS)
   for (const n of [2, 3, 4, 5, 6]) {
     // «Продвинутый» needs 8 exercises a workout to fit; the rest — the usual 7.
     const perDay = preset.id === 'advanced' ? 8 : 7;
@@ -156,9 +164,9 @@ for (const preset of TARGET_PRESETS)
     }
   }
 expect(slowest < 1500, 'составляется быстро (самое долгое ' + Math.round(slowest) + ' мс)');
-const once = planByVolume(TARGET_PRESETS[1].targets, { days: 4 });
-const again = planByVolume(TARGET_PRESETS[1].targets, { days: 4 });
-const other = planByVolume(TARGET_PRESETS[1].targets, { days: 4, variant: 1 });
+const once = planByVolume(PRESETS[1].targets, { days: 4 });
+const again = planByVolume(PRESETS[1].targets, { days: 4 });
+const other = planByVolume(PRESETS[1].targets, { days: 4, variant: 1 });
 expect(same(once.days, again.days), 'те же цели — та же программа');
 const ids = (r: typeof once) => r.days.flatMap((d) => d.exercises.map((e) => e.exerciseId)).sort().join();
 expect(ids(once) !== ids(other), '«Другой вариант» — другие упражнения');
@@ -171,7 +179,40 @@ const curlOnly = planByVolume({ hamsShort: 6, hamsLong: 6 }, { days: 2 });
 expect(curlOnly.total.hamsShort >= 5, 'короткая головка — сгибания голени', curlOnly.total);
 const longHead = planByVolume({ tricepsLong: 6 }, { days: 2 });
 expect(longHead.total.tricepsLong >= 5, 'длинная головка трицепса закрывается разгибаниями', longHead.days.map((d) => d.exercises.map((e) => e.exerciseId)));
-expect(planByVolume(TARGET_PRESETS[1].targets, { days: 3, split: 'ppl' }).split === 'ppl' && autoSplit(4) === 'upperLower', 'схема: выбранная или по числу тренировок');
+expect(planByVolume(PRESETS[1].targets, { days: 3, split: 'ppl' }).split === 'ppl' && autoSplit(4) === 'upperLower', 'схема: выбранная или по числу тренировок');
+expect(autoSplit(5, ['glutes', 'quads']) === 'lowerUpper' && autoSplit(5, ['chest']) === 'hybrid' && autoSplit(3, ['glutes']) === 'full', 'акценты на ноги: схема низ / верх с низа');
+
+console.log('8. Акценты: специализация и поддержание');
+const mid = targetsFor('middle', ['chest']);
+expect(mid.chest === Math.round(GROWTH.middle.chest * 1.4) && mid.lats === Math.round(GROWTH.middle.lats * 0.5), 'акцент — ×1,4 от объёма роста, остальные — половина', { chest: mid.chest, lats: mid.lats });
+expect(targetsFor('novice', ['chest']).chest < mid.chest && mid.chest < targetsFor('advanced', ['chest']).chest, 'подходов больше с опытом: новичок < средний < продвинутый');
+expect(same(targetsFor('middle', []), targetsFor('middle')), 'без акцентов — всё на рост');
+expect(same(cleanFocus({ level: 'middle', accents: ['chest', 'chest', 'back', 'x', 'delts', 'abs'] }), { level: 'middle', accents: ['chest', 'back', 'delts'] }), 'не больше 3 акцентов, только известные');
+expect(cleanFocus({ level: 'pro', accents: [] }) === undefined, 'неизвестный опыт не принимается');
+const isFor = (id: string, marked: Map<string, number>) => Object.entries(EXERCISE_LOAD[id]).some(([p, f]) => f === 1 && marked.has(p));
+const cases: Array<[any, string[], number]> = [
+  ['middle', ['chest'], 4], ['middle', ['chest'], 3], ['novice', ['glutes'], 3], ['middle', ['glutes', 'hamstrings'], 4],
+  ['advanced', ['delts'], 6], ['middle', ['back', 'biceps'], 4], ['advanced', ['quads', 'glutes', 'calves'], 5], ['novice', ['triceps', 'chest'], 2],
+];
+for (const [level, acc, n] of cases) {
+  const t = targetsFor(level, acc);
+  const r = planByVolume(t, { days: n, accents: acc });
+  const marked = accentParts(acc);
+  const label = level + ', ' + acc.map((a) => ACCENTS.find((x) => x.id === a)!.label).join(' + ') + ', ' + n + ' в неделю';
+  const order: string[] = [];
+  for (const d of r.days) {
+    const ranks = d.exercises.map((e) => Math.min(...Object.entries(EXERCISE_LOAD[e.exerciseId]).filter(([, f]) => f === 1).map(([p]) => marked.get(p) ?? 9)));
+    if (ranks.some((x, i) => i && x < ranks[i - 1])) order.push(d.name + ': ' + d.exercises.map((e) => e.exerciseName).join(', '));
+  }
+  expect(!order.length, label + ': упражнения акцентов первыми (первый акцент — раньше второго)', order);
+  const short = [...marked.keys()].filter((p) => t[p] && (r.total[p] || 0) < t[p] - 2).map((p) => p + ' ' + (r.total[p] || 0) + '/' + t[p]);
+  if (n >= 3) expect(!short.length, label + ': акценты закрыты (недобор не больше 2)', short);
+  expect(r.days.some((d) => d.exercises.length && isFor(d.exercises[0].exerciseId, marked)), label + ': есть тренировки, которые начинаются с акцента');
+}
+// No room for everything: maintenance gives way, not the accent.
+const tight = planByVolume(targetsFor('middle', ['chest']), { days: 2, perDay: 5, accents: ['chest'] });
+const tightPlain = planByVolume(targetsFor('middle', ['chest']), { days: 2, perDay: 5 });
+expect((tight.total.chest || 0) >= (tightPlain.total.chest || 0), 'когда места мало, акцент получает не меньше, чем без приоритета', [tight.total.chest, tightPlain.total.chest]);
 
 console.log(`\n${checks} проверок, ошибок: ${failures}`);
 process.exit(failures ? 1 : 0);

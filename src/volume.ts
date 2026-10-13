@@ -327,6 +327,50 @@ export function volumeRows(done: Tally, plan: Tally, targets: Record<string, num
   });
 }
 
+/**
+ * Muscles a program can specialise on («акценты»), as a trainer names them. Up to 3: they get more volume and come first
+ * in every workout they are in; the rest are kept at maintenance.
+ */
+export const ACCENTS: Array<{ id: string; label: string; parts: string[] }> = [
+  { id: 'chest', label: 'Грудь', parts: ['chest'] },
+  { id: 'back', label: 'Спина', parts: ['lats', 'upperBack'] },
+  { id: 'delts', label: 'Дельты', parts: ['deltFront', 'deltSide', 'deltRear'] },
+  { id: 'biceps', label: 'Бицепс', parts: ['bicepsBrachii', 'brachialis'] },
+  { id: 'triceps', label: 'Трицепс', parts: ['tricepsLong', 'tricepsShort'] },
+  { id: 'quads', label: 'Квадрицепс', parts: ['rectusFemoris', 'vasti'] },
+  { id: 'hamstrings', label: 'Задняя поверхность бедра', parts: ['hamsLong', 'hamsShort'] },
+  { id: 'glutes', label: 'Ягодицы', parts: ['glutes', 'abductors'] },
+  { id: 'calves', label: 'Икры', parts: ['gastrocnemius', 'soleus'] },
+  { id: 'abs', label: 'Пресс', parts: ['abs'] },
+];
+export const MAX_ACCENTS = 3;
+export type Level = 'novice' | 'middle' | 'advanced';
+export const LEVELS: Array<{ id: Level; label: string }> = [
+  { id: 'novice', label: 'Новичок' },
+  { id: 'middle', label: 'Средний' },
+  { id: 'advanced', label: 'Продвинутый' },
+];
+/** How the targets of a program were set: the client's experience and the accents in their order (first — first). */
+export interface Focus {
+  level: Level;
+  accents: string[];
+}
+export function cleanFocus(v: unknown): Focus | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const f = v as { level?: unknown; accents?: unknown };
+  if (!LEVELS.some((l) => l.id === f.level)) return undefined;
+  const accents = Array.isArray(f.accents) ? [...new Set(f.accents.map(String))].filter((a) => ACCENTS.some((x) => x.id === a)).slice(0, MAX_ACCENTS) : [];
+  return { level: f.level as Level, accents };
+}
+/** Parts of the accents, with the place of their accent (0 — the first one). */
+export function accentParts(accents: string[] = []) {
+  const out = new Map<string, number>();
+  accents.forEach((a, i) => {
+    for (const p of ACCENTS.find((x) => x.id === a)?.parts || []) if (!out.has(p)) out.set(p, i);
+  });
+  return out;
+}
+
 /** Weekly targets as stored with a program: known parts, whole sets 1–40. */
 export function cleanTargets(v: unknown): Record<string, number> {
   const out: Record<string, number> = {};

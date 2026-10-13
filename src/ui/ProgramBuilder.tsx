@@ -14,6 +14,7 @@ import {
 } from '../trainingRules';
 import { fmtKg } from '../analytics';
 import type { ClientItem, Exercise, Program, ProgramDay, ProgramExercise } from '../types';
+import type { Focus } from '../volume';
 import { Confirm, Sheet, nextDayName, plural, searchKey, tidyDayNames } from './common';
 import { AddExercise } from './Library';
 import { MuscleChips, PlanVolume } from './Volume';
@@ -57,6 +58,8 @@ export function ProgramBuilder({
   const [perWeek, setPerWeek] = useState<number | undefined>(options.program?.perWeek);
   // Weekly sets per muscle part the program is made for («По объёму»); kept with the program.
   const [targets, setTargets] = useState<Record<string, number>>(options.program?.targets || {});
+  // The client's experience and the accents the targets were made from.
+  const [volumeFocus, setVolumeFocus] = useState<Focus | undefined>(options.program?.focus);
   // Focus of a workout (muscle groups): asking before replacing exercises; the same focus again gives other exercises.
   const [focusAsk, setFocusAsk] = useState<{ key: string; label: string } | null>(null);
   const [lastFocus, setLastFocus] = useState<{ dayId: string; key: string; variant: number } | null>(null);
@@ -163,6 +166,7 @@ export function ProgramBuilder({
           days,
           perWeek: perWeek ?? null,
           targets,
+          focus: volumeFocus ?? null,
           base: { updatedAt: options.program!.updatedAt || options.program!.createdAt, days: options.program!.days },
         });
       else
@@ -172,6 +176,7 @@ export function ProgramBuilder({
           days,
           ...(perWeek ? { perWeek } : {}),
           ...(Object.keys(targets).length ? { targets } : {}),
+          ...(volumeFocus ? { focus: volumeFocus } : {}),
         });
       await onSaved();
     } catch (e) {
@@ -288,6 +293,8 @@ export function ProgramBuilder({
         days={days}
         targets={targets}
         onTargets={setTargets}
+        focus={volumeFocus}
+        onFocus={setVolumeFocus}
         onMake={(made, splitLabel, times) => {
           setUndo({ days, name });
           setDays(made);
@@ -519,7 +526,7 @@ export function ProgramBuilder({
         </button>
       </div>
 
-      <PlanVolume days={days} perWeek={perWeek} onPerWeek={setPerWeek} targets={targets} />
+      <PlanVolume days={days} perWeek={perWeek} onPerWeek={setPerWeek} targets={targets} accents={volumeFocus?.accents} />
 
       {warnings.length > 0 && (
         <div className="warn-list">

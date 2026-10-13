@@ -1107,7 +1107,7 @@ await scenario('32. Программа по объёму: подходы на м
   await p.getByRole('button', { name: 'Новая программа' }).click();
   await p.waitForTimeout(1000);
   await p.locator('.plan-volume .block-toggle').click();
-  await p.getByRole('group', { name: 'Готовые цели' }).getByRole('button', { name: 'Средний' }).click();
+  await p.getByRole('group', { name: 'Опыт клиента' }).getByRole('button', { name: 'Средний' }).click();
   await p.getByRole('group', { name: 'Тренировок в неделю для составления' }).getByRole('button', { name: '4', exact: true }).click();
   await p.getByRole('button', { name: 'Больше: Задняя дельта' }).click();
   expect((await p.getByRole('textbox', { name: 'Подходов в неделю: Задняя дельта' }).inputValue()) === '9', '«+» adds a set to the target');
@@ -1139,6 +1139,41 @@ await scenario('33. Новые тренировки программы назы�
   expect(JSON.stringify(tabs) === JSON.stringify(['Тренировка A', 'Тренировка B', 'Тренировка C']), 'A, B, C — not A, 2, 3', tabs);
   await p.getByRole('button', { name: 'Закрыть конструктор' }).click();
   await p.waitForTimeout(400);
+});
+
+await scenario('34. По объёму с акцентом на грудь: грудь первой, остальное на поддержании', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: 'Павел' }).first().locator('.client-open').click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('tab', { name: 'Программы' }).click();
+  await p.waitForTimeout(600);
+  await p.getByRole('button', { name: 'Новая программа' }).click();
+  await p.waitForTimeout(1000);
+  await p.locator('.plan-volume .block-toggle').click();
+  await p.getByRole('group', { name: 'Опыт клиента' }).getByRole('button', { name: 'Средний' }).click();
+  const before = Number(await p.getByRole('textbox', { name: 'Подходов в неделю: Грудь' }).inputValue());
+  const lats0 = Number(await p.getByRole('textbox', { name: 'Подходов в неделю: Широчайшие' }).inputValue());
+  await p.getByRole('group', { name: 'Акценты' }).getByRole('button', { name: 'Грудь' }).click();
+  const chest = Number(await p.getByRole('textbox', { name: 'Подходов в неделю: Грудь' }).inputValue());
+  const lats = Number(await p.getByRole('textbox', { name: 'Подходов в неделю: Широчайшие' }).inputValue());
+  expect(chest > before && lats < lats0, 'accent: more for the chest, the rest at maintenance', { before, chest, lats0, lats });
+  await p.getByRole('group', { name: 'Тренировок в неделю для составления' }).getByRole('button', { name: '4', exact: true }).click();
+  await p.getByRole('button', { name: 'Составить программу' }).click();
+  await p.locator('.pv-report').waitFor({ timeout: 5000 });
+  await p.getByRole('button', { name: 'Назначить клиенту' }).click();
+  await p.waitForTimeout(1500);
+  const made = (await call('get', '/api/programs')).programs.find((x) => x.clientId === idOf('Павел') && x.focus?.accents?.[0] === 'chest');
+  expect(made?.focus?.level === 'middle', 'saved with the experience and the accent', made?.focus);
+  // Chest exercises of the base (main work — the chest).
+  const CHEST = /^(Жим штанги лёжа|Жим гантелей на наклонной|Жим в тренажёре|Жим в Смите на наклонной|Жим от груди|Сведение рук|Бабочка)/;
+  const wrong = (made?.days || [])
+    .filter((d) => d.exercises.some((e) => CHEST.test(e.exerciseName)) && !CHEST.test(d.exercises[0].exerciseName))
+    .map((d) => d.name + ': ' + d.exercises.map((e) => e.exerciseName).join(', '));
+  expect(made && !wrong.length, 'every workout with chest work starts with it', wrong);
+  if (made) await call('post', '/api/programs/' + made.id + '/archive', { archived: true });
 });
 
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {

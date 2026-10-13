@@ -13,6 +13,7 @@ import {
   partsOfGroup,
   planTally,
   sumTargets,
+  accentParts,
   volumeRows,
   weekPlan,
   weekStart,
@@ -45,6 +46,7 @@ export function WeekVolume({ sessions, programs = [], exercises = [] }: { sessio
   const week = useMemo(() => inWeek(sessions, start), [sessions, start.getTime()]);
   const planned = useMemo(() => weekPlan(active), [active]);
   const targets = useMemo(() => sumTargets(active.map((p) => p.targets)), [active]);
+  const accents = useMemo(() => [...new Set(active.flatMap((p) => p.focus?.accents || []))], [active]);
   const rows = useMemo(() => volumeRows(doneTally(week, resolve), planTally(planned, resolve), targets), [week, planned, resolve, targets]);
   const setsDone = week.reduce((n, s) => n + s.exercises.reduce((k, e) => k + e.sets.filter((x) => x.reps > 0).length, 0), 0);
   const setsPlan = Math.round(planned.reduce((n, e) => n + e.sets, 0));
@@ -72,7 +74,7 @@ export function WeekVolume({ sessions, programs = [], exercises = [] }: { sessio
         {workouts ? ` из ${workouts}` : ''} · {setsDone} {plural(setsDone, 'подход', 'подхода', 'подходов')}
         {workouts ? ` из ${setsPlan} по плану` : ''}
       </p>
-      {rows.length ? <VolumeBars rows={rows} plan={workouts > 0} /> : <p className="muted small">На этой неделе тренировок не было.</p>}
+      {rows.length ? <VolumeBars rows={rows} plan={workouts > 0} accents={accents} /> : <p className="muted small">На этой неделе тренировок не было.</p>}
       <VolumeLegend plan={workouts > 0} targets={Object.keys(targets).length > 0} />
     </section>
   );
@@ -84,11 +86,13 @@ export function PlanVolume({
   perWeek,
   onPerWeek,
   targets = {},
+  accents = [],
 }: {
   days: Program['days'];
   perWeek?: number;
   onPerWeek: (n: number | undefined) => void;
   targets?: Record<string, number>;
+  accents?: string[];
 }) {
   const times = perWeek || Math.min(days.length, 7);
   const rows = useMemo(
@@ -117,7 +121,7 @@ export function PlanVolume({
             ? `${days.length} ${plural(days.length, 'тренировка', 'тренировки', 'тренировок')} программы по кругу, ${times} в неделю: в среднем ${Math.round((times / days.length) * 100)}% программы за неделю.`
             : `${times} в неделю при ${days.length} в программе: тренировки повторяются чаще раза в неделю.`}
       </p>
-      {rows.length ? <VolumeBars rows={rows} plan={false} /> : <p className="muted small">Добавьте упражнения.</p>}
+      {rows.length ? <VolumeBars rows={rows} plan={false} accents={accents} /> : <p className="muted small">Добавьте упражнения.</p>}
       <VolumeLegend plan={false} targets={hasTargets} />
     </section>
   );
@@ -150,10 +154,11 @@ function VolumeLegend({ plan, targets }: { plan: boolean; targets?: boolean }) {
   );
 }
 
-function VolumeBars({ rows, plan }: { rows: VolumeRow[]; plan: boolean }) {
+function VolumeBars({ rows, plan, accents = [] }: { rows: VolumeRow[]; plan: boolean; accents?: string[] }) {
+  const marked = accentParts(accents);
   const max = Math.max(BAND[1] + 4, ...rows.flatMap((r) => [r.done, r.plan, r.target || 0, ...r.parts.map((p) => p.target || 0)]));
   const pct = (v: number) => Math.min(100, (v / max) * 100) + '%';
-  const line = (r: { done: number; plan: number; target?: number }, cls: string, label: string, band: boolean, joints?: string) => {
+  const line = (r: { done: number; plan: number; target?: number }, cls: string, label: string, band: boolean, joints?: string, accent?: boolean) => {
     // Week: done against the plan. Editor: the plan (shown as done) against the trainer's target, ±1 set.
     const reached = plan ? r.plan > 0 && r.done >= r.plan : !!r.target && Math.abs(r.done - r.target) <= 1;
     const title =
@@ -164,6 +169,7 @@ function VolumeBars({ rows, plan }: { rows: VolumeRow[]; plan: boolean }) {
         <span className="vol-name">
           {label}
           {joints && <span className="vol-joints"> · {joints}</span>}
+          {accent && <span className="pv-accent">акцент</span>}
         </span>
         <div className="vol-bar">
           {band && !r.target && <b className="vol-band" style={{ left: pct(BAND[0]), width: `calc(${pct(BAND[1])} - ${pct(BAND[0])})` }} aria-hidden="true" />}
@@ -184,7 +190,7 @@ function VolumeBars({ rows, plan }: { rows: VolumeRow[]; plan: boolean }) {
     <div className="vol-bars">
       {rows.map((r) => (
         <div className="vol-group" key={r.id}>
-          {line(r, 'vol-whole', r.name, true)}
+          {line(r, 'vol-whole', r.name, true, undefined, partsOfGroup(r.id).some((p) => marked.has(p.id)))}
           {r.parts.map((p) => (
             <div key={p.id}>{line(p, 'vol-part', p.name, false, p.joints)}</div>
           ))}
