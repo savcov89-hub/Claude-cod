@@ -1,6 +1,7 @@
 import { catalog } from '../src/catalog';
 import { groupMuscles, exerciseRules, programIssue } from '../src/trainingRules';
 import { cleanFocus, cleanMuscles, cleanTargets, type Focus } from '../src/volume';
+import { cleanRestrictions } from '../src/restrictions';
 import { clientInsights, sessionRecords, type ClientInsights } from '../src/analytics';
 import { nowIso } from '../src/clock';
 import type { AutoFinished, OpenWorkout } from '../src/types';
@@ -72,6 +73,8 @@ export interface ClientNotes {
   goal?: string;
   limits?: string;
   notes?: string;
+  /** Ticked restrictions (src/restrictions.ts): exercises that do not suit are not picked by the app. */
+  restrictions?: string[];
 }
 interface ClientRecord {
   clientId: string;
@@ -1179,8 +1182,15 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           if (!name) return error('Имя не может быть пустым.', 400);
           patch.clientName = name;
         }
-        if (b.notes)
-          patch.notes = { goal: text(b.notes.goal, 300), limits: text(b.notes.limits, 500), notes: text(b.notes.notes, 2000) };
+        if (b.notes) {
+          const restrictions = cleanRestrictions(b.notes.restrictions);
+          patch.notes = {
+            goal: text(b.notes.goal, 300),
+            limits: text(b.notes.limits, 500),
+            notes: text(b.notes.notes, 2000),
+            ...(restrictions.length ? { restrictions } : {}),
+          };
+        }
         if (typeof b.archived === 'boolean') patch.archived = b.archived;
         // One of the ready-made pictures (src/ui/avatars.tsx); empty for the initial letter.
         if (typeof b.avatar === 'string') {
@@ -2133,6 +2143,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           draft: draft?.closed ? null : draft || null,
           // When the client was marked «Пришёл»: the journal shows the time spent in the gym.
           checkedInAt: client?.checkedInAt || null,
+          ...(client?.notes?.restrictions?.length ? { restrictions: client.notes.restrictions } : {}),
           // An open workout takes set counts changed in the program after it was started.
           programUpdatedAt: program.updatedAt || program.createdAt,
           revision: draft?.revision || null,

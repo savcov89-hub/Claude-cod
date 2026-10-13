@@ -1632,6 +1632,14 @@ table {
 .sw.band {
   border: 1px dashed var(--ink-2);
 }
+/* the client's restriction in the program editor */
+.restriction-note {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--warn-soft);
+  color: var(--warn);
+}
 /* «По объёму»: weekly targets per muscle part */
 .pv {
   display: grid;

@@ -1176,6 +1176,54 @@ await scenario('34. По объёму с акцентом на грудь: гр�
   if (made) await call('post', '/api/programs/' + made.id + '/archive', { archived: true });
 });
 
+await scenario('35. Ограничение «Локоть»: в подборе нет жимов и тяг, в списке они помечены', async () => {
+  // Presses and pulls of the base (src/restrictions.ts): what the elbow restriction leaves out.
+  const PRESS_PULL = new Set([
+    'bench-press', 'machine-chest-press', 'stack-chest-press', 'plate-chest-press', 'incline-dumbbell-press', 'smith-incline-press', 'plate-incline-press',
+    'dips', 'stack-assisted-dip', 'machine-shoulder-press', 'dumbbell-shoulder-press', 'overhead-press', 'stack-shoulder-press', 'plate-shoulder-press',
+    'lat-pulldown', 'assisted-pull-up', 'pull-up', 'stack-lat-pulldown', 'plate-lat-pulldown', 'chest-supported-row', 't-bar-row', 'seated-row',
+    'one-arm-row', 'barbell-row', 'stack-seated-row', 'plate-seated-row', 'plate-low-row', 'plate-dorian-row', 'face-pull', 'stack-triceps-press', 'plate-triceps',
+  ]);
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: 'Павел' }).first().locator('.client-open').click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('tab', { name: 'Обзор' }).click();
+  await p.waitForTimeout(500);
+  await p.getByRole('group', { name: 'Ограничения' }).getByRole('button', { name: 'Локоть: движение ограничено' }).click();
+  await p.waitForTimeout(1200);
+  const notes = (await call('get', '/api/clients')).clients.find((c) => c.clientName === 'Павел').notes;
+  expect(JSON.stringify(notes?.restrictions) === '["elbow"]', 'the restriction is saved with the client', notes);
+  await p.getByRole('tab', { name: 'Программы' }).click();
+  await p.waitForTimeout(600);
+  await p.getByRole('button', { name: 'Новая программа' }).click();
+  await p.waitForTimeout(1000);
+  expect(await p.locator('.restriction-note').isVisible(), 'the editor reminds of the restriction');
+  await p.locator('.plan-volume .block-toggle').click();
+  await p.getByRole('group', { name: 'Опыт клиента' }).getByRole('button', { name: 'Средний' }).click();
+  await p.getByRole('group', { name: 'Акценты' }).getByRole('button', { name: 'Спина' }).click();
+  await p.getByRole('group', { name: 'Тренировок в неделю для составления' }).getByRole('button', { name: '4', exact: true }).click();
+  await p.getByRole('button', { name: 'Составить программу' }).click();
+  await p.locator('.pv-report').waitFor({ timeout: 5000 });
+  await p.getByRole('button', { name: 'Добавить упражнение' }).click();
+  await p.waitForTimeout(600);
+  const sheet = p.locator('.sheet').last();
+  expect(await sheet.getByText('Не подходят по ограничениям клиента').count() === 1, 'the list puts presses and pulls last, under their own heading');
+  expect(await sheet.locator('.pick', { hasText: 'Жим штанги лёжа' }).getByText('Локоть: движение ограничено').count() === 1, 'the bench press is marked');
+  await sheet.getByRole('button', { name: 'Закрыть' }).click();
+  await p.waitForTimeout(300);
+  await p.getByRole('button', { name: 'Назначить клиенту' }).click();
+  await p.waitForTimeout(1500);
+  const made = (await call('get', '/api/programs')).programs.find((x) => x.clientId === idOf('Павел') && x.focus?.accents?.[0] === 'back');
+  const ids = (made?.days || []).flatMap((d) => d.exercises.map((e) => e.exerciseId));
+  expect(ids.length > 0 && !ids.some((id) => PRESS_PULL.has(id)), 'no presses or pulls in the program', ids.filter((id) => PRESS_PULL.has(id)));
+  expect(ids.includes('cable-pullover') || ids.includes('side-lying-pullover'), 'the back gets pullovers', ids);
+  if (made) await call('post', '/api/programs/' + made.id + '/archive', { archived: true });
+  await call('post', '/api/client/' + idOf('Павел') + '/update', { notes: { ...notes, restrictions: [] } });
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

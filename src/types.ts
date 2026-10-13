@@ -13,6 +13,8 @@ export interface ClientNotes {
   goal?: string;
   limits?: string;
   notes?: string;
+  /** Ticked restrictions (src/restrictions.ts): exercises that do not suit are not picked by the app. */
+  restrictions?: string[];
 }
 export interface ClientItem {
   clientId: string;
@@ -167,6 +169,8 @@ export interface WorkoutPayload {
   day: { id: string; name: string; exercises: WorkoutExercise[] };
   /** Workouts of this program left open long ago, recorded by the server as this one was opened. */
   autoFinished?: AutoFinished[];
+  /** The client's restrictions: the exercise lists of the journal put what does not suit last, marked. */
+  restrictions?: string[];
   /** Free workout only: what was done last time, to start "как в прошлый раз". */
   lastFree?: Array<{ exerciseId: string; exerciseName: string; sets: number; repMin: number; repMax: number; targetRir: number }>;
 }

@@ -162,6 +162,12 @@ export const catalog = [
     equipment: 'Тренажёр (стек)',
   },
   {
+    id: 'cable-rear-delt-fly',
+    name: 'Отведение в кроссовере на заднюю дельту',
+    muscleGroup: 'Плечи',
+    equipment: 'Блок',
+  },
+  {
     id: 'barbell-curl',
     name: 'Сгибание рук со штангой',
     muscleGroup: 'Бицепс',
@@ -236,6 +242,12 @@ export const catalog = [
   {
     id: 'cable-pullover',
     name: 'Пулловер на верхнем блоке',
+    muscleGroup: 'Спина',
+    equipment: 'Блок',
+  },
+  {
+    id: 'side-lying-pullover',
+    name: 'Пуловер лёжа на боку',
     muscleGroup: 'Спина',
     equipment: 'Блок',
   },

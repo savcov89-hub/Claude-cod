@@ -119,6 +119,7 @@ export const EXERCISE_LOAD: Record<string, Load> = {
   'barbell-row': { ...row, erectors: 0.5 },
   // Shoulder extension with a straight arm: the long head of the triceps extends the shoulder too.
   'cable-pullover': { lats: 1, tricepsLong: 0.5 },
+  'side-lying-pullover': { lats: 1, tricepsLong: 0.5 },
   'plate-shrug': { upperBack: 1 },
   'overhead-press': overhead,
   'dumbbell-shoulder-press': overhead,
@@ -132,6 +133,7 @@ export const EXERCISE_LOAD: Record<string, Load> = {
   'rear-delt-fly': rear,
   'reverse-pec-deck': rear,
   'stack-rear-delt': rear,
+  'cable-rear-delt-fly': rear,
   'face-pull': { deltRear: 1, upperBack: 1 },
   'barbell-curl': curl,
   'dumbbell-curl': curl,

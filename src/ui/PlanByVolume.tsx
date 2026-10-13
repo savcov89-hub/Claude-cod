@@ -34,6 +34,7 @@ export function PlanByVolume({
   onFocus,
   onMake,
   onUndo,
+  restrictions = [],
 }: {
   days: ProgramDay[];
   targets: Record<string, number>;
@@ -43,6 +44,8 @@ export function PlanByVolume({
   onFocus: (f: Focus | undefined) => void;
   onMake: (days: ProgramDay[], splitLabel: string, times: number) => void;
   onUndo?: () => void;
+  /** The client's restrictions: exercises that do not suit are not picked. */
+  restrictions?: string[];
 }) {
   const [open, setOpen] = useState(Object.keys(targets).length > 0);
   const [times, setTimes] = useState(Math.min(7, Math.max(2, days.filter((d) => d.exercises.length).length || 3)));
@@ -86,7 +89,7 @@ export function PlanByVolume({
     setVariant(v);
     // A moment for «Составляем…» to show: the planner takes a fraction of a second on a phone.
     setTimeout(() => {
-      const r = planByVolume(targets, { days: times, split: kind, perDay, variant: v, accents });
+      const r = planByVolume(targets, { days: times, split: kind, perDay, variant: v, accents, restrictions });
       const short: string[] = [];
       const over: string[] = [];
       for (const p of PARTS) {

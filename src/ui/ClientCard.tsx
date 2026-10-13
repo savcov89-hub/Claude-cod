@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Clipboard, Copy, Pencil, Plus, Smartphone, Archive, RotateCcw, Share2 } from 'lucide-react';
 import { api, inGym, readError } from '../transport';
 import { inviteLink } from '../invite';
-import type { AutoFinished, OpenWorkout, Program, Session } from '../types';
+import type { AutoFinished, ClientNotes, OpenWorkout, Program, Session } from '../types';
 import { activeClients, lastVisit, programsOf, visits30, type TrainerData } from './data';
 import { Avatar, AvatarPicker, Confirm, Empty, Sheet, VisitGrid, ago, autoFinishedText, fmtDate, fmtDateTime } from './common';
 import { ProgressView } from './Progress';
+import { RESTRICTIONS } from '../restrictions';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
 import { AUTO_FINISH_IDLE_MS, Journal } from './Journal';
@@ -276,7 +277,7 @@ const newPassword = () => {
 
 function Overview({ data, clientId, sessionsCount }: { data: TrainerData; clientId: string; sessionsCount: number }) {
   const client = data.clients.find((c) => c.clientId === clientId)!;
-  const [notes, setNotes] = useState({ goal: '', limits: '', notes: '', ...client.notes });
+  const [notes, setNotes] = useState<ClientNotes>({ goal: '', limits: '', notes: '', ...client.notes });
   const [saved, setSaved] = useState(true);
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState('');
@@ -355,6 +356,22 @@ function Overview({ data, clientId, sessionsCount }: { data: TrainerData; client
       setErr(readError(e));
     }
   };
+  /** A restriction is saved at once (with the notes as they are): the program editor and the journal take it up. */
+  const toggleRestriction = async (id: string) => {
+    const has = notes.restrictions?.includes(id);
+    const next = { ...notes, restrictions: has ? (notes.restrictions || []).filter((x) => x !== id) : [...(notes.restrictions || []), id] };
+    setNotes(next);
+    setBusy(true);
+    try {
+      await api.post('/api/client/' + clientId + '/update', { notes: next });
+      setSaved(true);
+      await data.reloadClients();
+    } catch (e) {
+      setErr(readError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   const field = (key: 'goal' | 'limits' | 'notes', label: string, placeholder: string, rows = 1) => (
     <label className="field">
       <span>{label}</span>
@@ -400,6 +417,28 @@ function Overview({ data, clientId, sessionsCount }: { data: TrainerData; client
         <h4>Заметки тренера</h4>
         {field('goal', 'Цель', 'Масса, рельеф, сила, здоровая спина…')}
         {field('limits', 'Ограничения и травмы', 'Что нельзя или нужно делать осторожно', 2)}
+        <div className="field">
+          <span>Учитывать при подборе упражнений</span>
+          <div className="chips" role="group" aria-label="Ограничения">
+            {RESTRICTIONS.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                className={'filter' + (notes.restrictions?.includes(r.id) ? ' on' : '')}
+                aria-pressed={!!notes.restrictions?.includes(r.id)}
+                disabled={busy}
+                onClick={() => void toggleRestriction(r.id)}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+          {RESTRICTIONS.filter((r) => notes.restrictions?.includes(r.id)).map((r) => (
+            <span key={r.id} className="muted small">
+              {r.note}
+            </span>
+          ))}
+        </div>
         {field('notes', 'Заметки', 'Предпочтения, режим, питание…', 3)}
         <button className="btn btn-primary" disabled={saved || busy} onClick={save}>
           {saved ? 'Сохранено' : 'Сохранить заметки'}

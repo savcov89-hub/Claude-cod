@@ -2,6 +2,7 @@ import { catalog } from './catalog';
 import { ROLES, roleOf } from './templates';
 import { EXERCISE_LOAD, PARTS, accentParts, cleanTargets, type Level, type Load } from './volume';
 import type { ProgramDay } from './types';
+import { suits as suitsRestrictions, twiceFor } from './restrictions';
 
 /**
  * A program from weekly volume: the trainer sets sets a week for every muscle part, the planner picks exercises.
@@ -128,8 +129,8 @@ const ID_PREF: Record<string, number> = {};
  */
 const HAND_PICKED = new Set(['dip', 'deadlift']);
 /** The only kind of exercise that may come twice in one workout (two lateral raises, cable and dumbbell). */
-const TWICE = new Set(['lateralRaise']);
-const CANDIDATES: Candidate[] = catalog
+const TWICE_ALWAYS = ['lateralRaise'];
+const ALL_CANDIDATES: Candidate[] = catalog
   .filter((c) => EXERCISE_LOAD[c.id] && !HAND_PICKED.has(roleOf(c.id) || c.id))
   .map((c) => {
     // The conventional deadlift is a hinge too: never with a Romanian deadlift the same day.
@@ -157,6 +158,11 @@ function seeded(seed: number) {
   };
 }
 
+/** Big muscles first in a workout, then the delts, then the arms and calves (with no presses or squats to lead). */
+const SIZE: Record<string, number> = {
+  chest: 3, lats: 3, upperBack: 3, vasti: 3, rectusFemoris: 3, hamsLong: 3, hamsShort: 3, glutes: 3, erectors: 3,
+  deltFront: 2, deltSide: 2, deltRear: 2, abductors: 1, adductors: 1,
+};
 const MIN_SETS = 2;
 const MAX_SETS = 5;
 /** 3 sets is the usual: 2, 4 and 5 are taken when they fit the targets clearly better. */
@@ -176,6 +182,8 @@ export interface PlanOptions {
   variant?: number;
   /** Accents in their order: their targets are met first, their exercises open every workout they are in. */
   accents?: string[];
+  /** The client's restrictions (src/restrictions.ts): exercises that do not suit are not picked. */
+  restrictions?: string[];
 }
 export interface PlanResult {
   days: ProgramDay[];
@@ -191,6 +199,8 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
   const perDay = Math.max(2, Math.min(12, o.perDay || 7));
   const kinds = Array.from({ length: n }, (_, i) => SEQUENCE[split][i % SEQUENCE[split].length]);
   const accent = accentParts(o.accents);
+  const CANDIDATES = ALL_CANDIDATES.filter((c) => suitsRestrictions(c.id, o.restrictions));
+  const TWICE = new Set([...TWICE_ALWAYS, ...twiceFor(o.restrictions)]);
   /** An accent counts more: when there is not room for everything, maintenance gives way. */
   const weight = (p: string) => (accent.has(p) ? 1.6 : 1);
   const allows = (d: number, p: string) => ALLOWED[kinds[d]].has(p) || (accent.has(p) && HALF[kinds[d]].has(p));
@@ -230,14 +240,20 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
   const days: Array<Array<{ c: Candidate; sets: number }>> = kinds.map(() => []);
   const dayGot: Array<Record<string, number>> = kinds.map(() => ({}));
   const total: Record<string, number> = {};
-  const used = new Set<string>();
+  // Each exercise once a week; with restrictions the choice is small, so one may come again on another day.
+  const used = new Map<string, number>();
+  const reuse = !!o.restrictions?.length;
+  const blocked = (c: Candidate, d: number, skip = -1) =>
+    days[d].some((x, j) => j !== skip && x.c.id === c.id) || (!reuse && (used.get(c.id) || 0) > 0);
+  const again7 = (c: Candidate) => ((used.get(c.id) || 0) > 0 ? 0.6 : 0);
+  const use = (id: string, k: number) => used.set(id, (used.get(id) || 0) + k);
   for (let guard = 0; guard < 120; guard++) {
     let best: { d: number; c: Candidate; sets: number; score: number; gain: number } | null = null;
     for (let d = 0; d < n; d++) {
       if (days[d].length >= perDay) continue;
       const roles = new Set(days[d].map((x) => x.c.role));
       for (const c of CANDIDATES) {
-        if (used.has(c.id) || !suits(c, d)) continue;
+        if (blocked(c, d) || !suits(c, d)) continue;
         // A second exercise of the same kind the same day — only lateral raises (cable and dumbbell).
         const again = roles.has(c.role);
         if (again && !TWICE.has(c.role)) continue;
@@ -257,14 +273,14 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
           }
           if (capped) continue;
           const score =
-            gain - 0.7 * waste - shape(sets) - 0.2 * days[d].length - (again ? 0.8 : 0) + c.pref + (ROLE_PREF[c.role] || 0) + 1.2 * (noise.get(c.id) || 0);
+            gain - 0.7 * waste - shape(sets) - 0.2 * days[d].length - (again ? 0.8 : 0) - again7(c) + c.pref + (ROLE_PREF[c.role] || 0) + 1.2 * (noise.get(c.id) || 0);
           if (!best || score > best.score) best = { d, c, sets, score, gain };
         }
       }
     }
     if (!best || best.gain < 1.5) break;
     days[best.d].push({ c: best.c, sets: best.sets });
-    used.add(best.c.id);
+    use(best.c.id, 1);
     for (const [p, f] of Object.entries(best.c.load)) {
       dayGot[best.d][p] = (dayGot[best.d][p] || 0) + f * best.sets;
       total[p] = (total[p] || 0) + f * best.sets;
@@ -291,7 +307,7 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
     return gain;
   };
   const fits = (c: Candidate, d: number, skip = -1) =>
-    !used.has(c.id) &&
+    !blocked(c, d, skip) &&
     suits(c, d) &&
     !(!TWICE.has(c.role) && days[d].some((x, j) => j !== skip && x.c.role === c.role));
   const apply = (d: number, c: Candidate, sets: number) => {
@@ -318,13 +334,13 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
         for (const c of helpful) {
           if (!fits(c, d, i)) continue;
           for (let sets = MIN_SETS; sets <= 4; sets++)
-            offer({ gain: better(d, [[x.c.load, -x.sets], [c.load, sets]]) - 0.4 - shape(sets) + shape(x.sets) + c.pref - x.c.pref + (ROLE_PREF[c.role] || 0) - (ROLE_PREF[x.c.role] || 0), d, i, to: sets, c });
+            offer({ gain: better(d, [[x.c.load, -x.sets], [c.load, sets]]) - 0.4 - again7(c) - shape(sets) + shape(x.sets) + c.pref - x.c.pref + (ROLE_PREF[c.role] || 0) - (ROLE_PREF[x.c.role] || 0), d, i, to: sets, c });
         }
       }
       if (days[d].length < perDay)
         for (const c of helpful) {
           if (!fits(c, d)) continue;
-          for (let sets = MIN_SETS; sets <= 3; sets++) offer({ gain: better(d, [[c.load, sets]]) - 0.6 - shape(sets) + (ROLE_PREF[c.role] || 0), d, i: days[d].length, to: sets, c });
+          for (let sets = MIN_SETS; sets <= 3; sets++) offer({ gain: better(d, [[c.load, sets]]) - 0.6 - again7(c) - shape(sets) + (ROLE_PREF[c.role] || 0), d, i: days[d].length, to: sets, c });
         }
     }
     const m = best as Move | null;
@@ -332,12 +348,12 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
     const x = days[m.d][m.i];
     if (x) apply(m.d, x.c, -x.sets);
     if (m.c) {
-      if (x) used.delete(x.c.id);
-      used.add(m.c.id);
+      if (x) use(x.c.id, -1);
+      use(m.c.id, 1);
       days[m.d][m.i] = { c: m.c, sets: m.to };
       apply(m.d, m.c, m.to);
     } else if (m.to === 0) {
-      used.delete(x.c.id);
+      use(x.c.id, -1);
       days[m.d].splice(m.i, 1);
     } else {
       x.sets = m.to;
@@ -349,7 +365,11 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
   // by how much they load, abs last; empty days are left out.
   const rankOf = (c: Candidate) => Math.min(...c.main.map((p) => accent.get(p) ?? 9));
   const order = (x: { c: Candidate }) =>
-    (9 - rankOf(x.c)) * 1000 + (x.c.role === 'abs' ? -100 : 0) + (COMPOUND.has(x.c.role) ? 10 : 0) + Object.values(x.c.load).reduce((s, f) => s + f, 0);
+    (9 - rankOf(x.c)) * 1000 +
+    (x.c.role === 'abs' ? -100 : 0) +
+    (COMPOUND.has(x.c.role) ? 20 : 0) +
+    4 * Math.max(...x.c.main.map((p) => SIZE[p] ?? 1)) +
+    Object.values(x.c.load).reduce((s, f) => s + f, 0);
   const count: Record<string, number> = {};
   kinds.forEach((k) => (count[k] = (count[k] || 0) + 1));
   const seen: Record<string, number> = {};

@@ -1627,6 +1627,7 @@ function JournalBody({
         <ExercisePicker
           title={'Замена: ' + plan[swapping.ei].exerciseName}
           exercises={swapping.list}
+          restrictions={workout.restrictions}
           exclude={[...workout.day.exercises.map((x) => x.exerciseId), ...plan.map((x) => x.exerciseId)]}
           initialGroup={
             (swapping.list.find((x) => x.id === slotOf(results[swapping.ei]))?.muscleGroup || '').split(' / ')[0]
@@ -1700,6 +1701,7 @@ function JournalBody({
         <ExercisePicker
           title="Добавить упражнение"
           exercises={adding.list}
+          restrictions={workout.restrictions}
           exclude={[...workout.day.exercises.map((x) => x.exerciseId), ...results.map((x) => x.exerciseId)]}
           autoFocusSearch={false}
           allowCreate={workout.actorRole === 'trainer'}

@@ -5,6 +5,10 @@ import { catalog } from '../src/catalog';
 import { muscleLoad, programIssue } from '../src/trainingRules';
 import { EXERCISE_LOAD, PARTS, cleanMuscles, doneTally, inWeek, loadKeys, ownLoad, planTally, volumeRows, weekPlan, weekStart } from '../src/volume';
 import { createHandler } from '../backend/app';
+import { adaptExercises, cleanRestrictions, unsuitable } from '../src/restrictions';
+import { TECHNIQUE } from '../src/exerciseTechnique';
+import { MOVES } from '../src/ui/figure/moves';
+import { roleOf as roleOfEx } from '../src/templates';
 import { GROWTH, autoSplit, planByVolume, targetsFor } from '../src/volumePlanner';
 import { ACCENTS, LEVELS, accentParts, cleanFocus } from '../src/volume';
 import { sdk } from '../src/local/sdk';
@@ -86,6 +90,7 @@ expect(tri?.parts.length === 2 && tri.parts[0].id === 'tricepsLong' && tri.parts
 console.log('6. Сервер хранит «тренировок в неделю»');
 const handle: any = createHandler(sdk);
 const T = 'vol-trainer';
+const T_ID = T;
 const call = async (method: string, path: string, body?: unknown) => {
   const res = await handle(method, path, body, { userId: T, name: 'Тренер', email: '' });
   if (res.status >= 400) throw new Error(path + ': ' + res.data?.error);
@@ -213,6 +218,50 @@ for (const [level, acc, n] of cases) {
 const tight = planByVolume(targetsFor('middle', ['chest']), { days: 2, perDay: 5, accents: ['chest'] });
 const tightPlain = planByVolume(targetsFor('middle', ['chest']), { days: 2, perDay: 5 });
 expect((tight.total.chest || 0) >= (tightPlain.total.chest || 0), 'когда места мало, акцент получает не меньше, чем без приоритета', [tight.total.chest, tightPlain.total.chest]);
+
+console.log('9. Ограничение «Локоть»: без жимов и тяг');
+const E = ['elbow'];
+const out = ['bench-press', 'incline-dumbbell-press', 'machine-chest-press', 'dips', 'lat-pulldown', 'pull-up', 'seated-row', 'barbell-row', 't-bar-row', 'overhead-press', 'machine-shoulder-press', 'face-pull', 'stack-triceps-press', 'plate-triceps', 'front-squat', 'hanging-leg-raise', 'plate-dorian-row'];
+const keep = ['pec-deck', 'cable-fly', 'cable-pullover', 'side-lying-pullover', 'lateral-raise', 'reverse-pec-deck', 'cable-rear-delt-fly', 'plate-shrug', 'dumbbell-curl', 'hammer-curl', 'triceps-pushdown', 'overhead-triceps', 'leg-press', 'back-squat', 'rdl', 'bulgarian-split-squat', 'crunch'];
+expect(out.every((id) => unsuitable(id, E)), 'жимы, тяги, тяга к лицу, трицепс-машины, фронтальный присед, вис — не подходят', out.filter((id) => !unsuitable(id, E)));
+expect(keep.every((id) => !unsuitable(id, E)), 'сведения, пуловеры, махи, разведения, шраги, бицепс, трицепс, ноги — подходят', keep.filter((id) => unsuitable(id, E)));
+expect(keep.every((id) => !unsuitable(id, [])), 'без ограничений подходит всё');
+expect(same(cleanRestrictions(['elbow', 'x', 'elbow']), ['elbow']), 'сервер принимает только известные ограничения');
+for (const id of ['side-lying-pullover', 'cable-rear-delt-fly'])
+  expect(!!catalog.find((c) => c.id === id) && !!EXERCISE_LOAD[id] && !!TECHNIQUE[id] && !!MOVES[id] && !!roleOfEx(id), 'новое упражнение «' + catalog.find((c) => c.id === id)?.name + '»: мышцы, техника, рисунок, тип');
+const bad9: string[] = [];
+for (const l of LEVELS)
+  for (const acc of [[], ['chest'], ['back'], ['delts', 'triceps']])
+    for (const n of [2, 3, 4, 5, 6]) {
+      const r = planByVolume(targetsFor(l.id, acc), { days: n, accents: acc, restrictions: E });
+      for (const d of r.days) for (const e of d.exercises) if (unsuitable(e.exerciseId, E)) bad9.push(l.id + ' ' + acc.join('+') + ' ' + n + ': ' + e.exerciseName);
+      if (programIssue(r.days)) bad9.push(programIssue(r.days));
+    }
+expect(!bad9.length, '«По объёму» с ограничением: ни одного жима и тяги (60 программ)', bad9.slice(0, 5));
+const elbowBack = planByVolume(targetsFor('middle', ['back']), { days: 4, accents: ['back'], restrictions: E });
+expect((elbowBack.total.lats || 0) >= targetsFor('middle', ['back']).lats - 2, 'акцент на спину без тяг: широчайшие закрыты пуловерами', elbowBack.days.map((d) => d.exercises.map((e) => e.exerciseId)));
+const { templates: TPL, templateDays: TD } = await import('../src/templates');
+const tBad: string[] = [];
+TPL.forEach((t, i) => {
+  const days = TD(i, 6, 0, true);
+  for (const d of days) {
+    const a = adaptExercises(d.exercises, E);
+    for (const e of a) if (unsuitable(e.exerciseId, E)) tBad.push(t.name + ': ' + e.exerciseName);
+    if (new Set(a.map((e) => e.exerciseId)).size !== a.length) tBad.push(t.name + ' ' + d.name + ': повтор');
+    if (a.length < d.exercises.length - 1) tBad.push(t.name + ' ' + d.name + ': пропало ' + (d.exercises.length - a.length));
+  }
+});
+expect(!tBad.length, 'шаблоны с ограничением: жимы и тяги заменены, упражнения не повторяются и не пропадают', tBad.slice(0, 5));
+const swapped = adaptExercises([{ exerciseId: 'bench-press', exerciseName: 'Жим', sets: 4, repMin: 6, repMax: 10, targetRir: 2 }], E)[0];
+expect(swapped?.exerciseId === 'pec-deck' && swapped.sets === 4 && swapped.repMin === 6, 'замена сохраняет подходы и повторы: жим лёжа → сведение в тренажёре', swapped);
+await call('POST', '/api/client/' + client.clientId + '/update', { notes: { goal: 'Сила', limits: 'Контрактура', notes: '', restrictions: ['elbow', 'nope'] } });
+const vera = (await call('GET', '/api/clients')).clients.find((c: any) => c.clientId === client.clientId);
+expect(same(vera.notes.restrictions, ['elbow']) && vera.notes.goal === 'Сила', 'ограничение сохраняется в заметках клиента', vera.notes);
+const w = await call('GET', '/api/workout/' + T_ID + '/' + created.id + '/a');
+expect(same(w.restrictions, ['elbow']), 'журнал получает ограничение клиента', w.restrictions);
+await call('POST', '/api/client/' + client.clientId + '/update', { notes: { goal: 'Сила', limits: '', notes: '' } });
+const vera2 = (await call('GET', '/api/clients')).clients.find((c: any) => c.clientId === client.clientId);
+expect(!vera2.notes.restrictions, 'снятое ограничение убирается', vera2.notes);
 
 console.log(`\n${checks} проверок, ошибок: ${failures}`);
 process.exit(failures ? 1 : 0);

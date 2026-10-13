@@ -469,11 +469,11 @@ export const ROLES: Record<string, string[]> = {
   fly: ['pec-deck', 'cable-fly', 'stack-pec-fly'],
   shoulderPress: ['machine-shoulder-press', 'dumbbell-shoulder-press', 'overhead-press', 'stack-shoulder-press', 'plate-shoulder-press'],
   lateralRaise: ['lateral-raise', 'cable-lateral-raise', 'machine-lateral-raise', 'stack-lateral-raise'],
-  rearDelt: ['reverse-pec-deck', 'face-pull', 'rear-delt-fly', 'stack-rear-delt'],
+  rearDelt: ['reverse-pec-deck', 'face-pull', 'rear-delt-fly', 'stack-rear-delt', 'cable-rear-delt-fly'],
   // back
   verticalPull: ['lat-pulldown', 'assisted-pull-up', 'pull-up', 'stack-lat-pulldown', 'plate-lat-pulldown'],
   row: ['chest-supported-row', 't-bar-row', 'seated-row', 'one-arm-row', 'barbell-row', 'stack-seated-row', 'plate-seated-row', 'plate-low-row', 'plate-dorian-row'],
-  pullover: ['cable-pullover'],
+  pullover: ['cable-pullover', 'side-lying-pullover'],
   shrug: ['plate-shrug'],
   // arms
   curl: ['incline-curl', 'bayesian-curl', 'cable-curl', 'dumbbell-curl', 'barbell-curl', 'preacher-curl', 'stack-biceps-curl'],

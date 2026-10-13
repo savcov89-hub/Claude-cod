@@ -18,6 +18,7 @@ import type { Focus } from '../volume';
 import { Confirm, Sheet, nextDayName, plural, searchKey, tidyDayNames } from './common';
 import { AddExercise } from './Library';
 import { MuscleChips, PlanVolume } from './Volume';
+import { adaptExercises, restrictionsOf, unsuitable } from '../restrictions';
 import { PlanByVolume } from './PlanByVolume';
 
 export interface BuilderOptions {
@@ -73,6 +74,9 @@ export function ProgramBuilder({
   const [saving, setSaving] = useState(false);
   const [errorText, setErrorText] = useState('');
 
+  // The client's restrictions (client card): what the app picks here leaves out the exercises that do not suit.
+  const restrictions = clients.find((c) => c.clientId === clientId)?.notes?.restrictions || [];
+  const adaptDays = (list: ProgramDay[]) => list.map((d) => ({ ...d, exercises: adaptExercises(d.exercises, restrictions) }));
   const day = days[Math.min(activeDay, days.length - 1)];
   const dayLoad = muscleLoad(day.exercises);
   const warnings = programWarnings(days);
@@ -80,7 +84,7 @@ export function ProgramBuilder({
 
   const generate = (t: number, c = count, v = variant, abs = withAbs) => {
     setUndo({ days, name });
-    setDays(templateDays(t, c, v, abs));
+    setDays(adaptDays(templateDays(t, c, v, abs)));
     setName(templates[t].name);
     setPerWeek(undefined);
     setTemplate(t);
@@ -98,7 +102,7 @@ export function ProgramBuilder({
     const again = lastFocus?.dayId === day.id && lastFocus.key === f.key;
     if (again) return refreshDay();
     const generic = !day.name.trim() || /^Тренировка( [A-ZА-Я0-9]+)?$/i.test(day.name.trim()) || DAY_FOCUS.some((x) => x.label === day.name);
-    patchDay({ ...day, name: generic ? f.label : day.name, exercises: focusDay(f.key) });
+    patchDay({ ...day, name: generic ? f.label : day.name, exercises: adaptExercises(focusDay(f.key), restrictions) });
     setLastFocus({ dayId: day.id, key: f.key, variant: 0 });
   };
   /** The open workout with other exercises of the same roles: order, sets, reps and RIR stay; undone with «Вернуть». */
@@ -106,7 +110,7 @@ export function ProgramBuilder({
   const refreshDay = () => {
     setDayUndo({ dayId: day.id, exercises: day.exercises });
     const elsewhere = days.filter((d) => d.id !== day.id).flatMap((d) => d.exercises.map((e) => e.exerciseId));
-    patchDay({ ...day, exercises: refreshExercises(day.exercises, elsewhere) });
+    patchDay({ ...day, exercises: adaptExercises(refreshExercises(day.exercises, elsewhere), restrictions) });
   };
   const canRefresh = day.exercises.some((e) => roleOf(e.exerciseId));
   const patchExercise = (i: number, patch: Partial<ProgramExercise>) =>
@@ -218,6 +222,11 @@ export function ProgramBuilder({
           <input id="builder-name" value={name} onChange={(e) => setName(e.target.value)} />
         </label>
       </div>
+      {restrictionsOf(restrictions).map((r) => (
+        <p key={r.id} className="restriction-note small">
+          <b>{r.label}.</b> {r.note} Шаблоны, «По объёму», «Обновить упражнения» и «Тренировка на…» это учитывают.
+        </p>
+      ))}
       {editing && (
         <p className="muted small">
           Изменения увидит клиент. История и начатые записи сохранятся; у дня с новым составом упражнений незавершённый черновик начнётся заново.
@@ -295,6 +304,7 @@ export function ProgramBuilder({
         onTargets={setTargets}
         focus={volumeFocus}
         onFocus={setVolumeFocus}
+        restrictions={restrictions}
         onMake={(made, splitLabel, times) => {
           setUndo({ days, name });
           setDays(made);
@@ -550,6 +560,7 @@ export function ProgramBuilder({
       {picker && (
         <ExercisePicker
           exercises={exercises}
+          restrictions={restrictions}
           exclude={day.exercises.filter((_, i) => i !== picker.replace).map((e) => e.exerciseId)}
           title={picker.replace === null ? 'Добавить упражнение' : 'Заменить упражнение'}
           allowCreate
@@ -609,6 +620,7 @@ export function ExercisePicker({
   initialGroup = '',
   autoFocusSearch = true,
   allowCreate = false,
+  restrictions = [],
   top,
   onCreated,
   onPick,
@@ -624,6 +636,8 @@ export function ExercisePicker({
   autoFocusSearch?: boolean;
   /** Trainer only: offer to create an exercise that is not in the list. */
   allowCreate?: boolean;
+  /** The client's restrictions: exercises that do not suit go last, marked. */
+  restrictions?: string[];
   onCreated?: (e: Exercise) => void;
   onPick: (e: Exercise) => void;
   onClose: () => void;
@@ -643,7 +657,11 @@ export function ExercisePicker({
   const inGroup = found.filter((e) => !group || e.muscleGroup.startsWith(group));
   // A name typed while a muscle group is chosen is also looked for in the other groups.
   const elsewhere = q.trim() && group ? found.filter((e) => !e.muscleGroup.startsWith(group)) : [];
-  const list = [...inGroup, ...elsewhere];
+  // What does not suit the client's restrictions comes after everything else.
+  const fits = (e: Exercise) => !unsuitable(e.id, restrictions);
+  const list = [...inGroup.filter(fits), ...elsewhere.filter(fits), ...inGroup, ...elsewhere].filter((e, i, all) => all.indexOf(e) === i);
+  const firstElsewhere = list.findIndex((e) => elsewhere.includes(e) && fits(e));
+  const firstUnfit = list.findIndex((e) => !fits(e));
   if (creating)
     return (
       <AddExercise
@@ -676,7 +694,8 @@ export function ExercisePicker({
       <div className="pick-list">
         {list.map((e, i) => (
           <Fragment key={e.id}>
-          {i === inGroup.length && <p className="muted small pick-other">В других группах</p>}
+          {i === firstElsewhere && <p className="muted small pick-other">В других группах</p>}
+          {i === firstUnfit && <p className="muted small pick-other">Не подходят по ограничениям клиента</p>}
           <button className="pick" onClick={() => onPick(e)}>
             <ExerciseThumb exercise={e} size={40} />
             <span className="grow">
@@ -685,6 +704,7 @@ export function ExercisePicker({
                 {e.muscleGroup} · {e.equipment}
                 {exerciseRules[e.id] ? ' · ' + exerciseRules[e.id].position : ''}
               </span>
+              {!fits(e) && <span className="small tone-warn">{unsuitable(e.id, restrictions)!.label}</span>}
             </span>
             <Plus size={18} />
           </button>
