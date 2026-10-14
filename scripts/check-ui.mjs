@@ -1224,6 +1224,41 @@ await scenario('35. Ограничение «Локоть»: в подборе �
   await call('post', '/api/client/' + idOf('Павел') + '/update', { notes: { ...notes, restrictions: [] } });
 });
 
+await scenario('36. План акцентов: этапы в карточке, шкала, этап — в «По объёму»', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: 'Павел' }).first().locator('.client-open').click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('tab', { name: 'Прогресс' }).click();
+  await p.waitForTimeout(800);
+  await p.getByRole('button', { name: 'Составить план' }).click();
+  await p.waitForTimeout(500);
+  await p.getByRole('group', { name: 'Акценты этапа 1' }).getByRole('button', { name: 'Грудь' }).click();
+  await p.getByRole('button', { name: 'Добавить этап' }).click();
+  await p.getByRole('group', { name: 'Акценты этапа 2' }).getByRole('button', { name: /Руки/ }).click();
+  await p.getByRole('button', { name: 'Сохранить план' }).click();
+  await p.waitForTimeout(1200);
+  const text = (await p.locator('.phases').innerText()).replace(/\s+/g, ' ');
+  expect(/Этап 1 из 2: Грудь — 20 подходов в неделю/.test(text) && /Неделя 1 из 8/.test(text) && /из 160/.test(text), 'the card shows the stage, its week and the sets of the stage', text.slice(0, 220));
+  expect(/Дальше с .*Руки/.test(text), 'and what comes next');
+  const plan = (await call('get', '/api/clients')).clients.find((c) => c.clientName === 'Павел').phases;
+  expect(plan?.list?.length === 2 && plan.list[1].accents.join() === 'biceps,triceps', 'the plan is saved with the client', plan);
+  await p.getByRole('tab', { name: 'Программы' }).click();
+  await p.waitForTimeout(600);
+  await p.getByRole('button', { name: 'Новая программа' }).click();
+  await p.waitForTimeout(1000);
+  await p.locator('.plan-volume .block-toggle').click();
+  await p.getByRole('group', { name: 'Этапы плана' }).getByRole('button', { name: /Этап 1 \(сейчас\): Грудь 20/ }).click();
+  const chest = await p.getByRole('textbox', { name: 'Подходов в неделю: Грудь' }).inputValue();
+  const pressed = await p.getByRole('group', { name: 'Акценты' }).getByRole('button', { name: 'Грудь' }).getAttribute('aria-pressed');
+  expect(chest === '20' && pressed === 'true', '«По объёму» takes the stage: chest is the accent with 20 sets', { chest, pressed });
+  await p.getByRole('button', { name: 'Закрыть конструктор' }).click();
+  await p.waitForTimeout(400);
+  await call('post', '/api/client/' + idOf('Павел') + '/update', { phases: null });
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

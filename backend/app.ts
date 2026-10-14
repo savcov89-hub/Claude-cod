@@ -2,6 +2,7 @@ import { catalog } from '../src/catalog';
 import { groupMuscles, exerciseRules, programIssue } from '../src/trainingRules';
 import { cleanFocus, cleanMuscles, cleanTargets, type Focus } from '../src/volume';
 import { cleanRestrictions } from '../src/restrictions';
+import { cleanPhases, type PhasePlan } from '../src/phases';
 import { clientInsights, sessionRecords, type ClientInsights } from '../src/analytics';
 import { nowIso } from '../src/clock';
 import type { AutoFinished, OpenWorkout } from '../src/types';
@@ -94,6 +95,8 @@ interface ClientRecord {
   archived?: boolean;
   /** Ready-made picture chosen by the trainer. */
   avatar?: string;
+  /** Specialisation plan: stages of accents one after another (src/phases.ts). */
+  phases?: PhasePlan;
 }
 interface CoachRecord {
   trainerId: string;
@@ -1192,6 +1195,8 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           };
         }
         if (typeof b.archived === 'boolean') patch.archived = b.archived;
+        // The specialisation plan; null removes it.
+        if (b.phases !== undefined) patch.phases = cleanPhases(b.phases);
         // One of the ready-made pictures (src/ui/avatars.tsx); empty for the initial letter.
         if (typeof b.avatar === 'string') {
           if (b.avatar && !/^[a-z-]{1,24}$/.test(b.avatar)) return error('Нет такой аватарки.', 400);
@@ -2075,6 +2080,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
             checkedInAt: client?.checkedInAt || null,
             visits: client?.visits || [],
             ...(client?.avatar ? { avatar: client.avatar } : {}),
+            ...(client?.phases ? { phases: client.phases } : {}),
           });
         }
         programs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));

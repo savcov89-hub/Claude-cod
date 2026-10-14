@@ -1632,6 +1632,85 @@ table {
 .sw.band {
   border: 1px dashed var(--ink-2);
 }
+/* specialisation plan: the stages on one line, the current one in detail */
+.ph-line {
+  display: flex;
+  gap: 2px;
+  margin: 10px 0 8px;
+}
+.ph-seg {
+  position: relative;
+  min-width: 0;
+  padding: 6px 6px 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-size: 12px;
+  line-height: 1.2;
+}
+.ph-seg span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ph-seg.is-done {
+  background: var(--info-soft);
+  color: var(--info);
+}
+.ph-seg.is-now {
+  background: var(--info);
+  color: #fff;
+  font-weight: 600;
+}
+/* «сейчас»: a small triangle under the current week */
+.ph-mark {
+  position: absolute;
+  top: 100%;
+  width: 0;
+  height: 0;
+  margin-left: -5px;
+  border: 5px solid transparent;
+  border-bottom-color: var(--ink);
+}
+.ph-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.ph-acc {
+  display: grid;
+  gap: 4px;
+}
+.ph-acc-head {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+}
+.ph-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+.ph-list .ph-past {
+  color: var(--ink-2);
+}
+.ph-edit {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.ph-edit-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ph-edit-head strong {
+  flex: 1;
+}
 /* the client's restriction in the program editor */
 .restriction-note {
   margin: 0;

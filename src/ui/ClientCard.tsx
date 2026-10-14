@@ -6,6 +6,7 @@ import type { AutoFinished, ClientNotes, OpenWorkout, Program, Session } from '.
 import { activeClients, lastVisit, programsOf, visits30, type TrainerData } from './data';
 import { Avatar, AvatarPicker, Confirm, Empty, Sheet, VisitGrid, ago, autoFinishedText, fmtDate, fmtDateTime } from './common';
 import { ProgressView } from './Progress';
+import { PhasesBlock } from './Phases';
 import { RESTRICTIONS } from '../restrictions';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
@@ -233,7 +234,26 @@ export function ClientCard({
       ))}
 
       {tab === 'overview' && <Overview data={data} clientId={clientId} sessionsCount={sessions.length} />}
-      {tab === 'progress' && (loading ? <div className="loader-block"><span className="loader" /></div> : <ProgressView sessions={sessions} programs={data.programs.filter((p) => p.clientId === clientId)} exercises={data.exercises} />)}
+      {tab === 'progress' &&
+        (loading ? (
+          <div className="loader-block">
+            <span className="loader" />
+          </div>
+        ) : (
+          <>
+            <PhasesBlock
+              plan={client?.phases}
+              sessions={sessions}
+              programs={data.programs.filter((p) => p.clientId === clientId)}
+              exercises={data.exercises}
+              onSave={async (phases) => {
+                await api.post('/api/client/' + clientId + '/update', { phases });
+                await data.reloadClients();
+              }}
+            />
+            <ProgressView sessions={sessions} programs={data.programs.filter((p) => p.clientId === clientId)} exercises={data.exercises} />
+          </>
+        ))}
       {tab === 'history' && (
         <>
           {client.needsReview && sessions.some((s) => s.id === client.latestSessionId) && (

@@ -4,6 +4,7 @@ import type { ProgramDay } from '../types';
 import { ACCENTS, GROUPS, LEVELS, MAX_ACCENTS, accentParts, muscleNames, partsOfGroup, planTally, PARTS, type Focus, type Level } from '../volume';
 import { ACCENT_FACTOR, GROWTH, MAINTAIN_FACTOR, SPLITS, autoSplit, planByVolume, targetsFor, type SplitKind } from '../volumePlanner';
 import { plural } from './common';
+import { phaseLabel, stageNow, stageTargets, type Phase, type PhasePlan } from '../phases';
 
 const partName = (id: string) => {
   const p = PARTS.find((x) => x.id === id)!;
@@ -35,6 +36,7 @@ export function PlanByVolume({
   onMake,
   onUndo,
   restrictions = [],
+  phases,
 }: {
   days: ProgramDay[];
   targets: Record<string, number>;
@@ -46,6 +48,8 @@ export function PlanByVolume({
   onUndo?: () => void;
   /** The client's restrictions: exercises that do not suit are not picked. */
   restrictions?: string[];
+  /** The client's specialisation plan: its current (and coming) stage can set the accents and targets. */
+  phases?: PhasePlan;
 }) {
   const [open, setOpen] = useState(Object.keys(targets).length > 0);
   const [times, setTimes] = useState(Math.min(7, Math.max(2, days.filter((d) => d.exercises.length).length || 3)));
@@ -63,6 +67,25 @@ export function PlanByVolume({
   const choose = (level: Level, list: string[]) => {
     onFocus({ level, accents: list });
     onTargets(targetsFor(level, list));
+    setReport(null);
+  };
+  /** Stages to take from the plan: the current one, and the next when the current ends within two weeks or not begun. */
+  const offered = (() => {
+    if (!phases) return [];
+    const now = stageNow(phases);
+    const out: Array<{ i: number; when: string }> = [];
+    if (now.index >= 0) {
+      out.push({ i: now.index, when: 'сейчас' });
+      const s = now.stages[now.index];
+      if (now.index + 1 < now.stages.length && s.phase.weeks - now.week < 2)
+        out.push({ i: now.index + 1, when: 'с ' + new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(now.stages[now.index + 1].from) });
+    } else if (now.before) out.push({ i: 0, when: 'с ' + new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(now.stages[0].from) });
+    return out.map((x) => ({ ...x, phase: now.stages[x.i].phase }));
+  })();
+  const takeStage = (phase: Phase) => {
+    const level = focus?.level || 'middle';
+    onFocus({ level, accents: phase.accents });
+    onTargets(stageTargets(level, phase));
     setReport(null);
   };
   const toggleAccent = (id: string) => {
@@ -116,6 +139,19 @@ export function PlanByVolume({
             Выберите опыт клиента и до трёх акцентов — цели на неделю заполнятся сами, их можно поправить. Приложение составит тренировки.
             Половинки считаются: жим даёт передней дельте и трицепсу по ½ подхода, поэтому изоляции добавится ровно на остаток.
           </p>
+          {offered.length > 0 && (
+            <div className="field">
+              <span>Взять этап из плана акцентов</span>
+              <div className="chips" role="group" aria-label="Этапы плана">
+                {offered.map((o) => (
+                  <button key={o.i} type="button" className="filter" onClick={() => takeStage(o.phase)}>
+                    Этап {o.i + 1} ({o.when}): {phaseLabel(o.phase)} {o.phase.sets}
+                  </button>
+                ))}
+              </div>
+              <span className="muted small">Акцентам — подходы этапа, остальным — поддержание по опыту клиента.</span>
+            </div>
+          )}
           <div className="field">
             <span>Опыт клиента — от него число подходов</span>
             <div className="chips" role="group" aria-label="Опыт клиента">

@@ -1,3 +1,4 @@
+import type { PhasePlan } from './phases';
 import type { ClientInsights } from './analytics';
 
 export type Role = 'trainer' | 'client';
@@ -37,6 +38,8 @@ export interface ClientItem {
   live?: OpenWorkout;
   /** Workouts left open long ago that the server has just recorded by itself. */
   autoFinished?: AutoFinished[];
+  /** Specialisation plan: stages of accents one after another. */
+  phases?: PhasePlan;
 }
 /** A workout left open (sets done, nothing saved for 3 hours) that the server recorded by itself. */
 export interface AutoFinished {
@@ -183,4 +186,6 @@ export interface Coach {
   avatar?: string;
   /** The trainer's own picture. */
   trainerAvatar?: string;
+  /** The trainer's specialisation plan for this client. */
+  phases?: PhasePlan;
 }

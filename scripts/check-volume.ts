@@ -6,6 +6,7 @@ import { muscleLoad, programIssue } from '../src/trainingRules';
 import { EXERCISE_LOAD, PARTS, cleanMuscles, doneTally, inWeek, loadKeys, ownLoad, planTally, volumeRows, weekPlan, weekStart } from '../src/volume';
 import { createHandler } from '../backend/app';
 import { adaptExercises, cleanRestrictions, unsuitable } from '../src/restrictions';
+import { accentShare, cleanPhases, phaseLabel, planProgress, stageNow, stageTargets } from '../src/phases';
 import { TECHNIQUE } from '../src/exerciseTechnique';
 import { MOVES } from '../src/ui/figure/moves';
 import { roleOf as roleOfEx } from '../src/templates';
@@ -262,6 +263,48 @@ expect(same(w.restrictions, ['elbow']), 'журнал получает огра�
 await call('POST', '/api/client/' + client.clientId + '/update', { notes: { goal: 'Сила', limits: '', notes: '' } });
 const vera2 = (await call('GET', '/api/clients')).clients.find((c: any) => c.clientId === client.clientId);
 expect(!vera2.notes.restrictions, 'снятое ограничение убирается', vera2.notes);
+
+console.log('10. План акцентов: этапы, недели, сделано и осталось');
+const plan = { start: '2026-09-21', list: [{ accents: ['chest'], sets: 20, weeks: 8 }, { accents: ['biceps', 'triceps'], sets: 20, weeks: 8 }] };
+expect(same(cleanPhases({ start: '2026-09-21', list: [{ accents: ['chest', 'x'], sets: 20, weeks: 8 }, { accents: [], sets: 20, weeks: 8 }, { accents: ['abs'], sets: 99, weeks: 4 }] }), { start: '2026-09-21', list: [{ accents: ['chest'], sets: 20, weeks: 8 }] }), 'сервер принимает только правильные этапы');
+expect(cleanPhases({ start: 'вчера', list: plan.list }) === undefined, 'дата начала обязательна');
+const dayAt = (iso: string) => new Date(iso + 'T12:00:00').getTime();
+let now = stageNow(plan, dayAt('2026-10-14'));
+expect(now.index === 0 && now.week === 4, '14 окт.: этап 1, неделя 4 из 8', now);
+now = stageNow(plan, dayAt('2026-11-16'));
+expect(now.index === 1 && now.week === 1, '16 нояб. (понедельник): этап 2, неделя 1', now);
+now = stageNow(plan, dayAt('2026-11-15'));
+expect(now.index === 0 && now.week === 8, '15 нояб. (воскресенье): этап 1, последняя неделя', now);
+expect(stageNow(plan, dayAt('2026-09-20')).before && stageNow(plan, dayAt('2027-01-11')).index === -1, 'до начала и после конца — этапа нет');
+expect(phaseLabel(plan.list[1]) === 'Руки' && phaseLabel({ accents: ['chest', 'delts'], sets: 20, weeks: 8 }) === 'Грудь + Дельты', 'бицепс + трицепс — «Руки»');
+const sess = (iso: string, list: Array<[string, number]>) => ({ completedAt: new Date(iso + 'T18:00:00').toISOString(), exercises: list.map(([exerciseId, n]) => ({ exerciseId, sets: set(n) })) });
+const history = [
+  sess('2026-09-15', [['bench-press', 4]]), // before the plan
+  sess('2026-09-22', [['bench-press', 4], ['pec-deck', 3], ['triceps-pushdown', 3]]),
+  sess('2026-10-13', [['incline-dumbbell-press', 4], ['cable-fly', 3]]),
+  sess('2026-11-17', [['barbell-curl', 3], ['bench-press', 2]]),
+];
+const prog = planProgress(plan, history, undefined, dayAt('2026-10-14'));
+const chestP = prog[0].accents[0];
+expect(prog[0].state === 'now' && chestP.done === 14 && chestP.planned === 160 && chestP.byNow === 80 && chestP.thisWeek === 7, 'грудь: сделано 14 из 160, по плану к концу недели 80, эта неделя 7', chestP);
+expect(prog[1].state === 'next' && prog[1].accents.every((a) => a.done === 0), 'следующий этап ещё пуст');
+const later = planProgress(plan, history, undefined, dayAt('2026-11-18'));
+const arms = later[1].accents;
+expect(later[0].state === 'done' && arms.find((a) => a.id === 'biceps')!.done === 3 && arms.find((a) => a.id === 'triceps')!.done === 1, 'этап «Руки»: бицепс 3, трицепс 1 (жим даёт ½)', arms);
+expect(accentShare(EXERCISE_LOAD['overhead-press'], 'delts') === 1.5 && accentShare(EXERCISE_LOAD['triceps-pushdown'], 'triceps') === 1, 'дельты — сумма пучков, остальные — по главной части');
+const st = stageTargets('middle', { accents: ['chest'], sets: 20, weeks: 8 });
+expect(st.chest === 20 && st.lats === Math.round(GROWTH.middle.lats * 0.5), 'цели этапа: грудь 20, остальное на поддержании', { chest: st.chest, lats: st.lats });
+const sd = stageTargets('middle', { accents: ['delts'], sets: 20, weeks: 8 });
+expect(Math.abs(sd.deltFront + sd.deltSide + sd.deltRear - 20) <= 1, 'цели этапа «Дельты 20»: три пучка вместе ≈ 20', sd);
+const sa = stageTargets('middle', { accents: ['biceps', 'triceps'], sets: 20, weeks: 8 });
+expect(sa.bicepsBrachii === 20 && sa.tricepsShort === 20, 'цели этапа «Руки 20»: 20 на бицепс и 20 на трицепс', sa);
+await call('POST', '/api/client/' + client.clientId + '/update', { phases: plan });
+const withPlan = (await call('GET', '/api/clients')).clients.find((c: any) => c.clientId === client.clientId);
+expect(same(withPlan.phases, plan), 'план хранится у клиента', withPlan.phases);
+await call('POST', '/api/client/' + client.clientId + '/update', { clientName: 'Вера' });
+expect(same((await call('GET', '/api/clients')).clients.find((c: any) => c.clientId === client.clientId).phases, plan), 'другие изменения клиента план не трогают');
+await call('POST', '/api/client/' + client.clientId + '/update', { phases: null });
+expect(!(await call('GET', '/api/clients')).clients.find((c: any) => c.clientId === client.clientId).phases, '«Убрать план» убирает его');
 
 console.log(`\n${checks} проверок, ошибок: ${failures}`);
 process.exit(failures ? 1 : 0);

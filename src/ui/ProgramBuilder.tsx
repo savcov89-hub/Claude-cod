@@ -305,6 +305,7 @@ export function ProgramBuilder({
         focus={volumeFocus}
         onFocus={setVolumeFocus}
         restrictions={restrictions}
+        phases={clients.find((c) => c.clientId === clientId)?.phases}
         onMake={(made, splitLabel, times) => {
           setUndo({ days, name });
           setDays(made);

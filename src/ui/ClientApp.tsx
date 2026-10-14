@@ -6,6 +6,7 @@ import { localDate } from '../clock';
 import type { Coach, Profile, Program, Session } from '../types';
 import { Journal } from './Journal';
 import { ProgressView } from './Progress';
+import { PhasesBlock } from './Phases';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
 import { Avatar, Empty, VisitGrid, autoFinishedText, fmtDate } from './common';
@@ -288,7 +289,16 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
                 </section>
               </>
             )}
-            {tab === 'progress' && <ProgressView sessions={sessions} programs={programs} />}
+            {tab === 'progress' && (
+              <>
+                {coaches
+                  .filter((c) => c.phases)
+                  .map((c) => (
+                    <PhasesBlock key={c.trainerId} plan={c.phases} sessions={sessions} programs={programs} />
+                  ))}
+                <ProgressView sessions={sessions} programs={programs} />
+              </>
+            )}
             {tab === 'history' && <HistoryList sessions={sessions} programs={programs} />}
             {tab === 'body' && <BodyView />}
           </>
