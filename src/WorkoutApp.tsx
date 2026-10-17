@@ -4,7 +4,7 @@ import { getTheme, nextTheme, setTheme, themeLabel, type ThemeMode } from './the
 import { api, isArtifactBuild, isLocal, readError } from './transport';
 import { auth, type AuthUser } from './supabase';
 import { OfflineBar } from './ui/OfflineBar';
-import { captureInvite, clearInvite, pendingInvite } from './invite';
+import { captureInvite, captureLogin, clearInvite, pendingInvite } from './invite';
 import { getActor, initLocal, localActors, resetLocal, setActor, storageMode } from './local/runtime';
 import type { Profile, Role } from './types';
 import { TrainerApp } from './ui/TrainerApp';
@@ -109,6 +109,8 @@ function LocalApp() {
 
 /** Opened from a «сменить пароль» email: read before the sign-in library clears the address. */
 const recovering = typeof location !== 'undefined' && /type=recovery/.test(location.hash + location.search);
+/** Opened by the sign-in link the trainer sent (#login=…): the email and password are filled in, «Войти» is left. */
+const linkLogin = typeof location !== 'undefined' ? captureLogin() : null;
 
 /** Production: Supabase sign-in (Google or emailed link), then roles. */
 function RealApp() {
@@ -117,12 +119,12 @@ function RealApp() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(linkLogin?.email || '');
   const [sentTo, setSentTo] = useState('');
   const [name, setName] = useState('');
   const [googleOn, setGoogleOn] = useState(false);
   const [code, setCode] = useState('');
-  const [password, setPassword] = useState('');
+  const [password, setPassword] = useState(linkLogin?.password || '');
   // Password first; the emailed code stays as a fallback (the project's own mail is limited).
   const [byEmail, setByEmail] = useState(false);
   const [newPassword, setNewPassword] = useState<string | null>(recovering ? '' : null);
@@ -368,6 +370,8 @@ function RealApp() {
         </button>
       </div>
     );
+  // The sign-in link's email and password, as long as they are not changed.
+  const filled = !!linkLogin && email === linkLogin.email && password === linkLogin.password;
   if (!user)
     return (
       <div className="auth">
@@ -376,8 +380,9 @@ function RealApp() {
         <h1>Дневник тренера и клиента</h1>
         <p className="muted">Вкладки клиентов в зале, запись подходов в одно касание, подсказки прогрессии и сводка по всем клиентам.</p>
         {invite && <div className="success">Вас пригласил тренер. Войдите — подключение к нему произойдёт само.</div>}
+        {filled && <div className="success">Почта и пароль от тренера уже введены — нажмите «Войти».</div>}
         {err && <div className="alert">{err}</div>}
-        {googleOn && (
+        {googleOn && !filled && (
           <>
             <button className="btn btn-primary btn-lg btn-block" disabled={busy} onClick={google}>
               <GoogleMark /> Войти через Google
@@ -396,7 +401,12 @@ function RealApp() {
                 <span>Пароль</span>
                 <input id="login-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
               </label>
-              <button className={'btn btn-lg btn-block' + (googleOn ? '' : ' btn-primary')} disabled={busy || !email.trim() || !password} type="submit">
+              <button
+                className={'btn btn-lg btn-block' + (googleOn && !filled ? '' : ' btn-primary')}
+                disabled={busy || !email.trim() || !password}
+                autoFocus={filled}
+                type="submit"
+              >
                 {busy ? 'Входим…' : 'Войти'}
               </button>
             </form>

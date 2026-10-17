@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Clipboard, Copy, Pencil, Plus, Smartphone, Archive, RotateCcw, Share2, X } from 'lucide-react';
 import { api, inGym, readError } from '../transport';
-import { inviteLink } from '../invite';
+import { inviteLink, loginLink } from '../invite';
 import type { AutoFinished, ClientNotes, OpenWorkout, Program, Session } from '../types';
 import { activeClients, lastVisit, programsOf, visits30, type TrainerData } from './data';
 import { Avatar, AvatarPicker, Confirm, Empty, Sheet, VisitGrid, ago, autoFinishedText, fmtDate, fmtDateTime } from './common';
@@ -305,6 +305,7 @@ function Overview({ data, clientId, sessionsCount }: { data: TrainerData; client
   // Sign-in made by the trainer: email + password, no email needed.
   const [login, setLogin] = useState<{ email: string; password: string } | null>(null);
   const [made, setMade] = useState<{ email: string; password: string } | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const makeLogin = async () => {
     if (!login) return;
     setBusy(true);
@@ -320,8 +321,9 @@ function Overview({ data, clientId, sessionsCount }: { data: TrainerData; client
       setBusy(false);
     }
   };
+  // The link fills in the email and password: the client only presses «Войти».
   const shareLogin = async (m: { email: string; password: string }) => {
-    const text = `${client.clientName}, ваш дневник тренировок: ${location.origin + location.pathname}\nПочта: ${m.email}\nПароль: ${m.password}\nПароль можно сменить в приложении (значок ключа).`;
+    const text = `${client.clientName}, ваш дневник тренировок. Откройте ссылку — почта и пароль подставятся сами, останется нажать «Войти»:\n${loginLink(m.email, m.password)}\n\nПочта: ${m.email}\nПароль: ${m.password}\nПароль можно сменить в приложении (значок ключа).`;
     try {
       if (navigator.share) await navigator.share({ title: 'Вход в дневник тренировок', text });
       else {
@@ -510,6 +512,19 @@ function Overview({ data, clientId, sessionsCount }: { data: TrainerData; client
             <button className="btn btn-primary btn-block" onClick={() => void shareLogin(made)}>
               <Share2 size={16} /> {shared || 'Отправить данные для входа'}
             </button>
+            <button
+              className="btn btn-block"
+              data-link={loginLink(made.email, made.password)}
+              onClick={() => {
+                void navigator.clipboard?.writeText(loginLink(made.email, made.password)).then(
+                  () => setLinkCopied(true),
+                  () => setLinkCopied(false),
+                );
+              }}
+            >
+              <Copy size={16} /> {linkCopied ? 'Ссылка скопирована' : 'Скопировать ссылку для входа'}
+            </button>
+            <span className="muted small">По ссылке почта и пароль подставятся сами — клиенту останется нажать «Войти».</span>
           </div>
         ) : client.userId ? (
           <p className="muted">
