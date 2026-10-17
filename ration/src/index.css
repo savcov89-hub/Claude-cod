@@ -137,3 +137,19 @@ h3 { font-size: 17px; font-weight: 600; line-height: 1.25; }
 
 /* Во вкладке «Рацион» Training Log: своё меню и шапка у приложения есть, здесь — только рацион. */
 .app.embedded { padding-top: 0; }
+/* …а если у дневника своё меню внизу (кабинет тренера) — разделы рациона строкой вкладок сверху, как вкладки карточки. */
+/* fixed, не sticky: у body overflow-x: hidden, и sticky внутри него не держится. */
+.app.menu-top { padding: 44px 0 0; }
+.app.menu-top .nav {
+  position: fixed; top: 0; bottom: auto; left: 0; right: 0; width: auto; height: 44px;
+  display: flex; gap: 4px; padding: 0 12px; overflow-x: auto; scrollbar-width: none;
+  border: 0; box-shadow: inset 0 -1px 0 var(--line); background: var(--bg);
+}
+.app.menu-top .nav::-webkit-scrollbar { display: none; }
+.app.menu-top .nav-item {
+  flex: none; height: 44px; padding: 0 10px; display: flex; align-items: center;
+  font-size: 14px; color: var(--ink-2); border-bottom: 2px solid transparent;
+}
+.app.menu-top .nav-item svg { display: none; }
+.app.menu-top .nav-item.on { color: var(--ink); border-bottom-color: var(--accent); }
+@media (min-width: 900px) { .app.menu-top .nav { padding: 0 20px; } }

@@ -1525,7 +1525,14 @@ await scenario('40. Рацион от тренера: собрать в карт
   expect(body.profile?.heightCm === 166 && body.profile?.sex === 'f' && body.entries.some((e) => e.weight === 61.2), 'saved to her «Замеры»', [body.profile, body.entries.slice(-1)]);
   const account = (await f.getByTestId('from-account').innerText()).replace(/\s+/g, ' ');
   expect(/клиента \(Мария\).*женщина, 29 лет, рост 166 см, вес 61,2 кг/.test(account), 'the questionnaire: her data from «Замеры»', account);
-  for (let i = 0; i < 4; i++) await f.getByRole('button', { name: 'Дальше' }).click();
+  for (let i = 0; i < 3; i++) await f.getByRole('button', { name: 'Дальше' }).click();
+  // Scrolled down the long step: the sections stay on top of the frame.
+  await f.getByRole('button', { name: 'Дальше' }).scrollIntoViewIfNeeded();
+  const frameTop = (await p.locator('.ration-box').boundingBox()).y;
+  const strip = await f.getByRole('navigation', { name: 'Разделы' }).boundingBox();
+  const scrolled = await f.locator('html').evaluate(() => window.scrollY);
+  expect(scrolled > 0 && strip && Math.abs(strip.y - frameTop) <= 2, 'scrolled: the ration\'s sections stay on top', [scrolled, strip?.y, frameTop]);
+  await f.getByRole('button', { name: 'Дальше' }).click();
   await f.getByRole('button', { name: 'Собрать рацион на неделю' }).click();
   await f.getByRole('heading', { name: 'Рацион на неделю' }).waitFor({ timeout: 90000 });
   const bar = f.getByTestId('assign-bar');
@@ -1542,6 +1549,14 @@ await scenario('40. Рацион от тренера: собрать в карт
   const box = await p.locator('.ration-box').boundingBox();
   const nav = await p.locator('.app > .nav').boundingBox();
   expect(box && nav && box.height >= 420 && box.y + box.height <= nav.y + 1, 'the frame ends above the trainer\'s menu', [box, nav?.y]);
+  // One menu at the bottom: the ration's sections are a strip of tabs on top of the frame, and they work.
+  const sections = await f.getByRole('navigation', { name: 'Разделы' }).boundingBox();
+  expect(sections && box && sections.y - box.y <= 2 && sections.height <= 48, 'the ration\'s sections on top, not a second row at the bottom', [sections, box?.y]);
+  await f.getByRole('navigation', { name: 'Разделы' }).getByRole('button', { name: 'Покупки' }).click();
+  await p.waitForTimeout(600);
+  expect(/Цены примерные/.test(await f.locator('main').innerText()), 'the top tab «Покупки» opens the shopping list');
+  await f.getByRole('navigation', { name: 'Разделы' }).getByRole('button', { name: 'Меню' }).click();
+  await p.waitForTimeout(400);
   // Another tab of the card and back: the assigned ration is still there.
   await p.getByRole('tab', { name: 'Обзор' }).click();
   await p.waitForTimeout(400);

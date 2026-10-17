@@ -9,6 +9,8 @@ export interface Embed {
   /** Кто открыл: клиент у себя или тренер в карточке клиента (`name` — имя клиента). */
   role: "client" | "trainer";
   name: string;
+  /** У дневника своё меню внизу: разделы рациона — вкладками сверху. */
+  menu: "top" | "bottom";
   theme: "light" | "dark" | null;
   /** Каждый раз: пол, возраст, рост, вес — из «Замеров» (вес меняется, там он свежий). */
   always: Partial<Profile>;
@@ -45,6 +47,7 @@ export function readEmbed(): Embed | null {
     key: (q.get("key") || "").slice(0, 120),
     role: q.get("role") === "trainer" ? "trainer" : "client",
     name: (q.get("name") || "").slice(0, 80),
+    menu: q.get("menu") === "top" ? "top" : "bottom",
     theme: theme === "dark" || theme === "light" ? theme : null,
     always,
     first,

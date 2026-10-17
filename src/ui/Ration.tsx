@@ -23,6 +23,8 @@ function rationSrc(person: string, profile: BodyProfile, weight: number, forClie
     q.set('role', 'trainer');
     q.set('name', forClient.clientName);
   }
+  // The app has its own menu at the bottom (the trainer's): the ration's sections go on top, not as a second row.
+  if (document.querySelector('.app.has-nav > .nav')) q.set('menu', 'top');
   const theme = document.documentElement.getAttribute('data-theme');
   if (theme) q.set('theme', theme);
   q.set('sex', profile.sex === 'm' ? 'male' : 'female');

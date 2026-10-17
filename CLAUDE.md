@@ -60,7 +60,8 @@
   (`src/ui/Ration.tsx`): данные из «Замеров» после `#` (`embed=1&key&sex&age&h&w&act&strength&theme`), ответы и последний
   рацион — в localStorage по `key`. Стили — Tailwind 4 только там (`ration/vite.config.ts`), service worker её не трогает.
   Цены примерные, без привязки к городу — так и писать в текстах.
-  Тренер — та же страница в карточке клиента (`role=trainer&name`), данные из «Замеров» клиента. «Назначить клиенту»:
+  Тренер — та же страница в карточке клиента (`role=trainer&name`), данные из «Замеров» клиента; у дневника своё меню
+  внизу — разделы рациона строкой сверху (`menu=top`, класс `.app.menu-top`). «Назначить клиенту»:
   рамка шлёт `postMessage` `tl-ration:assign` → `POST /api/client/:id/ration` (таблица `ration:<ключ клиента>`, одна строка
   `{plan, assignedAt, trainerName}`). Рамка по готовности (`tl-ration:ready`) и при каждом открытии вкладки получает
   `tl-ration:assigned` из `GET /api/ration`; у клиента новое назначение (`assignedAt` ≠ `seen` в localStorage) заменяет

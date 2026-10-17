@@ -121,8 +121,21 @@ export default function App() {
       ].filter(Boolean).join(", ")
     : "";
 
+  // У дневника своё меню внизу (кабинет тренера): разделы рациона — строкой вкладок сверху, а не вторым рядом внизу.
+  const menuTop = embed?.menu === "top";
+  const nav = (
+    <nav className="nav no-print" aria-label="Разделы">
+      {NAV.map((n) => (
+        <button key={n.id} className={`nav-item ${view === n.id ? "on" : ""}`} onClick={() => setView(n.id)} aria-current={view === n.id ? "page" : undefined}>
+          <Icon name={n.icon} />
+          <span>{n.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+
   return (
-    <div className={embed ? "app embedded" : "app"}>
+    <div className={embed ? `app embedded${menuTop ? " menu-top" : ""}` : "app"}>
       {!embed && <header className="topbar">
         <button className="brand" onClick={() => setView("form")} aria-label="На главную">
           <span className="brand-mark"><Icon name="menu" size={15} /></span>
@@ -135,6 +148,7 @@ export default function App() {
         <button className="btn btn-sm" onClick={toggleTheme} aria-label="Переключить тему" title="Тема"><Icon name="sun" size={16} /></button>
       </header>}
 
+      {menuTop && nav}
       <main className="main">
         {error && <div className="rounded-[10px] bg-danger-soft p-3 text-sm text-danger">Ошибка: {error}</div>}
 
@@ -180,14 +194,7 @@ export default function App() {
         </footer>
       </main>
 
-      <nav className="nav no-print" aria-label="Разделы">
-        {NAV.map((n) => (
-          <button key={n.id} className={`nav-item ${view === n.id ? "on" : ""}`} onClick={() => setView(n.id)} aria-current={view === n.id ? "page" : undefined}>
-            <Icon name={n.icon} />
-            <span>{n.label}</span>
-          </button>
-        ))}
-      </nav>
+      {!menuTop && nav}
     </div>
   );
 }
