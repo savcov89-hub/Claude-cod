@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Clipboard, Copy, Pencil, Plus, Smartphone, Archive, RotateCcw, Share2, X } from 'lucide-react';
-import { api, inGym, readError } from '../transport';
+import { api, inGym, isArtifactBuild, readError } from '../transport';
 import { inviteLink, loginLink } from '../invite';
 import type { AutoFinished, ClientNotes, OpenWorkout, Program, Session } from '../types';
 import { activeClients, lastVisit, programsOf, visits30, type TrainerData } from './data';
@@ -10,12 +10,13 @@ import { PhasesBlock } from './Phases';
 import { RESTRICTIONS } from '../restrictions';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
+import { RationTab } from './Ration';
 import { AUTO_FINISH_IDLE_MS, Journal } from './Journal';
 import { RecordsSheet } from './Records';
 import { copyLater, programText } from './programText';
 import type { PersonalRecord } from '../analytics';
 
-type Tab = 'overview' | 'progress' | 'history' | 'body' | 'programs';
+type Tab = 'overview' | 'progress' | 'history' | 'body' | 'ration' | 'programs';
 
 export function ClientCard({
   data,
@@ -25,9 +26,12 @@ export function ClientCard({
   openBuilder,
   onTabChange,
   openInGym,
+  trainerKey,
 }: {
   data: TrainerData;
   clientId: string;
+  /** The trainer's own e-mail: the ration built for a client is kept apart from another trainer's on the same phone. */
+  trainerKey: string;
   initialTab?: string;
   onTabChange?: (tab: string) => void;
   onBack: () => void;
@@ -41,8 +45,11 @@ export function ClientCard({
 }) {
   const client = data.clients.find((c) => c.clientId === clientId);
   const [tab, setTabState] = useState<Tab>((initialTab as Tab) || 'overview');
+  // «Рацион» is a page in a frame: once opened it stays (hidden), so going to another tab and back keeps its place.
+  const [rationSeen, setRationSeen] = useState(tab === 'ration');
   const setTab = (t: Tab) => {
     setTabState(t);
+    if (t === 'ration') setRationSeen(true);
     onTabChange?.(t);
   };
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -198,6 +205,7 @@ export function ClientCard({
             ['overview', 'Обзор'],
             ['programs', 'Программы'],
             ['body', 'Замеры'],
+            ...(isArtifactBuild ? [] : [['ration', 'Рацион']]),
             ['history', 'История'],
             ['progress', 'Прогресс'],
           ] as [Tab, string][]
@@ -277,6 +285,15 @@ export function ClientCard({
         </>
       )}
       {tab === 'body' && <BodyView clientId={clientId} />}
+      {rationSeen && (
+        <div hidden={tab !== 'ration'}>
+          <RationTab
+            person={trainerKey + '/' + clientId}
+            active={tab === 'ration'}
+            forClient={{ clientId, clientName: client.clientName }}
+          />
+        </div>
+      )}
       {tab === 'programs' && (
         <ClientPrograms
           data={data}

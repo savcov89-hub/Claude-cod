@@ -61,5 +61,16 @@ const progs = (await pgCall(TRAINER_ID, 'GET', '/api/programs')).programs;
 const other = progs.find((p: any) => p.clientName === 'Александр');
 try { await pgCall('demo-u1', 'GET', `/api/workout/${TRAINER_ID}/${other.id}/${other.days[0].id}`); console.log('LEAK'); } catch (e: any) { console.log('access check ok:', e.message); }
 try { await pgCall('stranger', 'GET', `/api/client/${pgClients[0].clientId}/history`); console.log('LEAK2'); } catch (e: any) { console.log('stranger blocked:', e.message); }
+// The trainer assigns a ration to Мария: she reads it back the same from both, Александр does not get hers.
+const plan = { profile: { sex: 'female', weightKg: 61 }, solverStatus: 'Optimal', basket: { oats: 350 }, days: Array.from({ length: 7 }, (_, i) => ({ index: i })) };
+const maria = (list: any[]) => list.find((c: any) => c.clientName === 'Мария').clientId;
+await memCall(TRAINER_ID, 'POST', `/api/client/${maria(memClients)}/ration`, { plan });
+await pgCall(TRAINER_ID, 'POST', `/api/client/${maria(pgClients)}/ration`, { plan });
+const [rx, ry] = [norm(await memCall('demo-u1', 'GET', '/api/ration')), norm(await pgCall('demo-u1', 'GET', '/api/ration'))];
+console.log(rx === ry && /"oats":350/.test(ry) ? 'ration same' : 'DIFF ration\n mem ' + rx + '\n pg  ' + ry);
+console.log('not hers:', JSON.stringify((await pgCall('demo-u0', 'GET', '/api/ration')).ration));
+try { await pgCall('demo-u0', 'GET', `/api/ration?clientId=${maria(pgClients)}`).then((r) => console.log(r.ration ? 'LEAK3' : 'other client: own (none)')); } catch (e: any) { console.log('other client blocked:', e.message); }
+try { await pgCall('demo-u1', 'POST', `/api/client/${maria(pgClients)}/ration`, { plan }); console.log('LEAK4'); } catch (e: any) { console.log('client cannot assign:', e.message); }
+try { await pgCall(TRAINER_ID, 'POST', `/api/client/${maria(pgClients)}/ration`, { plan: { ...plan, solverStatus: 'Infeasible' } }); console.log('BAD PLAN TAKEN'); } catch (e: any) { console.log('unsolved refused:', e.message); }
 const { count } = await sb.from('kv_rows').select('*', { count: 'exact', head: true });
 console.log('rows in postgres', count);

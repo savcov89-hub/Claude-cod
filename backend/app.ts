@@ -251,6 +251,21 @@ const draftTable = (clientId: string, programId: string, dayId: string) =>
 /** Body measurements of one client key, one row per date. */
 const bodyTable = (clientId: string) => 'body:' + tableKey(clientId);
 const bodyProfileTable = (clientId: string) => 'body_profile:' + tableKey(clientId);
+/** One row: the ration the trainer assigned to the client (built in ration/, shown in the client's «Рацион»). */
+const rationTable = (clientId: string) => 'ration:' + tableKey(clientId);
+interface RationRecord {
+  plan: Record<string, unknown>;
+  assignedAt: string;
+  trainerName: string;
+}
+/** The ration as built (ration/src/core PlanResult): only a solved one of a reasonable size, kept as sent. */
+const cleanRation = (plan: any): Record<string, unknown> | null => {
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) return null;
+  if (plan.solverStatus !== 'Optimal' || !plan.profile || typeof plan.profile !== 'object' || !Array.isArray(plan.days) || plan.days.length !== 7)
+    return null;
+  if (!plan.basket || typeof plan.basket !== 'object' || Array.isArray(plan.basket)) return null;
+  return JSON.stringify(plan).length <= 200_000 ? plan : null;
+};
 /** Keys for «Команды» on iPhone (steps and weight from «Здоровье»): rows by the key's hash, and each owner's current one. */
 const HEALTH_KEYS = 'health_keys';
 const healthKeyOfTable = (owner: string) => 'health_key_of:' + tableKey(owner);
@@ -1661,6 +1676,36 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const profile: BodyProfile = { sex: b.sex, heightCm, birthYear, activity: b.activity, updatedAt: nowIso() };
         for (const key of access.keys) await upsertSingle(bodyProfileTable(key), profile);
         return json({ profile });
+      },
+    ],
+
+    // The trainer assigns the ration built in the client's card: the client sees it in «Рацион», marked «от тренера».
+    'POST /api/client/:clientId/ration': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const trainer = await trainerOnly(ctx);
+        if (!trainer) return error('Доступ только для тренера.', 403);
+        const clientId = ctx.params.clientId;
+        if (!(await findClient(ctx.user!.userId, clientId))) return error('Клиент не найден.', 404);
+        const plan = cleanRation(ctx.body?.plan);
+        if (!plan) return error('Рацион не подошёл — соберите его заново.', 400);
+        const ration: RationRecord = { plan, assignedAt: nowIso(), trainerName: trainer.name };
+        await upsertSingle(rationTable(clientId), ration);
+        return json({ ration });
+      },
+    ],
+    // The assigned ration: the trainer's client, or the client's own (the latest of her trainers').
+    'GET /api/ration': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const access = await bodyKeys(ctx, ctx.query.clientId);
+        if (!access) return error('Нет доступа.', 403);
+        let ration: RationRecord | null = null;
+        for (const key of access.keys) {
+          const r = await first<RationRecord>(rationTable(key));
+          if (r?.plan && (!ration || r.assignedAt > ration.assignedAt)) ration = { plan: r.plan, assignedAt: r.assignedAt, trainerName: r.trainerName };
+        }
+        return json({ ration });
       },
     ],
 

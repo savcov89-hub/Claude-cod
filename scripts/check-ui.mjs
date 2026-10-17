@@ -1502,6 +1502,91 @@ await scenario('39. Рацион во вкладке клиента: данны�
   await p.waitForTimeout(800);
 });
 
+await scenario('40. Рацион от тренера: собрать в карточке клиента, назначить, клиент видит у себя', async () => {
+  await p.setViewportSize({ width: 390, height: 844 });
+  const clients = (await call('get', '/api/clients')).clients;
+  const maria = clients.find((c) => c.clientName === 'Мария');
+  // In the card: no data in her «Замеры» yet — the trainer fills it once, it goes to her «Замеры».
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(500);
+  await p.locator('.client-row', { hasText: 'Мария' }).first().locator('.client-open').click();
+  await p.waitForTimeout(900);
+  await p.getByRole('tab', { name: 'Рацион' }).click();
+  await p.locator('.ration-account').waitFor({ timeout: 10000 });
+  expect(/данным клиента/.test(await p.locator('.ration-account').innerText()), 'the card asks for the client\'s data');
+  await p.getByRole('group', { name: 'Пол' }).getByRole('button', { name: 'Женщина' }).click();
+  await p.locator('#ration-height').fill('166');
+  await p.locator('#ration-year').fill(String(new Date().getFullYear() - 29));
+  await p.locator('#ration-weight').fill('61,2');
+  await p.getByRole('button', { name: 'Сохранить и открыть рацион' }).click();
+  const f = p.frameLocator('.ration-box iframe');
+  await f.getByTestId('from-account').waitFor({ timeout: 20000 });
+  const body = await call('get', '/api/body?clientId=' + encodeURIComponent(maria.clientId));
+  expect(body.profile?.heightCm === 166 && body.profile?.sex === 'f' && body.entries.some((e) => e.weight === 61.2), 'saved to her «Замеры»', [body.profile, body.entries.slice(-1)]);
+  const account = (await f.getByTestId('from-account').innerText()).replace(/\s+/g, ' ');
+  expect(/клиента \(Мария\).*женщина, 29 лет, рост 166 см, вес 61,2 кг/.test(account), 'the questionnaire: her data from «Замеры»', account);
+  for (let i = 0; i < 4; i++) await f.getByRole('button', { name: 'Дальше' }).click();
+  await f.getByRole('button', { name: 'Собрать рацион на неделю' }).click();
+  await f.getByRole('heading', { name: 'Рацион на неделю' }).waitFor({ timeout: 90000 });
+  const bar = f.getByTestId('assign-bar');
+  expect(/Мария увидит рацион/.test(await bar.innerText()), 'not assigned yet: says who will see it', await bar.innerText());
+  const stats = async () => {
+    const t = (await f.getByRole('heading', { name: 'Рацион на неделю' }).locator('xpath=../../..').innerText()).replace(/\s+/g, ' ');
+    return t.slice(t.indexOf('Рацион на неделю'), t.indexOf('Приложение не является'));
+  };
+  const built = await stats();
+  await f.getByRole('button', { name: 'Назначить клиенту' }).click();
+  await f.getByText(/Назначен клиенту .* Мария видит его во вкладке «Рацион»/).waitFor({ timeout: 10000 });
+  const saved = (await call('get', '/api/ration?clientId=' + encodeURIComponent(maria.clientId))).ration;
+  expect(saved?.plan?.profile?.weightKg === 61.2 && saved.plan.solverStatus === 'Optimal' && saved.trainerName, 'the ration is kept for her on the server', saved && [saved.assignedAt, saved.trainerName]);
+  const box = await p.locator('.ration-box').boundingBox();
+  const nav = await p.locator('.app > .nav').boundingBox();
+  expect(box && nav && box.height >= 420 && box.y + box.height <= nav.y + 1, 'the frame ends above the trainer\'s menu', [box, nav?.y]);
+  // Another tab of the card and back: the assigned ration is still there.
+  await p.getByRole('tab', { name: 'Обзор' }).click();
+  await p.waitForTimeout(400);
+  await p.getByRole('tab', { name: 'Рацион' }).click();
+  await p.waitForTimeout(600);
+  expect(await f.getByText(/Назначен клиенту/).isVisible(), 'back on the tab: still «назначен»');
+  await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click();
+
+  // Her app: the trainer's ration at once, marked.
+  await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
+  await p.waitForTimeout(800);
+  await p.locator('#demo-client').selectOption({ label: 'Мария' });
+  await p.waitForTimeout(1500);
+  await p.getByRole('tab', { name: 'Рацион' }).click();
+  await f.getByTestId('from-trainer').waitFor({ timeout: 20000 });
+  const mark = await f.getByTestId('from-trainer').innerText();
+  expect(/Рацион от тренера .*назначен \d+ [а-я]+/.test(mark), 'marked «от тренера» with the date', mark);
+  const seen = await stats();
+  const at = [...seen].findIndex((ch, i) => ch !== built[i]);
+  expect(seen === built, 'the same menu as the trainer built (calories, cost, norms)', [seen.slice(Math.max(0, at - 40), at + 120), built.slice(Math.max(0, at - 40), at + 120)]);
+  // She builds her own: it stays hers (after reopening too); the trainer's is one tap away.
+  await f.getByRole('button', { name: 'Изменить опросник' }).click();
+  await f.getByRole('button', { name: 'Дальше' }).click();
+  await f.getByRole('button', { name: /^Эконом/ }).first().click();
+  for (let i = 0; i < 3; i++) await f.getByRole('button', { name: 'Дальше' }).click();
+  await f.getByRole('button', { name: 'Собрать рацион на неделю' }).click();
+  await f.getByRole('button', { name: 'Открыть рацион тренера' }).waitFor({ timeout: 90000 });
+  expect((await f.getByTestId('from-trainer').count()) === 0, 'her own ration: no «от тренера»');
+  await p.reload();
+  await p.waitForSelector('.subtabs', { timeout: 30000 });
+  await p.waitForTimeout(1500);
+  await p.getByRole('tab', { name: 'Рацион' }).click();
+  await f.getByRole('button', { name: 'Открыть рацион тренера' }).waitFor({ timeout: 20000 });
+  expect((await f.getByTestId('from-trainer').count()) === 0, 'opened again: still her own, the same assignment does not replace it');
+  await f.getByRole('button', { name: 'Открыть рацион тренера' }).click();
+  await f.getByTestId('from-trainer').waitFor({ timeout: 5000 });
+  expect((await stats()) === built, '«Открыть рацион тренера» — the trainer\'s menu again');
+  const over = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  expect(over <= 1, 'nothing sideways', over);
+  await p.locator('#demo-client').selectOption({ label: 'Александр' });
+  await p.waitForTimeout(800);
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

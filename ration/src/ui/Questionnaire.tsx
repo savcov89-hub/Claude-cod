@@ -8,11 +8,13 @@ interface Props {
   profile: Profile; onChange: (p: Profile) => void; onSubmit: () => void; busy: boolean; products: Product[];
   /** Во вкладке Training Log: пол, возраст, рост и вес — из аккаунта клиента («Замеры»), здесь не меняются. */
   fromAccount?: boolean;
+  /** Открыл тренер в карточке клиента: имя клиента — данные из его «Замеров». */
+  client?: string;
 }
 
 const STEPS = ["Профиль", "Цель и бюджет", "Здоровье", "Исключения", "Проверка"];
 
-export default function Questionnaire({ profile: p, onChange, onSubmit, busy, products, fromAccount = false }: Props) {
+export default function Questionnaire({ profile: p, onChange, onSubmit, busy, products, fromAccount = false, client }: Props) {
   const [step, setStep] = useState(0);
   const set = <K extends keyof Profile>(k: K, v: Profile[K]) => onChange({ ...p, [k]: v });
   const toggleEx = (id: Exclusion) => set("exclusions", p.exclusions.includes(id) ? p.exclusions.filter((e) => e !== id) : [...p.exclusions, id]);
@@ -51,8 +53,10 @@ export default function Questionnaire({ profile: p, onChange, onSubmit, busy, pr
         <Card className="grid gap-5">
           {fromAccount ? (
             <div className="rounded-[10px] bg-surface-2 p-3 text-sm" data-testid="from-account">
-              <b>Из вашего профиля:</b> {p.sex === "female" ? "женщина" : "мужчина"}, {p.age} лет, рост {p.heightCm} см, вес {String(p.weightKg).replace(".", ",")} кг
-              <span className="mt-1 block text-muted">Вес — средний за неделю из «Замеров». Изменить данные — во вкладке «Замеры».</span>
+              <b>{client ? `Из «Замеров» клиента (${client}):` : "Из вашего профиля:"}</b> {p.sex === "female" ? "женщина" : "мужчина"}, {p.age} лет, рост {p.heightCm} см, вес {String(p.weightKg).replace(".", ",")} кг
+              <span className="mt-1 block text-muted">
+                {client ? "Вес — средний за неделю. Изменить данные — во вкладке «Замеры» карточки клиента." : "Вес — средний за неделю из «Замеров». Изменить данные — во вкладке «Замеры»."}
+              </span>
             </div>
           ) : (
             <>

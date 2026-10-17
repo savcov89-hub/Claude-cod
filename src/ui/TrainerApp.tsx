@@ -130,6 +130,7 @@ export function TrainerApp({ profile, header, onSwitchRole }: { profile: Profile
                 key={card!.id}
                 data={data}
                 clientId={card!.id}
+                trainerKey={profile.email || profile.name}
                 initialTab={card!.tab}
                 // The open tab is remembered, so coming back from the program editor lands on it again.
                 onTabChange={(t) => setCard((c) => (c ? { ...c, tab: t } : c))}

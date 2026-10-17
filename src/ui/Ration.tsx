@@ -10,9 +10,19 @@ const tagOf = (s: string) => {
   return s ? h.toString(36) : '';
 };
 
+/** The trainer in the client's card: whose ration is built there (the client's name). */
+interface ForClient {
+  clientId: string;
+  clientName: string;
+}
+
 /** The ration's address: who it is for, the theme and the client's own data (after #: never sent anywhere). */
-function rationSrc(person: string, profile: BodyProfile, weight: number) {
+function rationSrc(person: string, profile: BodyProfile, weight: number, forClient?: ForClient) {
   const q = new URLSearchParams({ embed: '1', key: tagOf(person), strength: '1' });
+  if (forClient) {
+    q.set('role', 'trainer');
+    q.set('name', forClient.clientName);
+  }
   const theme = document.documentElement.getAttribute('data-theme');
   if (theme) q.set('theme', theme);
   q.set('sex', profile.sex === 'm' ? 'male' : 'female');
@@ -27,39 +37,78 @@ function rationSrc(person: string, profile: BodyProfile, weight: number) {
  * «Рацион» — a page of its own (ration/, built to dist/ration): the weekly menu and shopping list by the norms, in a
  * frame under the tabs, so its styles stay apart. Sex, age, height, weight and training come from the client's own
  * data in «Замеры» — asked here once when missing and saved there; the app's theme follows.
+ * In the trainer's client card (`forClient`) the ration is built by the client's data and assigned to the client
+ * («Назначить клиенту» in the frame); the client's tab shows the assigned one, marked «от тренера».
  */
-export function RationTab({ person, active }: { person: string; active: boolean }) {
+export function RationTab({ person, active, forClient }: { person: string; active: boolean; forClient?: ForClient }) {
   const [src, setSrc] = useState<string | null>(null);
   // The client's data is not there yet: what is known, to ask for the rest.
   const [missing, setMissing] = useState<{ profile: BodyProfile | null; weight: number | null } | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(600);
+  const clientId = forClient?.clientId;
+  const query = clientId ? '?clientId=' + encodeURIComponent(clientId) : '';
 
   useEffect(() => {
     let alive = true;
     api
-      .get('/api/body')
+      .get('/api/body' + query)
       .then((r) => {
         if (!alive) return;
         const profile: BodyProfile | null = r.data.profile || null;
         const entries = r.data.entries || [];
         const weight = weeklyAverage(entries, localDate()).current ?? latest(entries).weight?.value ?? null;
-        if (profile && weight) setSrc(rationSrc(person, profile, weight));
+        if (profile && weight) setSrc(rationSrc(person, profile, weight, forClient));
         else setMissing({ profile, weight });
       })
       .catch(() => alive && setMissing({ profile: null, weight: null }));
     return () => {
       alive = false;
     };
-  }, [person]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [person, query]);
 
-  // The frame takes the screen below the tabs (the ration has its own menu at the bottom).
+  // The frame asks for the assigned ration when it is up, and gets it again each time the tab is opened (the trainer
+  // may have assigned one meanwhile); the trainer's «Назначить клиенту» is saved here.
+  const post = (msg: unknown) => frame.current?.contentWindow?.postMessage(msg, location.origin);
+  const sendAssigned = () =>
+    api
+      .get('/api/ration' + query)
+      .then((r) => post({ type: 'tl-ration:assigned', ration: r.data.ration || null }))
+      .catch(() => {});
+  const ready = useRef(false);
+  useEffect(() => {
+    const listen = (e: MessageEvent) => {
+      if (e.origin !== location.origin || !frame.current || e.source !== frame.current.contentWindow) return;
+      if (e.data?.type === 'tl-ration:ready') {
+        ready.current = true;
+        void sendAssigned();
+      }
+      if (e.data?.type === 'tl-ration:assign' && clientId)
+        api
+          .post('/api/client/' + encodeURIComponent(clientId) + '/ration', { plan: e.data.plan })
+          .then((r) => post({ type: 'tl-ration:assign-result', ration: r.data.ration }))
+          .catch((err) => post({ type: 'tl-ration:assign-result', error: readError(err) }));
+    };
+    window.addEventListener('message', listen);
+    return () => window.removeEventListener('message', listen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, query]);
+  useEffect(() => {
+    if (active && ready.current) void sendAssigned();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+
+  // The frame takes the screen below the tabs and above the app's own menu at the bottom, if any (the ration has
+  // its own menu at the bottom).
   useEffect(() => {
     if (!active) return;
     const fit = () => {
       const top = box.current?.getBoundingClientRect().top ?? 0;
-      setHeight(Math.max(420, window.innerHeight - Math.max(0, top) - 4));
+      const nav = document.querySelector('.app.has-nav > .nav')?.getBoundingClientRect();
+      const bottom = nav && nav.height && nav.top > top ? nav.top : window.innerHeight;
+      setHeight(Math.max(420, bottom - Math.max(0, top) - 4));
     };
     fit();
     window.addEventListener('resize', fit);
@@ -84,9 +133,10 @@ export function RationTab({ person, active }: { person: string; active: boolean 
     return (
       <AccountData
         known={missing}
+        forClient={forClient}
         onDone={(profile, weight) => {
           setMissing(null);
-          setSrc(rationSrc(person, profile, weight));
+          setSrc(rationSrc(person, profile, weight, forClient));
         }}
       />
     );
@@ -104,7 +154,15 @@ export function RationTab({ person, active }: { person: string; active: boolean 
 }
 
 /** The client's data the ration needs and «Замеры» has not got yet: asked once, saved to «Замеры». */
-function AccountData({ known, onDone }: { known: { profile: BodyProfile | null; weight: number | null }; onDone: (p: BodyProfile, weight: number) => void }) {
+function AccountData({
+  known,
+  forClient,
+  onDone,
+}: {
+  known: { profile: BodyProfile | null; weight: number | null };
+  forClient?: ForClient;
+  onDone: (p: BodyProfile, weight: number) => void;
+}) {
   const p = known.profile;
   const [sex, setSex] = useState<'m' | 'f' | ''>(p?.sex || '');
   const [height, setHeight] = useState(p ? String(p.heightCm) : '');
@@ -125,8 +183,10 @@ function AccountData({ known, onDone }: { known: { profile: BodyProfile | null; 
     setErr('');
     try {
       const profile: BodyProfile = { sex, heightCm: Math.round(h), birthYear: y, activity };
-      if (!p || p.sex !== sex || p.heightCm !== profile.heightCm || p.birthYear !== y || p.activity !== activity) await api.post('/api/body/profile', profile);
-      if (!known.weight) await api.post('/api/body', { date: localDate(), weight: Math.round(w * 10) / 10 });
+      const who = forClient ? { clientId: forClient.clientId } : {};
+      if (!p || p.sex !== sex || p.heightCm !== profile.heightCm || p.birthYear !== y || p.activity !== activity)
+        await api.post('/api/body/profile', { ...profile, ...who });
+      if (!known.weight) await api.post('/api/body', { date: localDate(), weight: Math.round(w * 10) / 10, ...who });
       onDone(profile, known.weight || Math.round(w * 10) / 10);
     } catch (e) {
       setErr(readError(e));
@@ -137,7 +197,11 @@ function AccountData({ known, onDone }: { known: { profile: BodyProfile | null; 
   return (
     <section className="block ration-account">
       <h4>Данные для рациона</h4>
-      <p className="muted small">Рацион считается по вашим данным из «Замеров». Их там ещё нет — заполните один раз, они сохранятся в «Замерах».</p>
+      <p className="muted small">
+        {forClient
+          ? 'Рацион считается по данным клиента из «Замеров». Их там ещё нет — заполните один раз, они сохранятся в «Замерах» клиента.'
+          : 'Рацион считается по вашим данным из «Замеров». Их там ещё нет — заполните один раз, они сохранятся в «Замерах».'}
+      </p>
       <div className="chips" role="group" aria-label="Пол">
         {(
           [

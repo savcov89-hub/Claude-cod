@@ -1,4 +1,5 @@
 import type { PlanResult, Product, Profile } from "../core";
+import { usablePlan } from "./host";
 
 // Внутри Training Log ответы и последний рацион хранятся у каждого человека отдельно (на общем телефоне не смешиваются).
 let scope = "";
@@ -38,8 +39,7 @@ export function loadPlan(products: Product[]): PlanResult | null {
     if (!raw) return null;
     const plan = JSON.parse(raw) as PlanResult;
     // Продукт убрали из каталога в новой версии: такой рацион не показать — считаем заново.
-    const known = new Set(products.map((p) => p.id));
-    return plan && plan.basket && Object.keys(plan.basket).every((id) => known.has(id)) ? plan : null;
+    return usablePlan(plan, products) ? plan : null;
   } catch {
     return null;
   }
@@ -49,6 +49,18 @@ export function savePlan(plan: PlanResult | null) {
     if (plan) localStorage.setItem(key("plan.v1"), JSON.stringify(plan));
     else localStorage.removeItem(key("plan.v1"));
   } catch { /* места нет: рацион просто не запомнится */ }
+}
+
+/**
+ * Чей последний рацион (во вкладке Training Log): `assignedAt` и `trainerName` — это рацион, назначенный тренером;
+ * `seen` — последнее назначение, которое клиент уже получил (свой пересобранный рацион оно больше не заменит).
+ */
+export interface PlanInfo { assignedAt?: string; trainerName?: string; seen?: string }
+export function loadPlanInfo(): PlanInfo {
+  try { return JSON.parse(localStorage.getItem(key("plan-info.v1")) || "{}") || {}; } catch { return {}; }
+}
+export function savePlanInfo(info: PlanInfo) {
+  try { localStorage.setItem(key("plan-info.v1"), JSON.stringify(info)); } catch { /* ignore */ }
 }
 
 export function loadTheme(): "light" | "dark" | null {

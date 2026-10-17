@@ -6,6 +6,9 @@ import type { Activity, Profile } from "../core";
  */
 export interface Embed {
   key: string;
+  /** Кто открыл: клиент у себя или тренер в карточке клиента (`name` — имя клиента). */
+  role: "client" | "trainer";
+  name: string;
   theme: "light" | "dark" | null;
   /** Каждый раз: пол, возраст, рост, вес — из «Замеров» (вес меняется, там он свежий). */
   always: Partial<Profile>;
@@ -38,5 +41,12 @@ export function readEmbed(): Embed | null {
   // Клиент тренера: силовые тренировки — белок 1,6–2,0 г/кг.
   if (q.get("strength") === "1") first.strength = true;
   const theme = q.get("theme");
-  return { key: (q.get("key") || "").slice(0, 120), theme: theme === "dark" || theme === "light" ? theme : null, always, first };
+  return {
+    key: (q.get("key") || "").slice(0, 120),
+    role: q.get("role") === "trainer" ? "trainer" : "client",
+    name: (q.get("name") || "").slice(0, 80),
+    theme: theme === "dark" || theme === "light" ? theme : null,
+    always,
+    first,
+  };
 }
