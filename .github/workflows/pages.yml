@@ -23,6 +23,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm run test:ration
       - run: npm run build
       # GitHub Pages serves the gh-pages branch; it holds only the latest build.
       - name: Publish to gh-pages

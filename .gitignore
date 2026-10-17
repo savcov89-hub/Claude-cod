@@ -7,3 +7,7 @@ dist-artifact
 supabase/functions/api/server.js
 .env
 .env.local
+
+# Рацион: сырые данные USDA для пересборки products.json
+ration/data/raw
+__pycache__

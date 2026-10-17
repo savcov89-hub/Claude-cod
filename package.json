@@ -5,14 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build --config ration/vite.config.ts",
     "preview": "vite preview",
     "build:api": "esbuild backend/server.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=supabase/functions/api/server.js",
     "build:demo": "vite build --config vite.artifact.config.ts && node scripts/to-artifact.mjs",
-    "check": "tsc --noEmit -p tsconfig.check.json"
+    "check": "tsc --noEmit -p tsconfig.check.json && tsc --noEmit -p ration/tsconfig.json",
+    "test:ration": "vitest run --config ration/vite.config.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
+    "highs": "^1.15.4",
     "lucide-react": "^0.469.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -21,6 +23,7 @@
     "@rollup/rollup-linux-x64-gnu": "^4.0.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
@@ -29,10 +32,11 @@
     "playwright": "^1.63.0",
     "postcss": "^8.4.0",
     "supabase": "^2.118.0",
-    "tailwindcss": "^3.4.0",
+    "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
-    "vite-plugin-singlefile": "^2.3.3"
+    "vite-plugin-singlefile": "^2.3.3",
+    "vitest": "^3.2.7"
   }
 }

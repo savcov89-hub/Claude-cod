@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronRight, Play } from 'lucide-react';
-import { api, inGym, isLocal, readError } from '../transport';
+import { api, inGym, isArtifactBuild, isLocal, readError } from '../transport';
 import { onRemoteChange } from '../local/runtime';
 import { localDate } from '../clock';
 import type { Coach, Profile, Program, Session } from '../types';
@@ -9,11 +9,12 @@ import { ProgressView } from './Progress';
 import { PhasesBlock } from './Phases';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
+import { RationTab } from './Ration';
 import { Avatar, Empty, VisitGrid, autoFinishedText, fmtDate } from './common';
 import { RecordsSheet } from './Records';
 import type { PersonalRecord } from '../analytics';
 
-type Tab = 'workout' | 'progress' | 'history' | 'body';
+type Tab = 'workout' | 'progress' | 'history' | 'body' | 'ration';
 
 export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile; header: React.ReactNode; onSwitchRole?: () => void }) {
   const [coaches, setCoaches] = useState<Coach[]>([]);
@@ -24,6 +25,7 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>('workout');
+  const [rationSeen, setRationSeen] = useState(false);
   const [journal, setJournal] = useState<{ program: Program; dayId: string } | null>(null);
   const [justDone, setJustDone] = useState<string | null>(null);
   const [newRecords, setNewRecords] = useState<PersonalRecord[] | null>(null);
@@ -235,9 +237,20 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
                   ['progress', 'Прогресс'],
                   ['history', 'История'],
                   ['body', 'Замеры'],
+                  // The ration is a page of its own, not in the one-file test build.
+                  ...(isArtifactBuild ? [] : [['ration', 'Рацион']]),
                 ] as [Tab, string][]
               ).map(([k, label]) => (
-                <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
+                <button
+                  key={k}
+                  role="tab"
+                  aria-selected={tab === k}
+                  className={tab === k ? 'on' : ''}
+                  onClick={() => {
+                    if (k === 'ration') setRationSeen(true);
+                    setTab(k);
+                  }}
+                >
                   {label}
                 </button>
               ))}
@@ -301,6 +314,12 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
             )}
             {tab === 'history' && <HistoryList sessions={sessions} programs={programs} />}
             {tab === 'body' && <BodyView />}
+            {/* Kept once opened: the menu worked out there stays while the other tabs are looked at. */}
+            {rationSeen && (
+              <div hidden={tab !== 'ration'}>
+                <RationTab person={profile.email || profile.name} active={tab === 'ration'} />
+              </div>
+            )}
           </>
         )}
       </main>

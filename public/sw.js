@@ -69,6 +69,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (url.origin !== self.location.origin || !url.href.startsWith(self.registration.scope)) return;
+  // «Рацион» (ration/) is a page of its own in a frame: not kept here, so it never takes the place of the app's page.
+  if (url.pathname.includes('/ration/')) return;
   if (req.mode === 'navigate') {
     event.respondWith(
       (async () => {

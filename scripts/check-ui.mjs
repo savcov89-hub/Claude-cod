@@ -1436,6 +1436,53 @@ await scenario('38. Замеры: вес по неделям за 4 недели
   await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click().catch(() => {});
 });
 
+await scenario('39. Рацион во вкладке клиента: данные из «Замеров», меню на неделю, цены без привязки к городу', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
+  await p.waitForTimeout(1500);
+  const today = await p.evaluate(() => new Date().toLocaleDateString('sv-SE'));
+  await call('post', '/api/body/profile', { sex: 'm', heightCm: 182, birthYear: new Date().getFullYear() - 36, activity: 'moderate' });
+  await call('post', '/api/body', { date: today, weight: 84.6 });
+  await p.getByRole('tab', { name: 'Рацион' }).click();
+  const f = p.frameLocator('.ration-box iframe');
+  await f.getByRole('heading', { name: /Недельный рацион/ }).waitFor({ timeout: 20000 });
+  const fields = await f.locator('input.field').evaluateAll((els) => els.map((e) => e.value));
+  expect(fields.includes('84.6') && fields.includes('182') && fields.includes('36'), 'the questionnaire has his weight, height and age from «Замеры»', fields);
+  const intro = await f.locator('header').first().innerText();
+  expect(!/Новосибирск|Сибир/.test(intro), 'no city in the intro', intro.slice(0, 160));
+  for (let i = 0; i < 4; i++) await f.getByRole('button', { name: 'Дальше' }).click();
+  const summary = (await f.locator('main').innerText()).replace(/\s+/g, ' ');
+  expect(/силовые тренировки/.test(summary), 'strength training is on (the trainer\'s client)', summary.slice(0, 200));
+  await f.getByRole('button', { name: 'Собрать рацион на неделю' }).click();
+  await f.getByRole('heading', { name: 'Рацион на неделю' }).waitFor({ timeout: 90000 });
+  expect(await f.getByText(/84,6 кг|84.6 кг/).count() > 0, 'the week is worked out for 84.6 kg');
+  await f.getByRole('button', { name: 'Покупки' }).click();
+  await p.waitForTimeout(800);
+  const shop = (await f.locator('main').innerText()).replace(/\s+/g, ' ');
+  expect(/Цены примерные/.test(shop) && !/Новосибирск|НГС|Сибир/.test(shop), 'shopping list: prices are approximate, no city', shop.match(/Цены[^.]*\./)?.[0]);
+  await f.getByRole('button', { name: 'Источники' }).click();
+  await p.waitForTimeout(500);
+  const sources = await f.locator('main').innerText();
+  expect(!/Новосибирск|НГС|Сибир/.test(sources), 'sources: no city either');
+  // Another tab and back: the menu is still there; after the app is opened again — too (kept on the phone).
+  await f.getByRole('button', { name: 'Меню' }).click();
+  await p.getByRole('tab', { name: 'Тренировка' }).click();
+  await p.waitForTimeout(500);
+  await p.getByRole('tab', { name: 'Рацион' }).click();
+  await p.waitForTimeout(500);
+  expect(await f.getByRole('heading', { name: 'Рацион на неделю' }).isVisible(), 'back on the tab: the same menu');
+  await p.reload();
+  await p.waitForSelector('.nav, .subtabs', { timeout: 30000 });
+  await p.waitForTimeout(1500);
+  await p.getByRole('tab', { name: 'Рацион' }).click();
+  await f.getByRole('heading', { name: 'Рацион на неделю' }).waitFor({ timeout: 20000 });
+  expect(true, 'the app opened again: the menu shows at once, nothing to work out');
+  const box = await p.locator('.ration-box').boundingBox();
+  const over = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  expect(box && box.height >= 420 && over <= 1, 'the ration fills the screen under the tabs, nothing sideways', [box?.height, over]);
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

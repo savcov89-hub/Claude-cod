@@ -141,13 +141,19 @@
 - `supabase/migrations/` — схема базы: одна таблица `kv_rows`, прямой доступ из браузера закрыт.
 - `src/supabase.ts` — вход и запросы к серверу; `src/local/*` — тестовый режим в браузере.
 - `src/ui/*` — интерфейс; `src/analytics.ts` — прогресс, застой, подсказки; `src/templates.ts` — шаблоны.
+- `ration/` — «Рацион»: недельное меню и список покупок по нормам (перенесён из репозитория Diet). Отдельная страница
+  сайта (`dist/ration/`, свои стили на Tailwind), во вкладке клиента открывается в рамке (`src/ui/Ration.tsx`).
+  Пол, возраст, рост и вес приходят из «Замеров» в адресе после `#`; расчёт — в браузере (решатель HiGHS, WebAssembly).
+  Цены — `ration/data/etl/catalog.py` (в приложении подписаны как примерные), после правки:
+  `python3 ration/data/etl/build_products.py` (скачает состав продуктов USDA, 6 МБ) → `ration/src/data/products.json`.
 
 ## Команды
 - `npm run check` — проверка типов.
 - `npm run build:api` — собрать серверную функцию.
 - `npm run build:demo` — тестовая версия одним файлом (`artifact/training-log.html`).
 - `npm run dev` — интерфейс локально; адрес и ключ Supabase берутся из `.env.local` (образец — `.env.example`).
-- `npm run build` — сайт в `dist/` (на GitHub Pages собирается автоматически).
+- `npm run build` — сайт в `dist/` и «Рацион» в `dist/ration/` (на GitHub Pages собирается автоматически).
+- `npm run test:ration` — «Рацион»: нормы выполняются на 7 профилях (похудение, беременность, ХБП, СД1, веган, лактация, аллергии).
 
 ## Публикация
 - **Сайт.** Каждый пуш в `main` собирает сайт (Actions → Deploy site) и кладёт сборку в ветку `gh-pages`,

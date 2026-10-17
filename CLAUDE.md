@@ -24,6 +24,7 @@
 - Изменения подсчёта объёма и программы по объёму (`src/volume.ts`, `src/volumePlanner.ts`, мышцы упражнений):
   `npx tsx scripts/check-volume.ts`.
 - Изменения слияния программы с правками из зала (`src/programMerge.ts`): `npx tsx scripts/check-merge.ts`.
+- «Рацион» (`ration/`): `npm run test:ration` (нормы на 7 профилях) и check-ui сценарий 39 (вкладка клиента).
 - Картинки упражнений (`src/ui/figure/`): `npx tsx scripts/check-figures.tsx лист.html фото/` — суставы, опора, равновесие,
   и посмотреть лист глазами рядом с фото из `scripts/figure-refs.json`.
 - Изменения прогрессии или журнала: `npx tsx scripts/simulate-month.ts отчёт.md` — 30 клиентов, месяц Пн/Ср/Пт;
@@ -54,5 +55,9 @@
   (`mergeProgramDays(base, mine, theirs, log)`).
 - Замеры (`src/body.ts`): `rangeSeries` — график за период (до месяца по дням, дальше по неделям пн–вс), `weeksBack` —
   последние 4 недели; в интерфейсе — check-ui сценарий 38.
+- «Рацион» (`ration/`, из репозитория Diet): отдельная страница `dist/ration/` в рамке вкладки клиента «Рацион»
+  (`src/ui/Ration.tsx`): данные из «Замеров» после `#` (`embed=1&key&sex&age&h&w&act&strength&theme`), ответы и последний
+  рацион — в localStorage по `key`. Стили — Tailwind 4 только там (`ration/vite.config.ts`), service worker её не трогает.
+  Цены примерные, без привязки к городу — так и писать в текстах.
 - Брошенная тренировка (есть подходы, 3 ч без сохранений) записывается сервером сама датой последнего сохранения,
   когда её черновик читают по пути: приложение клиента, карточка, «Зал», открытие тренировки (`finishStale`).
