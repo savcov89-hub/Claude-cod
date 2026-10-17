@@ -298,6 +298,33 @@ function seatedFly(together: 'end' | 'start'): FrontMove {
 export const pecDeckFront = seatedFly('end');
 export const reverseFlyFront = seatedFly('start');
 
+/** Rear-delt fly on a cable crossover, from the front: pulleys at shoulder height, cables crossed, arms open to a T. */
+export const cableRearDeltFly: FrontMove = {
+  view: 'front',
+  frames: [
+    { center: [50, ANKLE_Y - 36], arm: { out: 0, hand: [-12, 3], elbow: [2, 4.5] }, leg: { out: 6 } },
+    { center: [50, ANKLE_Y - 36], arm: { out: 0, hand: [9, 2.5], elbow: [7.5, 3] }, leg: { out: 6 } },
+    { center: [50, ANKLE_Y - 36], arm: { out: 0, hand: [21.5, 1], elbow: [11.5, 1.5] }, leg: { out: 6 } },
+  ],
+  work: ['delts', 'upperBack'],
+  show: [[14, 10], [86, 10]],
+  gear: (j) => {
+    const y = j.shoulder[0][1] + 1;
+    return [
+      { layer: 'back', node: G.floor() },
+      { layer: 'back', node: G.bar([16, FLOOR], [16, 8], 2.4) },
+      { layer: 'back', node: G.bar([84, FLOOR], [84, 8], 2.4) },
+      { layer: 'back', node: G.wheel([18, y]) },
+      { layer: 'back', node: G.wheel([82, y]) },
+      // Crossed: the left pulley's cable in the right hand and the other way round.
+      { layer: 'front', node: G.cable([18, y], j.hand[1]) },
+      { layer: 'front', node: G.cable([82, y], j.hand[0]) },
+      { layer: 'front', node: G.wheel(j.hand[0], 1.4) },
+      { layer: 'front', node: G.wheel(j.hand[1], 1.4) },
+    ];
+  },
+};
+
 /** Shrugs from the front: arms hanging with the handles, the shoulders up towards the ears. */
 export const shrugFront: FrontMove = {
   view: 'front',

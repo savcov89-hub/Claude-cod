@@ -43,7 +43,7 @@ export const MOVES: Record<string, AnyMove> = {
   'stack-back-extension': back.machineBackExtension,
   'cable-pullover': back.cablePullover,
   // The same arc of the shoulder with the elbow fixed, lying on the side with one arm.
-  'side-lying-pullover': back.cablePullover,
+  'side-lying-pullover': back.sideLyingPullover,
   'chest-supported-row': back.chestSupportedRow,
   't-bar-row': back.chestSupportedRow,
   'plate-dorian-row': back.dorianRow,
@@ -95,7 +95,7 @@ export const MOVES: Record<string, AnyMove> = {
   'rear-delt-fly': front.reverseFlyFront,
   'reverse-pec-deck': front.reverseFlyFront,
   'stack-rear-delt': front.reverseFlyFront,
-  'cable-rear-delt-fly': front.reverseFlyFront,
+  'cable-rear-delt-fly': front.cableRearDeltFly,
   'face-pull': shoulders.facePull,
   'standing-calf-raise': legs.standingCalfRaise,
   'seated-calf-raise': legs.seatedCalfRaise,

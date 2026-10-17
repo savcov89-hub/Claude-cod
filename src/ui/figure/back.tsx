@@ -276,6 +276,36 @@ export const cablePullover: Move = (() => {
 })();
 
 /**
+ * Side-lying cable pullover, seen from above (the person lies on the side along a bench, so the picture is the body's
+ * own plane): the cable from a low pulley beyond the head; the upper arm, the elbow half bent all the way, sweeps
+ * from overhead past the chest down to the hip.
+ */
+export const sideLyingPullover: Move = (() => {
+  const base = { anchor: { at: 'hip' as const, to: [58, 70.6] as V }, trunk: -90, head: -6, leg: { a: 90, b: 88, foot: 178 } };
+  const pulley: V = [4, 71];
+  return {
+    frames: [
+      { ...base, arm: { a: 268, b: 300 } },
+      { ...base, arm: { a: 180, b: 212 } },
+      { ...base, arm: { a: 92, b: 124 } },
+    ],
+    work: ['lats', 'triceps'],
+    show: [pulley, [3, FLOOR], [90, 76]],
+    gear: (j) => [
+      { layer: 'back', node: G.floor() },
+      { layer: 'back', node: G.bar([30, 78.6], [30, FLOOR]) },
+      { layer: 'back', node: G.bar([80, 78.6], [80, FLOOR]) },
+      { layer: 'back', node: G.bar([24, FLOOR], [36, FLOOR], 2.2) },
+      { layer: 'back', node: G.bar([74, FLOOR], [86, FLOOR], 2.2) },
+      { layer: 'mid', node: G.pad([20, 75.6], [90, 75.6], 3) },
+      { layer: 'back', node: G.bar([2, FLOOR], [2, pulley[1] - 3], 2.4) },
+      { layer: 'back', node: G.wheel(pulley) },
+      { layer: 'back', node: G.cable(pulley, j.hand) },
+    ],
+  };
+})();
+
+/**
  * Chest-supported T-bar row: standing on the foot plate, chest on the pad; the lever pivots low at the back by the
  * foot plate and runs forward under the pad, the plates on its front end right past the handles — the handles and
  * the plates go up together on an arc around the pivot, from long arms to the handles at the chest.
