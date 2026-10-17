@@ -1860,10 +1860,7 @@ function JournalBody({
 }
 
 type MenuConfirm = 'swap' | 'revert' | 'remove' | 'drop';
-/**
- * Actions for one exercise of the workout: replace (today or for good), sets and reps, skip, order, delete;
- * for one added today — delete or add to the program.
- */
+
 /** «A», «B» и «C». */
 const quoteList = (names: string[]) => {
   const q = names.map((n) => '«' + n + '»');
@@ -1926,6 +1923,10 @@ function SwapChoice({
   );
 }
 
+/**
+ * Actions for one exercise of the workout: replace (today or for good), sets and reps, skip, order, delete;
+ * for one added today — delete or add to the program.
+ */
 function ExerciseMenu({
   entry,
   name,
