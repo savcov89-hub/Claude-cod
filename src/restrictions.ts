@@ -59,14 +59,65 @@ export function unsuitable(exerciseId: string, ids: string[] = []): Restriction 
 export const suits = (exerciseId: string, ids: string[] = []) => !unsuitable(exerciseId, ids);
 
 /**
- * The exercises of a workout that suit: one that does not is replaced by one of the kinds listed for it (sets, reps
- * and RIR kept), not repeating the workout's other exercises; with nothing to put in its place it is left out.
+ * A replacement the trainer made «насовсем» in the gym, remembered for the client: whatever the app picks for her
+ * later («По объёму», templates, «Обновить упражнения», the workout of a muscle group) has `to` instead of `from`.
  */
-export function adaptExercises<T extends { exerciseId: string; exerciseName: string; muscles?: string[] }>(list: T[], ids: string[] = []): T[] {
-  if (!restrictionsOf(ids).length) return list;
+export interface Swap {
+  from: string;
+  to: string;
+  fromName: string;
+  toName: string;
+}
+export const MAX_SWAPS = 40;
+const swapId = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 120) : '');
+export function cleanSwaps(v: unknown): Swap[] {
+  if (!Array.isArray(v)) return [];
+  const out: Swap[] = [];
+  for (const x of v.slice(0, 100)) {
+    const from = swapId(x?.from);
+    const to = swapId(x?.to);
+    if (!from || !to || from === to || out.some((s) => s.from === from)) continue;
+    out.push({ from, to, fromName: String(x?.fromName || '').slice(0, 120), toName: String(x?.toName || '').slice(0, 120) });
+    if (out.length >= MAX_SWAPS) break;
+  }
+  return out;
+}
+/**
+ * The list with a new replacement on top: an earlier one of the same exercise gives way, the chosen exercise is wanted
+ * again (a replacement away from it goes), and chains follow (A → X, then X → Y: A → Y).
+ */
+export function withSwap(list: Swap[] = [], s: Swap): Swap[] {
+  const rest = list
+    .filter((x) => x.from !== s.from && x.from !== s.to)
+    .map((x) => (x.to === s.from ? { ...x, to: s.to, toName: s.toName } : x))
+    .filter((x) => x.from !== x.to);
+  return [s, ...rest].slice(0, MAX_SWAPS);
+}
+
+/**
+ * The exercises of a workout as they suit the client. One the trainer replaced for good is put back as that
+ * replacement; one that does not suit a restriction is replaced by one of the kinds listed for it. Sets, reps and RIR
+ * are kept, the workout's other exercises are not repeated; with nothing to put in its place an exercise is left out.
+ */
+export function adaptExercises<T extends { exerciseId: string; exerciseName: string; muscles?: string[] }>(
+  list: T[],
+  ids: string[] = [],
+  swaps: Swap[] = [],
+): T[] {
+  if (!restrictionsOf(ids).length && !swaps.length) return list;
   const used = new Set(list.map((e) => e.exerciseId));
+  const away = new Set(swaps.map((s) => s.from));
   const out: T[] = [];
   for (const e of list) {
+    const swap = swaps.find((s) => s.from === e.exerciseId);
+    if (swap) {
+      // The trainer's choice, whatever the restrictions say; already in the workout — this one goes.
+      if (used.has(swap.to)) continue;
+      used.add(swap.to);
+      const { muscles: _own, ...rest } = e;
+      out.push({ ...rest, exerciseId: swap.to, exerciseName: catalog.find((c) => c.id === swap.to)?.name || swap.toName || swap.to } as T);
+      continue;
+    }
     const r = unsuitable(e.exerciseId, ids);
     if (!r) {
       out.push(e);
@@ -74,7 +125,9 @@ export function adaptExercises<T extends { exerciseId: string; exerciseName: str
     }
     const role = roleOf(e.exerciseId) || e.exerciseId;
     const kinds = r.instead[role] || [];
-    const pick = kinds.flatMap((k) => ROLES[k] || []).find((id) => !used.has(id) && suits(id, ids) && catalog.some((c) => c.id === id));
+    const pick = kinds
+      .flatMap((k) => ROLES[k] || [])
+      .find((id) => !used.has(id) && !away.has(id) && suits(id, ids) && catalog.some((c) => c.id === id));
     if (!pick) continue;
     used.add(pick);
     const { muscles: _own, ...rest } = e;

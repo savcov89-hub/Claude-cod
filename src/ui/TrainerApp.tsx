@@ -43,9 +43,9 @@ export function TrainerApp({ profile, header, onSwitchRole }: { profile: Profile
   const reviews = data.clients.filter((c) => c.needsReview && !c.archived).length;
 
   const openClient = (id: string, t?: string) => setCard({ id, tab: t });
-  // An existing program opens as it is on the server now (it may have been changed in the gym moments ago).
+  // An existing program opens (or is copied) as it is on the server now (it may have been changed in the gym moments ago).
   const openBuilder = async (opts: BuilderOptions) => {
-    if (opts.program && !opts.copy) {
+    if (opts.program) {
       try {
         const fresh = (await api.get('/api/programs')).data.programs.find((x: Program) => x.id === opts.program!.id);
         if (fresh) opts = { ...opts, program: fresh };

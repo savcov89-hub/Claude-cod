@@ -5,7 +5,7 @@ import { catalog } from '../src/catalog';
 import { muscleLoad, programIssue } from '../src/trainingRules';
 import { EXERCISE_LOAD, PARTS, cleanMuscles, doneTally, inWeek, loadKeys, ownLoad, planTally, volumeRows, weekPlan, weekStart } from '../src/volume';
 import { createHandler } from '../backend/app';
-import { adaptExercises, cleanRestrictions, unsuitable } from '../src/restrictions';
+import { adaptExercises, cleanRestrictions, cleanSwaps, unsuitable, withSwap } from '../src/restrictions';
 import { accentShare, cleanPhases, phaseLabel, planProgress, stageNow, stageTargets } from '../src/phases';
 import { TECHNIQUE } from '../src/exerciseTechnique';
 import { MOVES } from '../src/ui/figure/moves';
@@ -305,6 +305,78 @@ await call('POST', '/api/client/' + client.clientId + '/update', { clientName: '
 expect(same((await call('GET', '/api/clients')).clients.find((c: any) => c.clientId === client.clientId).phases, plan), 'другие изменения клиента план не трогают');
 await call('POST', '/api/client/' + client.clientId + '/update', { phases: null });
 expect(!(await call('GET', '/api/clients')).clients.find((c: any) => c.clientId === client.clientId).phases, '«Убрать план» убирает его');
+
+console.log('11. Замена «насовсем»: во всех тренировках программы, запоминается клиенту');
+const sw = { from: 'lat-pulldown', to: 'side-lying-pullover', fromName: 'Вертикальная тяга', toName: 'Пуловер лёжа на боку' };
+const chain = withSwap(withSwap([], { from: 'a', to: 'x', fromName: 'A', toName: 'X' }), { from: 'x', to: 'y', fromName: 'X', toName: 'Y' });
+expect(same(chain.map((x) => x.from + '>' + x.to), ['x>y', 'a>y']), 'цепочка: A → X, потом X → Y — A тоже → Y', chain);
+expect(same(withSwap(chain, { from: 'y', to: 'a', fromName: 'Y', toName: 'A' }).map((x) => x.from + '>' + x.to), ['y>a', 'x>a']), 'обратная замена: выбранное снова нужно', withSwap(chain, { from: 'y', to: 'a', fromName: 'Y', toName: 'A' }));
+expect(cleanSwaps([{ from: 'a', to: 'a' }, { from: 'b', to: 'c' }, { from: 'b', to: 'd' }, 'x']).length === 1, 'сервер принимает только осмысленные замены');
+const ad = adaptExercises(
+  [
+    { exerciseId: 'lat-pulldown', exerciseName: 'Тяга', sets: 4, repMin: 8, repMax: 12, targetRir: 2 },
+    { exerciseId: 'bench-press', exerciseName: 'Жим', sets: 3, repMin: 6, repMax: 10, targetRir: 2 },
+  ],
+  E,
+  [sw],
+);
+expect(ad[0].exerciseId === 'side-lying-pullover' && ad[0].sets === 4 && ad[1].exerciseId !== 'bench-press', 'подбор: тяга → пуловер (подходы те же), ограничение — как прежде', ad);
+let swBad = 0;
+for (const n of [2, 3, 4, 5]) {
+  const r = planByVolume(targetsFor('middle', ['back']), { days: n, accents: ['back'], swaps: [sw] });
+  const ids = r.days.flatMap((d) => d.exercises.map((e) => e.exerciseId));
+  if (ids.includes('lat-pulldown') || !ids.includes('side-lying-pullover')) swBad++;
+}
+expect(!swBad, '«По объёму» с заменой: вертикальной тяги нет, пуловер на боку есть (2–5 тренировок)', swBad);
+const swTpl = TD(TPL.findIndex((t) => t.name.startsWith('Верх / низ')), 6, 0, true).map((d) => adaptExercises(d.exercises, [], [sw]));
+expect(swTpl.every((d) => !d.some((e) => e.exerciseId === 'lat-pulldown')), 'шаблон с заменой: вертикальная тяга заменена', swTpl.map((d) => d.map((e) => e.exerciseId)));
+// The server: a program where the exercise is in two workouts, an open workout on the other day.
+const twoDays = [
+  { id: 'a', name: 'Верх A', exercises: [{ exerciseId: 'lat-pulldown', sets: 4, repMin: 8, repMax: 12, targetRir: 2 }, { exerciseId: 'pec-deck', sets: 3, repMin: 10, repMax: 15, targetRir: 1 }] },
+  { id: 'b', name: 'Верх B', exercises: [{ exerciseId: 'cable-fly', sets: 3, repMin: 10, repMax: 15, targetRir: 1 }, { exerciseId: 'lat-pulldown', sets: 2, repMin: 10, repMax: 12, targetRir: 1 }] },
+  { id: 'c', name: 'Низ', exercises: [{ exerciseId: 'leg-press', sets: 3, repMin: 8, repMax: 12, targetRir: 2 }] },
+];
+const sp = (await call('POST', '/api/programs', { clientId: client.clientId, name: 'Замены', days: twoDays })).program;
+const openedB = await call('GET', `/api/workout/${T_ID}/${sp.id}/b`);
+const entryB = openedB.day.exercises.map((e: any) => ({ exerciseId: e.exerciseId, exerciseName: e.exerciseName, sets: Array.from({ length: e.sets }, () => ({ weight: 20, reps: 0, rir: null })) }));
+entryB[0].sets[0] = { weight: 20, reps: 12, rir: null };
+await call('POST', '/api/draft', { trainerId: T_ID, programId: sp.id, dayId: 'b', exercises: entryB, baseRevision: null, base: [], feedback: '', localDate: '2026-10-17' });
+// The editor opened now, before the replacement in the gym.
+const editorBase = (await call('GET', '/api/programs')).programs.find((x: any) => x.id === sp.id);
+const r11 = await call('POST', `/api/programs/${sp.id}/days/a/exercise`, { exerciseId: 'lat-pulldown', replaceWith: 'side-lying-pullover', everywhere: true });
+expect(same(r11.also, ['Верх B']), 'ответ: заменено ещё в «Верх B»', r11);
+const sp2 = (await call('GET', '/api/programs')).programs.find((x: any) => x.id === sp.id);
+const idsOf = (p: any, d: string) => p.days.find((x: any) => x.id === d).exercises.map((e: any) => e.exerciseId + ':' + e.sets).join(',');
+expect(idsOf(sp2, 'a') === 'side-lying-pullover:4,pec-deck:3' && idsOf(sp2, 'b') === 'cable-fly:3,side-lying-pullover:2', 'в обеих тренировках пуловер, подходы у каждой свои', [idsOf(sp2, 'a'), idsOf(sp2, 'b')]);
+const draftB = await call('GET', `/api/draft/${T_ID}/${sp.id}/b`);
+expect(
+  draftB.exercises[1].exerciseId === 'side-lying-pullover' && !draftB.exercises[1].replaces && draftB.exercises[0].sets[0].reps === 12,
+  'открытая тренировка «Верх B» перестроена: пуловер по плану, сделанный подход на месте',
+  draftB.exercises,
+);
+const vera3 = (await call('GET', '/api/clients')).clients.find((c: any) => c.clientId === client.clientId);
+expect(same(vera3.swaps?.map((x: any) => x.from + '>' + x.to), ['lat-pulldown>side-lying-pullover']), 'замена запомнилась клиенту', vera3.swaps);
+// The editor opened before: the gym moved the pullover to the end and the editor set 5 sets everywhere.
+await call('POST', `/api/programs/${sp.id}/days/a/exercises`, { exerciseIds: ['pec-deck', 'side-lying-pullover'], added: [], order: [] });
+const edited = editorBase.days.map((d: any) => ({ ...d, exercises: d.exercises.map((e: any) => ({ ...e, sets: 5 })) }));
+await call('POST', '/api/programs/' + sp.id, { name: 'Замены', days: edited, base: { updatedAt: editorBase.updatedAt || editorBase.createdAt, days: editorBase.days } });
+const sp3 = (await call('GET', '/api/programs')).programs.find((x: any) => x.id === sp.id);
+expect(
+  idsOf(sp3, 'a') === 'pec-deck:5,side-lying-pullover:5' && idsOf(sp3, 'b') === 'cable-fly:5,side-lying-pullover:5',
+  'редактор, открытый раньше: замена и порядок из зала остались, 5 подходов из редактора тоже',
+  [idsOf(sp3, 'a'), idsOf(sp3, 'b')],
+);
+// Only this workout: the other keeps the exercise, nothing is remembered.
+const r11b = await call('POST', `/api/programs/${sp.id}/days/b/exercise`, { exerciseId: 'side-lying-pullover', replaceWith: 'cable-pullover' });
+const sp4 = (await call('GET', '/api/programs')).programs.find((x: any) => x.id === sp.id);
+const vera4 = (await call('GET', '/api/clients')).clients.find((c: any) => c.clientId === client.clientId);
+expect(
+  !r11b.also && idsOf(sp4, 'a') === 'pec-deck:5,side-lying-pullover:5' && idsOf(sp4, 'b') === 'cable-fly:5,cable-pullover:5' && vera4.swaps.length === 1,
+  '«только в этой тренировке»: другие не трогаются, не запоминается',
+  [idsOf(sp4, 'a'), idsOf(sp4, 'b'), vera4.swaps],
+);
+await call('POST', '/api/client/' + client.clientId + '/update', { swaps: [] });
+expect(!(await call('GET', '/api/clients')).clients.find((c: any) => c.clientId === client.clientId).swaps, '«Забыть замену» в карточке убирает её');
 
 console.log(`\n${checks} проверок, ошибок: ${failures}`);
 process.exit(failures ? 1 : 0);

@@ -1719,6 +1719,25 @@ table {
   background: var(--warn-soft);
   color: var(--warn);
 }
+/* replacements made «насовсем» in the gym, remembered for the client (client card) */
+.swap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.swap-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--line);
+}
+.swap-list .grow {
+  flex: 1;
+  min-width: 0;
+}
 /* «По объёму»: weekly targets per muscle part */
 .pv {
   display: grid;
@@ -2868,6 +2887,8 @@ h2 {
 /* Body: weighing, measurements, body fat, calories. */
 .body-view {
   display: grid;
+  /* the column follows the screen: a wide row inside (the date and «Записать») wraps instead of widening every card */
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 .block-head {
@@ -2889,6 +2910,7 @@ h2 {
 }
 .weigh-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -2897,18 +2919,122 @@ h2 {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .weigh-date input {
   width: auto;
+  min-width: 0;
+  max-width: 100%;
   min-height: 36px;
   padding: 4px 8px;
 }
-.body-spark svg {
-  width: 100%;
-  height: 64px;
+/* measurements: the period of a chart, the chart with its scale, the last 4 weeks */
+.range-chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 2px 0 8px;
 }
-.body-spark .row {
+.range-chips::-webkit-scrollbar {
+  display: none;
+}
+.range-chips .filter {
+  height: 30px;
+  padding-inline: 11px;
+}
+.trend {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+}
+.trend svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.trend-y {
+  display: flex;
+  flex-direction: column;
   justify-content: space-between;
+  padding: 1px 0;
+  font-size: 11px;
+  color: var(--ink-2);
+  text-align: right;
+}
+.trend-x {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.trend-bar {
+  fill: var(--accent);
+  opacity: 0.8;
+}
+.trend-pt {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+.trend-avg {
+  stroke: var(--ink);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  opacity: 0.45;
+}
+.trend-sum {
+  margin: 6px 0 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .trend-bar {
+    transform-box: fill-box;
+    transform-origin: bottom;
+    animation: trend-grow 0.7s cubic-bezier(0.3, 0.9, 0.3, 1) var(--spark-delay, 0ms) both;
+  }
+  .trend-pt,
+  .trend-avg {
+    animation: spark-fade 0.5s ease-out calc(var(--spark-delay, 0ms) + 0.6s) both;
+  }
+}
+@keyframes trend-grow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+.body-weeks {
+  width: 100%;
+  margin-top: 12px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.body-weeks th {
+  padding: 0 0 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  text-align: right;
+}
+.body-weeks td {
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+.body-weeks th:first-child,
+.body-weeks td:first-child {
+  text-align: left;
+  white-space: normal;
+}
+.body-weeks th + th,
+.body-weeks td + td {
+  padding-left: 10px;
+}
+.body-weeks tr.is-now td:nth-child(2),
+.body-weeks tfoot td {
+  font-weight: 600;
 }
 .stat-row {
   display: grid;

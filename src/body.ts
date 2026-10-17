@@ -1,4 +1,5 @@
 // Body measurements: US Navy body-fat estimate and calorie needs.
+import { localDate } from './clock';
 
 export interface BodyEntry {
   date: string;
@@ -75,6 +76,89 @@ export function weeklyAverage(entries: BodyEntry[], end: string, field: 'weight'
     return list.length ? Math.round((list.reduce((a, b) => a + b, 0) / list.length) * 10) / 10 : null;
   };
   return { current: avg(endMs - 7 * day, endMs), previous: avg(endMs - 14 * day, endMs - 7 * day) };
+}
+
+/** Periods of the charts of weight, steps and calories: `label` on the switch, `full` in the text («за 3 месяца»). */
+export const RANGES = [
+  { id: '7d', label: '7 дней', full: '7 дней', days: 7 },
+  { id: '1m', label: 'Месяц', full: 'месяц', days: 30 },
+  { id: '3m', label: '3 мес', full: '3 месяца', days: 91 },
+  { id: '6m', label: '6 мес', full: '6 месяцев', days: 182 },
+  { id: '1y', label: 'Год', full: 'год', days: 365 },
+] as const;
+export type RangeId = (typeof RANGES)[number]['id'];
+export type SeriesField = 'weight' | 'steps' | 'kcal';
+
+const shiftDay = (date: string, days: number) => {
+  const d = new Date(date + 'T12:00:00');
+  d.setDate(d.getDate() + days);
+  return localDate(d);
+};
+/** Monday of the week of a yyyy-mm-dd date. */
+export const mondayOf = (date: string) => shiftDay(date, -((new Date(date + 'T12:00:00').getDay() + 6) % 7));
+const mean = (list: number[]) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : null);
+const round1 = (v: number) => Math.round(v * 10) / 10;
+/** Recorded values of `field` from `from` to `to` (yyyy-mm-dd, both included), by date; no steps or food is not a zero. */
+function valuesIn(entries: BodyEntry[], field: SeriesField, from: string, to: string) {
+  return entries
+    .filter((e) => e.date >= from && e.date <= to && typeof e[field] === 'number' && (field === 'weight' || (e[field] as number) > 0))
+    .map((e) => ({ date: e.date, value: e[field] as number }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * A chart of `field` over the last `days` days up to `end`: day by day up to a month, by week (average from Monday to
+ * Sunday) for longer periods. With the period's average, lowest and highest, and how it changed: from the average of
+ * its first 7 days to that of its last 7 (for 7 days — from the first day to the last).
+ */
+export function rangeSeries(entries: BodyEntry[], field: SeriesField, end: string, days: number) {
+  const from = shiftDay(end, -(days - 1));
+  const list = valuesIn(entries, field, from, end);
+  const byWeek = days > 31;
+  let points = list;
+  if (byWeek) {
+    const weeks = new Map<string, number[]>();
+    for (const p of list) weeks.set(mondayOf(p.date), [...(weeks.get(mondayOf(p.date)) || []), p.value]);
+    points = [...weeks].map(([date, vs]) => ({ date, value: round1(mean(vs)!) }));
+  }
+  const values = list.map((p) => p.value);
+  const head = mean(valuesIn(entries, field, from, shiftDay(from, 6)).map((p) => p.value));
+  const tail = mean(valuesIn(entries, field, shiftDay(end, -6), end).map((p) => p.value));
+  const change =
+    days <= 7 ? (list.length > 1 ? values[values.length - 1] - values[0] : null) : head !== null && tail !== null && list.length > 1 ? tail - head : null;
+  return {
+    from,
+    to: end,
+    byWeek,
+    points,
+    count: list.length,
+    average: values.length ? round1(mean(values)!) : null,
+    min: values.length ? Math.min(...values) : null,
+    max: values.length ? Math.max(...values) : null,
+    change: change === null ? null : round1(change),
+  };
+}
+
+/**
+ * The last `count` calendar weeks (Monday to Sunday) up to the week of `end`, oldest first: the average of `field` and
+ * on how many days it was recorded. With the average over all of them and the change from the first week with
+ * records to the last.
+ */
+export function weeksBack(entries: BodyEntry[], field: SeriesField, end: string, count = 4) {
+  const monday = mondayOf(end);
+  const weeks = Array.from({ length: count }, (_, i) => {
+    const from = shiftDay(monday, -7 * (count - 1 - i));
+    const to = shiftDay(from, 6);
+    const values = valuesIn(entries, field, from, to).map((p) => p.value);
+    return { from, to, average: values.length ? round1(mean(values)!) : null, days: values.length, current: i === count - 1 };
+  });
+  const all = valuesIn(entries, field, weeks[0].from, weeks[count - 1].to).map((p) => p.value);
+  const known = weeks.filter((w) => w.average !== null);
+  return {
+    weeks,
+    average: all.length ? round1(mean(all)!) : null,
+    change: known.length > 1 ? round1(known[known.length - 1].average! - known[0].average!) : null,
+  };
 }
 
 /**

@@ -1075,8 +1075,11 @@ function JournalBody({
     }
   };
 
-  /** Trainer: one planned exercise changed in the program (targets, or another exercise for good), then the journal reloads. */
-  const saveExerciseToProgram = async (slot: string, change: { replaceWith?: string } & Partial<Targets>) => {
+  /**
+   * Trainer: one planned exercise changed in the program (targets, or another exercise for good — `everywhere`: in
+   * every workout of the program that has it, remembered for the client), then the journal reloads.
+   */
+  const saveExerciseToProgram = async (slot: string, change: { replaceWith?: string; everywhere?: boolean } & Partial<Targets>) => {
     setProgramBusy(true);
     try {
       if (timer.current) clearTimeout(timer.current);
@@ -1120,11 +1123,14 @@ function JournalBody({
     if (await saveExerciseToProgram(slotOf(e), t)) setTargetsFor(null);
   };
   /** A replacement for good: swapped in today, then put in the program in place of the planned one. */
-  const replaceInProgram = async (ei: number, ex: Exercise) => {
+  const replaceInProgram = async (ei: number, ex: Exercise, everywhere: boolean) => {
     const slot = slotOf(latest.current[ei]);
     if (latest.current[ei].exerciseId !== ex.id) await swapExercise(ei, ex);
-    return saveExerciseToProgram(slot, { replaceWith: ex.id });
+    return saveExerciseToProgram(slot, { replaceWith: ex.id, everywhere });
   };
+  /** The program's other workouts that have this exercise too: a replacement «насовсем» goes there as well. */
+  const otherDaysWith = (exerciseId: string) =>
+    (workout.days || []).filter((d) => d.id !== workout.day.id && d.exerciseIds?.includes(exerciseId)).map((d) => d.name);
   const setNote = (ei: number, note: string) =>
     update(latest.current.map((x, i) => (i === ei ? { ...x, note: note || undefined } : x)));
 
@@ -1668,6 +1674,7 @@ function JournalBody({
           removeBlocked={!results[menu].extra && latest.current.length === 1}
           canEditTargets={canProgram || !!results[menu].extra}
           canJoin={canProgram}
+          elsewhere={otherDaysWith(slotOf(results[menu]))}
           busy={programBusy}
           onConfirm={setMenuConfirm}
           onSwap={() => void openSwap(menu)}
@@ -1685,7 +1692,7 @@ function JournalBody({
           }}
           onKeepSwap={async () => {
             const entry = latest.current[menu];
-            if (entry.replaces && (await saveExerciseToProgram(entry.replaces, { replaceWith: entry.exerciseId }))) closeMenu();
+            if (entry.replaces && (await saveExerciseToProgram(entry.replaces, { replaceWith: entry.exerciseId, everywhere: true }))) closeMenu();
           }}
           onRemove={async () => {
             const keep = latest.current.filter((_, i) => i !== menu);
@@ -1788,36 +1795,26 @@ function JournalBody({
         </Sheet>
       )}
       {swapChoice && (
-        <Sheet title={'Замена: ' + swapChoice.ex.name} onClose={() => setSwapChoice(null)}>
-          <p className="muted small">
-            Вместо «{plan[swapChoice.ei]?.exerciseName}». Подходы, повторы и RIR останутся прежними.
-          </p>
-          <div className="order-actions">
-            <button
-              className="btn btn-block"
-              disabled={programBusy}
-              onClick={() => {
-                void swapExercise(swapChoice.ei, swapChoice.ex);
-                setSwapChoice(null);
-              }}
-            >
-              Только сегодня
-            </button>
-            <button
-              className="btn btn-primary btn-block"
-              disabled={programBusy}
-              onClick={async () => {
-                setSwapError('');
-                // Closed only once it is in the program; otherwise it says so here (today the swap stays).
-                if (await replaceInProgram(swapChoice.ei, swapChoice.ex)) setSwapChoice(null);
-                else setSwapError('Не сохранилось в программе — сегодня упражнение уже заменено. Нажмите ещё раз.');
-              }}
-            >
-              {programBusy ? 'Сохраняем…' : 'В программе насовсем'}
-            </button>
-          </div>
-          {swapError && <div className="alert">{swapError}</div>}
-        </Sheet>
+        <SwapChoice
+          ex={swapChoice.ex}
+          name={plan[swapChoice.ei]?.exerciseName || ''}
+          planned={plannedOf(results[swapChoice.ei])?.exerciseName || ''}
+          dayName={workout.day.name}
+          elsewhere={otherDaysWith(slotOf(results[swapChoice.ei]))}
+          busy={programBusy}
+          error={swapError}
+          onToday={() => {
+            void swapExercise(swapChoice.ei, swapChoice.ex);
+            setSwapChoice(null);
+          }}
+          onProgram={async (everywhere) => {
+            setSwapError('');
+            // Closed only once it is in the program; otherwise it says so here (today the swap stays).
+            if (await replaceInProgram(swapChoice.ei, swapChoice.ex, everywhere)) setSwapChoice(null);
+            else setSwapError('Не сохранилось в программе — сегодня упражнение уже заменено. Нажмите ещё раз.');
+          }}
+          onClose={() => setSwapChoice(null)}
+        />
       )}
 
       <div className="j-foot">
@@ -1867,6 +1864,68 @@ type MenuConfirm = 'swap' | 'revert' | 'remove' | 'drop';
  * Actions for one exercise of the workout: replace (today or for good), sets and reps, skip, order, delete;
  * for one added today — delete or add to the program.
  */
+/** «A», «B» и «C». */
+const quoteList = (names: string[]) => {
+  const q = names.map((n) => '«' + n + '»');
+  return q.length > 1 ? q.slice(0, -1).join(', ') + ' и ' + q[q.length - 1] : q[0] || '';
+};
+
+/**
+ * A replacement picked for a planned exercise: today only, or in the program for good — in every workout of the
+ * program that has the exercise, remembered for the client (what the app picks for her later has the new one), or,
+ * when other workouts have it too, in this workout only.
+ */
+function SwapChoice({
+  ex,
+  name,
+  planned,
+  dayName,
+  elsewhere,
+  busy,
+  error,
+  onToday,
+  onProgram,
+  onClose,
+}: {
+  ex: Exercise;
+  /** What is in the slot now (the planned exercise, or today's replacement). */
+  name: string;
+  /** The program's exercise that is replaced. */
+  planned: string;
+  dayName: string;
+  /** Other workouts of the program with the planned exercise. */
+  elsewhere: string[];
+  busy: boolean;
+  error: string;
+  onToday: () => void;
+  onProgram: (everywhere: boolean) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Sheet title={'Замена: ' + ex.name} onClose={onClose}>
+      <p className="muted small">Вместо «{name}». Подходы, повторы и RIR останутся прежними.</p>
+      <div className="order-actions">
+        <button className="btn btn-block" disabled={busy} onClick={onToday}>
+          Только сегодня
+        </button>
+        <button className="btn btn-primary btn-block" disabled={busy} onClick={() => onProgram(true)}>
+          {busy ? 'Сохраняем…' : 'В программе насовсем'}
+        </button>
+        <p className="muted small center-text">
+          {elsewhere.length ? `Во всех тренировках с «${planned}»: ${quoteList([dayName, ...elsewhere])}. ` : ''}
+          Запомнится клиенту: при подборе упражнений будет «{ex.name}» вместо «{planned}».
+        </p>
+        {elsewhere.length > 0 && (
+          <button className="btn btn-quiet btn-block" disabled={busy} onClick={() => onProgram(false)}>
+            Насовсем только в «{dayName}»
+          </button>
+        )}
+      </div>
+      {error && <div className="alert">{error}</div>}
+    </Sheet>
+  );
+}
+
 function ExerciseMenu({
   entry,
   name,
@@ -1887,10 +1946,13 @@ function ExerciseMenu({
   onKeepSwap,
   onRemove,
   onClose,
+  elsewhere = [],
 }: {
   entry: SessionExercise;
   name: string;
   planned: WorkoutExercise;
+  /** Other workouts of the program with the planned exercise: a replacement for good goes there too. */
+  elsewhere?: string[];
   confirm: MenuConfirm | null;
   canProgram: boolean;
   /** The only exercise of the workout: deleting it would leave the program day empty. */
@@ -1959,7 +2021,9 @@ function ExerciseMenu({
               <Check size={18} />
               <span className="grow">
                 {busy ? 'Сохраняем…' : `Оставить «${name}» в программе`}
-                <small>вместо «{planned.exerciseName}» насовсем</small>
+                <small>
+                  вместо «{planned.exerciseName}» насовсем{elsewhere.length ? ` — и в ${quoteList(elsewhere)}` : ''}
+                </small>
               </span>
             </button>
           )}

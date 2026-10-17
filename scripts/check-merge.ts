@@ -1,7 +1,8 @@
 // Property check of the three-way merge (src/draftMerge.ts): random edits by two phones from the same version.
 //   npx tsx scripts/check-merge.ts [iterations]
 import { doneDiffers, fitPlan, mergeEntries, mergeText, slotKey } from '../src/draftMerge';
-import type { SessionExercise, SetEntry } from '../src/types';
+import { mergeProgramDays } from '../src/programMerge';
+import type { ProgramDay, SessionExercise, SetEntry } from '../src/types';
 
 const N = Number(process.argv[2] || 20000);
 let seed = 12345;
@@ -164,6 +165,137 @@ for (let it = 0; it < N; it++) {
   if (mergeText('', 'тяжело', '') !== 'тяжело' || mergeText('a', 'a', 'b') !== 'b' || mergeText(null, 'x', 'y') !== 'x') fail('mergeText', null);
 }
 
+// ---- The program editor saved on top of changes made meanwhile in the gym (src/programMerge.ts). ----
+// The gym: a replacement «насовсем» (in its place, in one workout or in all that have it), sets, the order, an
+// exercise taken out or joined. The editor: sets, names, a replacement, an exercise added, taken out, moved.
+type PEx = ProgramDay['exercises'][number];
+const PPOOL = Array.from({ length: 14 }, (_, i) => 'p' + i);
+const pex = (id: string, sets = 3): PEx => ({ exerciseId: id, exerciseName: 'Упр ' + id, sets, repMin: 8, repMax: 12, targetRir: 2 });
+const fresh = (day: PEx[], not: string[] = []) => PPOOL.find((id) => !day.some((e) => e.exerciseId === id) && !not.includes(id) && chance(0.3)) || null;
+const move = (list: PEx[]) => {
+  if (list.length < 2) return;
+  const i = int(list.length);
+  const [x] = list.splice(i, 1);
+  list.splice(int(list.length + 1), 0, x);
+};
+let programRuns = 0;
+for (let it = 0; it < N / 4; it++) {
+  const base: ProgramDay[] = Array.from({ length: 1 + int(3) }, (_, d) => ({
+    id: 'day-' + d,
+    name: 'Тренировка ' + 'ABC'[d],
+    exercises: PPOOL.slice()
+      .sort(() => rnd() - 0.5)
+      .slice(0, 3 + int(4))
+      .map((id) => pex(id)),
+  }));
+  // The gym, with what it did kept for the checks.
+  const theirs = clone(base);
+  const gymSwaps: Array<{ day: string; from: string; to: string }> = [];
+  const gymTouched = new Set<string>();
+  for (let o = 1 + int(3); o > 0; o--) {
+    const d = theirs[int(theirs.length)];
+    const k = int(6);
+    const i = int(d.exercises.length);
+    const e = d.exercises[i];
+    if (k <= 1) {
+      const to = fresh(d.exercises, theirs.flatMap((x) => x.exercises.map((y) => y.exerciseId)));
+      if (!to || gymTouched.has(d.id + ':' + e.exerciseId)) continue;
+      // In all workouts that have it (as «В программе насовсем»), or in this one.
+      for (const x of k === 0 ? theirs : [d]) {
+        const j = x.exercises.findIndex((y) => y.exerciseId === e.exerciseId);
+        if (j < 0 || x.exercises.some((y) => y.exerciseId === to)) continue;
+        x.exercises[j] = { ...pex(to, x.exercises[j].sets) };
+        gymSwaps.push({ day: x.id, from: e.exerciseId, to });
+        gymTouched.add(x.id + ':' + to);
+      }
+    } else if (k === 2) {
+      d.exercises[i] = { ...e, sets: e.sets === 5 ? 2 : e.sets + 1 };
+      gymTouched.add(d.id + ':' + e.exerciseId);
+    } else if (k === 3) move(d.exercises);
+    else if (k === 4 && d.exercises.length > 1 && !gymTouched.has(d.id + ':' + e.exerciseId)) d.exercises.splice(i, 1);
+    else if (k === 5) {
+      const id = fresh(d.exercises);
+      if (id) d.exercises.splice(int(d.exercises.length + 1), 0, pex(id, 2));
+    }
+  }
+  // The editor, opened on the base version.
+  const mine = clone(base);
+  const edTouched = new Set<string>();
+  const edAdded = new Set<string>();
+  for (let o = 1 + int(4); o > 0; o--) {
+    const d = mine[int(mine.length)];
+    const k = int(7);
+    const i = int(d.exercises.length);
+    const e = d.exercises[i];
+    if (k === 0) for (const x of mine) x.exercises = x.exercises.map((y) => ({ ...y, sets: 4 }));
+    else if (k === 1) d.name = 'Новое имя ' + int(9);
+    else if (k === 2) {
+      const to = fresh(d.exercises);
+      if (!to) continue;
+      edTouched.add(d.id + ':' + e.exerciseId);
+      d.exercises[i] = pex(to, e.sets);
+      edAdded.add(d.id + ':' + to);
+    } else if (k === 3) {
+      const id = fresh(d.exercises);
+      if (id) {
+        d.exercises.push(pex(id, 2));
+        edAdded.add(d.id + ':' + id);
+      }
+    } else if (k === 4 && d.exercises.length > 1) {
+      edTouched.add(d.id + ':' + e.exerciseId);
+      d.exercises.splice(i, 1);
+    } else if (k === 5) move(d.exercises);
+    else if (k === 6) d.exercises[i] = { ...e, repMin: 6, repMax: 10 };
+  }
+  const log = gymSwaps.map((x) => ({ dayId: x.day, from: x.from, to: x.to }));
+  const merged = mergeProgramDays(base, mine, theirs, log);
+  programRuns++;
+  const ctx = { base, mine, theirs, merged };
+  // Nothing changed on one side: the other side as it is.
+  if (key(mergeProgramDays(base, mine, clone(base)) as never) !== key(mine as never)) fail('program: gym unchanged → editor', ctx);
+  if (key(mergeProgramDays(base, clone(base), theirs, log) as never) !== key(theirs as never)) fail('program: editor unchanged → gym', ctx);
+  for (const d of merged) {
+    const ids = d.exercises.map((e) => e.exerciseId);
+    if (new Set(ids).size !== ids.length) fail('program: an exercise twice in a workout', { day: d, ...ctx });
+    if (!d.exercises.length) fail('program: an empty workout', ctx);
+    const b = base.find((x) => x.id === d.id)!;
+    const m = mine.find((x) => x.id === d.id)!;
+    const t = theirs.find((x) => x.id === d.id)!;
+    // A replacement in the gym stays, unless the editor replaced or took out that exercise, or put the new one in.
+    for (const s of gymSwaps.filter((x) => x.day === d.id)) {
+      const editorKept = m.exercises.some((e) => e.exerciseId === s.from) && !edTouched.has(d.id + ':' + s.from);
+      // (Not when the old one came back in the gym in another place, or the new one was replaced again.)
+      if (!editorKept || m.exercises.some((e) => e.exerciseId === s.to) || !t.exercises.some((e) => e.exerciseId === s.to) || t.exercises.some((e) => e.exerciseId === s.from)) continue;
+      if (!ids.includes(s.to) || ids.includes(s.from)) fail('program: the gym replacement is undone', { swap: s, ...ctx });
+    }
+    // What the editor added stays.
+    for (const e of m.exercises) if (edAdded.has(d.id + ':' + e.exerciseId) && !ids.includes(e.exerciseId)) fail('program: the editor addition is lost', { e, ...ctx });
+    // What the editor took out (and the gym did not change) is out.
+    for (const e of b.exercises) {
+      const gone = !m.exercises.some((x) => x.exerciseId === e.exerciseId) && edTouched.has(d.id + ':' + e.exerciseId);
+      const tSame = t.exercises.find((x) => x.exerciseId === e.exerciseId);
+      if (gone && tSame && JSON.stringify(tSame) === JSON.stringify(e) && ids.includes(e.exerciseId)) fail('program: the editor removal is undone', { e, ...ctx });
+    }
+    // New sets in the gym on an exercise the editor left alone stay.
+    for (const e of t.exercises) {
+      const was = b.exercises.find((x) => x.exerciseId === e.exerciseId);
+      const ed = m.exercises.find((x) => x.exerciseId === e.exerciseId);
+      if (!was || !ed || was.sets === e.sets || JSON.stringify(ed) !== JSON.stringify(was)) continue;
+      const got = d.exercises.find((x) => x.exerciseId === e.exerciseId);
+      if (got && got.sets !== e.sets) fail('program: the gym sets are undone', { e, got, ...ctx });
+    }
+  }
+}
+// Named: the gym replaced the first exercise and moved it to the end; the editor set 4 sets everywhere.
+{
+  const base: ProgramDay[] = [{ id: 'd', name: 'A', exercises: [pex('x'), pex('a'), pex('b')] }];
+  const theirs: ProgramDay[] = [{ id: 'd', name: 'A', exercises: [pex('a'), pex('b'), pex('y')] }];
+  const mine: ProgramDay[] = [{ id: 'd', name: 'A', exercises: [pex('x', 4), pex('a', 4), pex('b', 4)] }];
+  const got = mergeProgramDays(base, mine, theirs, [{ dayId: 'd', from: 'x', to: 'y' }])[0].exercises.map((e) => e.exerciseId + e.sets).join(',');
+  if (got !== 'a4,b4,y4') fail('program: replaced and moved in the gym, 4 sets in the editor', got);
+}
+
+console.log(`program merge checks: ${programRuns} random pairs of edits`);
 console.log(`merge checks: ${N} random pairs of edits, ${fails.length ? 'FAILED' : 'all good'}`);
 for (const f of fails) console.log('\n' + f);
 process.exit(fails.length ? 1 : 0);

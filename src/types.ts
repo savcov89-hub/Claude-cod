@@ -1,4 +1,5 @@
 import type { PhasePlan } from './phases';
+import type { Swap } from './restrictions';
 import type { ClientInsights } from './analytics';
 
 export type Role = 'trainer' | 'client';
@@ -40,6 +41,8 @@ export interface ClientItem {
   autoFinished?: AutoFinished[];
   /** Specialisation plan: stages of accents one after another. */
   phases?: PhasePlan;
+  /** Replacements made «насовсем» in the gym: what the app picks for the client has the chosen exercise instead. */
+  swaps?: Swap[];
 }
 /** A workout left open (sets done, nothing saved for 3 hours) that the server recorded by itself. */
 export interface AutoFinished {
@@ -167,7 +170,8 @@ export interface WorkoutPayload {
   programId: string;
   programName: string;
   trainerId: string;
-  days?: Array<{ id: string; name: string }>;
+  /** The program's workouts; `exerciseIds` — what each has (a replacement «насовсем» goes to all that have it). */
+  days?: Array<{ id: string; name: string; exerciseIds?: string[] }>;
   nextDayId?: string;
   day: { id: string; name: string; exercises: WorkoutExercise[] };
   /** Workouts of this program left open long ago, recorded by the server as this one was opened. */

@@ -18,7 +18,7 @@ import type { Focus } from '../volume';
 import { Confirm, Sheet, nextDayName, plural, searchKey, tidyDayNames } from './common';
 import { AddExercise } from './Library';
 import { MuscleChips, PlanVolume } from './Volume';
-import { adaptExercises, restrictionsOf, unsuitable } from '../restrictions';
+import { adaptExercises, restrictionsOf, unsuitable, type Swap } from '../restrictions';
 import { PlanByVolume } from './PlanByVolume';
 
 export interface BuilderOptions {
@@ -74,9 +74,12 @@ export function ProgramBuilder({
   const [saving, setSaving] = useState(false);
   const [errorText, setErrorText] = useState('');
 
-  // The client's restrictions (client card): what the app picks here leaves out the exercises that do not suit.
-  const restrictions = clients.find((c) => c.clientId === clientId)?.notes?.restrictions || [];
-  const adaptDays = (list: ProgramDay[]) => list.map((d) => ({ ...d, exercises: adaptExercises(d.exercises, restrictions) }));
+  // The client's restrictions (client card): what the app picks here leaves out the exercises that do not suit;
+  // replacements made «насовсем» in the gym are kept — the chosen exercise comes instead of the replaced one.
+  const client = clients.find((c) => c.clientId === clientId);
+  const restrictions = client?.notes?.restrictions || [];
+  const swaps = client?.swaps || [];
+  const adaptDays = (list: ProgramDay[]) => list.map((d) => ({ ...d, exercises: adaptExercises(d.exercises, restrictions, swaps) }));
   const day = days[Math.min(activeDay, days.length - 1)];
   const dayLoad = muscleLoad(day.exercises);
   const warnings = programWarnings(days);
@@ -102,7 +105,7 @@ export function ProgramBuilder({
     const again = lastFocus?.dayId === day.id && lastFocus.key === f.key;
     if (again) return refreshDay();
     const generic = !day.name.trim() || /^Тренировка( [A-ZА-Я0-9]+)?$/i.test(day.name.trim()) || DAY_FOCUS.some((x) => x.label === day.name);
-    patchDay({ ...day, name: generic ? f.label : day.name, exercises: adaptExercises(focusDay(f.key), restrictions) });
+    patchDay({ ...day, name: generic ? f.label : day.name, exercises: adaptExercises(focusDay(f.key), restrictions, swaps) });
     setLastFocus({ dayId: day.id, key: f.key, variant: 0 });
   };
   /** The open workout with other exercises of the same roles: order, sets, reps and RIR stay; undone with «Вернуть». */
@@ -110,7 +113,9 @@ export function ProgramBuilder({
   const refreshDay = () => {
     setDayUndo({ dayId: day.id, exercises: day.exercises });
     const elsewhere = days.filter((d) => d.id !== day.id).flatMap((d) => d.exercises.map((e) => e.exerciseId));
-    patchDay({ ...day, exercises: adaptExercises(refreshExercises(day.exercises, elsewhere), restrictions) });
+    // Exercises replaced for good are not offered again (failing that, they come back as their replacement).
+    const away = swaps.map((x) => x.from);
+    patchDay({ ...day, exercises: adaptExercises(refreshExercises(day.exercises, [...elsewhere, ...away]), restrictions, swaps) });
   };
   const canRefresh = day.exercises.some((e) => roleOf(e.exerciseId));
   const patchExercise = (i: number, patch: Partial<ProgramExercise>) =>
@@ -227,6 +232,12 @@ export function ProgramBuilder({
           <b>{r.label}.</b> {r.note} Шаблоны, «По объёму», «Обновить упражнения» и «Тренировка на…» это учитывают.
         </p>
       ))}
+      {swaps.length > 0 && (
+        <p className="restriction-note small">
+          <b>Замены из зала.</b> {swaps.map((x) => `«${x.toName}» вместо «${x.fromName}»`).join(', ')} — шаблоны, «По объёму» и «Обновить
+          упражнения» берут их. Убрать — в карточке клиента.
+        </p>
+      )}
       {editing && (
         <p className="muted small">
           Изменения увидит клиент. История и начатые записи сохранятся; у дня с новым составом упражнений незавершённый черновик начнётся заново.
@@ -305,7 +316,8 @@ export function ProgramBuilder({
         focus={volumeFocus}
         onFocus={setVolumeFocus}
         restrictions={restrictions}
-        phases={clients.find((c) => c.clientId === clientId)?.phases}
+        swaps={swaps}
+        phases={client?.phases}
         onMake={(made, splitLabel, times) => {
           setUndo({ days, name });
           setDays(made);
@@ -562,6 +574,7 @@ export function ProgramBuilder({
         <ExercisePicker
           exercises={exercises}
           restrictions={restrictions}
+          swaps={swaps}
           exclude={day.exercises.filter((_, i) => i !== picker.replace).map((e) => e.exerciseId)}
           title={picker.replace === null ? 'Добавить упражнение' : 'Заменить упражнение'}
           allowCreate
@@ -622,6 +635,7 @@ export function ExercisePicker({
   autoFocusSearch = true,
   allowCreate = false,
   restrictions = [],
+  swaps = [],
   top,
   onCreated,
   onPick,
@@ -639,6 +653,8 @@ export function ExercisePicker({
   allowCreate?: boolean;
   /** The client's restrictions: exercises that do not suit go last, marked. */
   restrictions?: string[];
+  /** Replacements made «насовсем» in the gym: a replaced exercise is marked with what replaced it. */
+  swaps?: Swap[];
   onCreated?: (e: Exercise) => void;
   onPick: (e: Exercise) => void;
   onClose: () => void;
@@ -706,6 +722,9 @@ export function ExercisePicker({
                 {exerciseRules[e.id] ? ' · ' + exerciseRules[e.id].position : ''}
               </span>
               {!fits(e) && <span className="small tone-warn">{unsuitable(e.id, restrictions)!.label}</span>}
+              {swaps.some((x) => x.from === e.id) && (
+                <span className="small tone-warn">Заменено в зале на «{swaps.find((x) => x.from === e.id)!.toName}»</span>
+              )}
             </span>
             <Plus size={18} />
           </button>

@@ -5,6 +5,7 @@ import { ACCENTS, GROUPS, LEVELS, MAX_ACCENTS, accentParts, muscleNames, partsOf
 import { ACCENT_FACTOR, GROWTH, MAINTAIN_FACTOR, SPLITS, autoSplit, planByVolume, targetsFor, type SplitKind } from '../volumePlanner';
 import { plural } from './common';
 import { phaseLabel, stageNow, stageTargets, type Phase, type PhasePlan } from '../phases';
+import type { Swap } from '../restrictions';
 
 const partName = (id: string) => {
   const p = PARTS.find((x) => x.id === id)!;
@@ -36,6 +37,7 @@ export function PlanByVolume({
   onMake,
   onUndo,
   restrictions = [],
+  swaps = [],
   phases,
 }: {
   days: ProgramDay[];
@@ -48,6 +50,8 @@ export function PlanByVolume({
   onUndo?: () => void;
   /** The client's restrictions: exercises that do not suit are not picked. */
   restrictions?: string[];
+  /** Replacements made «насовсем» in the gym: the chosen exercise instead of the replaced one. */
+  swaps?: Swap[];
   /** The client's specialisation plan: its current (and coming) stage can set the accents and targets. */
   phases?: PhasePlan;
 }) {
@@ -112,7 +116,7 @@ export function PlanByVolume({
     setVariant(v);
     // A moment for «Составляем…» to show: the planner takes a fraction of a second on a phone.
     setTimeout(() => {
-      const r = planByVolume(targets, { days: times, split: kind, perDay, variant: v, accents, restrictions });
+      const r = planByVolume(targets, { days: times, split: kind, perDay, variant: v, accents, restrictions, swaps });
       const short: string[] = [];
       const over: string[] = [];
       for (const p of PARTS) {

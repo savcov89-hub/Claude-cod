@@ -1259,6 +1259,183 @@ await scenario('36. План акцентов: этапы в карточке, �
   await call('post', '/api/client/' + idOf('Павел') + '/update', { phases: null });
 });
 
+await scenario('37. Замена «насовсем»: во всех тренировках с этим упражнением, запоминается клиенту', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  const ex = (id, sets) => ({ exerciseId: id, sets, repMin: 8, repMax: 12, targetRir: 2 });
+  const { program: two } = await call('post', '/api/programs', {
+    clientId: idOf('Павел'),
+    name: 'Верх и низ',
+    days: [
+      { id: 'up-a', name: 'Верх A', exercises: [ex('lat-pulldown', 4), ex('pec-deck', 3)] },
+      { id: 'up-b', name: 'Верх B', exercises: [ex('cable-fly', 3), ex('lat-pulldown', 2)] },
+      { id: 'low', name: 'Низ', exercises: [ex('leg-press', 3)] },
+    ],
+  });
+  // Made elsewhere (another phone): the app is opened again.
+  await p.reload();
+  await p.waitForSelector('.nav', { timeout: 30000 });
+  await p.waitForTimeout(1500);
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: 'Павел' }).first().locator('.client-open').click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('tab', { name: 'Программы' }).click();
+  await p.waitForTimeout(600);
+  await p.getByRole('button', { name: /Верх A/ }).first().click();
+  await p.getByRole('button', { name: 'Открыть журнал · Верх A' }).click();
+  await p.waitForTimeout(1200);
+  // (The gym keeps its own journals, hidden, on the same page.)
+  const j = p.locator('.main .journal:visible').first();
+  await j.getByRole('button', { name: 'Действия с упражнением: Вертикальная тяга' }).click();
+  await p.locator('.menu-item', { hasText: 'Заменить' }).first().click();
+  await p.waitForTimeout(500);
+  await pick('Пуловер лёжа на боку');
+  const sheet = (await p.locator('.sheet').last().innerText()).replace(/\s+/g, ' ');
+  expect(/Во всех тренировках с «Вертикальная тяга»: «Верх A» и «Верх B»/.test(sheet), 'the choice says it goes to both workouts with the exercise', sheet.slice(0, 300));
+  expect(/Запомнится/.test(sheet) && (await p.getByRole('button', { name: 'Насовсем только в «Верх A»' }).count()) === 1, 'and that it is remembered; «only in this workout» is there too');
+  await p.getByRole('button', { name: 'В программе насовсем' }).click();
+  await p.waitForTimeout(1500);
+  const after = (await call('get', '/api/programs')).programs.find((x) => x.id === two.id);
+  const idsIn = (d) => after.days.find((x) => x.id === d).exercises.map((e) => e.exerciseId + ':' + e.sets).join(',');
+  expect(idsIn('up-a') === 'side-lying-pullover:4,pec-deck:3' && idsIn('up-b') === 'cable-fly:3,side-lying-pullover:2', 'replaced in «Верх A» and «Верх B», each with its own sets', [idsIn('up-a'), idsIn('up-b')]);
+  const title = (await j.locator('.ex h3').first().innerText()).trim();
+  expect(title === 'Пуловер лёжа на боку', 'the journal shows the pullover', title);
+  await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click();
+  await p.waitForTimeout(800);
+  await p.getByRole('tab', { name: 'Обзор' }).click();
+  await p.waitForTimeout(500);
+  const list = (await p.getByRole('list', { name: 'Замены из зала' }).innerText()).replace(/\s+/g, ' ');
+  expect(/«Пуловер лёжа на боку» вместо «Вертикальная тяга»/.test(list), 'the client card shows the remembered replacement', list);
+  // A new program for him «По объёму» with the back as the accent: the pullover instead of the pulldown.
+  await p.getByRole('tab', { name: 'Программы' }).click();
+  await p.waitForTimeout(600);
+  await p.getByRole('button', { name: 'Новая программа' }).click();
+  await p.waitForTimeout(1000);
+  expect(/Замены из зала/.test(await p.locator('.builder').innerText()), 'the editor reminds of it');
+  await p.locator('.plan-volume .block-toggle').click();
+  await p.getByRole('group', { name: 'Опыт клиента' }).getByRole('button', { name: 'Средний' }).click();
+  await p.getByRole('group', { name: 'Акценты' }).getByRole('button', { name: 'Спина' }).click();
+  await p.getByRole('group', { name: 'Тренировок в неделю для составления' }).getByRole('button', { name: '4', exact: true }).click();
+  await p.getByRole('button', { name: 'Составить программу' }).click();
+  await p.locator('.pv-report').waitFor({ timeout: 5000 });
+  const made = await p.evaluate(() => [...document.querySelectorAll('[aria-label^="Заменить: "]')].map((b) => b.getAttribute('aria-label')));
+  expect(!made.some((x) => /Вертикальная тяга/.test(x)), 'the open workout of the made program has no pulldown', made);
+  await p.getByRole('button', { name: 'Закрыть конструктор' }).click();
+  await p.waitForTimeout(500);
+  await p.getByRole('tab', { name: 'Обзор' }).click();
+  await p.waitForTimeout(400);
+  await p.getByRole('button', { name: 'Забыть замену: Пуловер лёжа на боку вместо Вертикальная тяга' }).click();
+  await p.waitForTimeout(1000);
+  expect(!(await call('get', '/api/clients')).clients.find((c) => c.clientName === 'Павел').swaps, '«Забыть замену» removes it');
+  await call('post', '/api/programs/' + two.id + '/archive', { archived: true });
+  await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click().catch(() => {});
+});
+
+await scenario('38. Замеры: вес по неделям за 4 недели и средний; период графика 7 дней … год — у веса, шагов и калорий', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  const id = idOf('Ольга');
+  // A year of mornings: weight on most days, yesterday's steps and food on many; the expected weekly averages are
+  // counted here on their own, Monday to Sunday.
+  const expected = await p.evaluate(async (id) => {
+    const api = window.__tlApi || (await import('/src/transport.ts')).api;
+    let seed = 11;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const day = (back) => {
+      const d = new Date();
+      d.setHours(12, 0, 0, 0);
+      d.setDate(d.getDate() - back);
+      return d;
+    };
+    const weights = {};
+    for (let back = 370; back >= 0; back--) {
+      const body = { clientId: id, date: ymd(day(back)) };
+      if (rnd() > 0.15) body.weight = weights[body.date] = Math.round((70 + (back / 370) * 4 + (rnd() - 0.5)) * 10) / 10;
+      if (back > 0 && rnd() > 0.2) body.steps = Math.round(5000 + rnd() * 9000);
+      if (back > 0 && rnd() > 0.25) body.kcal = Math.round((1700 + rnd() * 700) / 10) * 10;
+      if (Object.keys(body).length > 2) await api.post('/api/body', body);
+    }
+    const monday = day(0);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    const weeks = [3, 2, 1, 0].map((k) => {
+      const list = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(monday);
+        d.setDate(d.getDate() - 7 * k + i);
+        if (weights[ymd(d)] !== undefined) list.push(weights[ymd(d)]);
+      }
+      return list.length ? Math.round((list.reduce((a, b) => a + b, 0) / list.length) * 10) / 10 : null;
+    });
+    const all = [];
+    for (let i = 0; i < 28; i++) {
+      const d = new Date(monday);
+      d.setDate(d.getDate() - 21 + i);
+      if (weights[ymd(d)] !== undefined) all.push(weights[ymd(d)]);
+    }
+    return { weeks, average: Math.round((all.reduce((a, b) => a + b, 0) / all.length) * 10) / 10 };
+  }, id);
+  const kg = (v) => String(v).replace('.', ',') + ' кг';
+  await p.reload();
+  await p.waitForSelector('.nav', { timeout: 30000 });
+  await p.waitForTimeout(1500);
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: 'Ольга' }).first().locator('.client-open').click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('tab', { name: 'Замеры' }).click();
+  await p.waitForTimeout(1500);
+  const weight = p.locator('section.block', { has: p.getByRole('heading', { name: 'Вес', exact: true }) });
+  const rows = await weight.getByRole('table', { name: 'По неделям: вес' }).locator('tbody tr').allInnerTexts();
+  const shown = rows.map((r) => r.split('\t')[1]?.trim());
+  expect(rows.length === 4 && /эта/.test(rows[3]), 'four weeks, Monday to Sunday, the last one is this week', rows);
+  expect(JSON.stringify(shown) === JSON.stringify(expected.weeks.map((v) => (v === null ? '—' : kg(v)))), 'the average weight of each week', [shown, expected.weeks]);
+  const total = await weight.getByRole('table', { name: 'По неделям: вес' }).locator('tfoot').innerText();
+  expect(total.includes(kg(expected.average)), 'the average weight over the four weeks', [total, expected.average]);
+  const group = weight.getByRole('group', { name: 'Период: вес' });
+  const chips = await group.getByRole('button').allInnerTexts();
+  expect(chips.join('|') === '7 дней|Месяц|3 мес|6 мес|Год', 'the chart periods: 7 days, a month, 3 and 6 months, a year', chips);
+  expect((await group.getByRole('button', { name: 'Месяц', exact: true }).getAttribute('aria-pressed')) === 'true', 'a month at first');
+  await group.getByRole('button', { name: 'Год', exact: true }).click();
+  await p.waitForTimeout(800);
+  const year = (await weight.locator('.trend-sum').innerText()).replace(/\s+/g, ' ');
+  expect(/^За год \(по неделям\): в среднем [\d,]+ кг/.test(year), 'a year: by week, with the average', year);
+  await group.getByRole('button', { name: '7 дней', exact: true }).click();
+  await p.waitForTimeout(800);
+  const points = await weight.locator('.trend circle').count();
+  expect(points >= 2 && points <= 7, '7 days: a point a day', points);
+  for (const [title, group2] of [['Шаги', 'Период: шаги'], ['Питание', 'Период: калории']]) {
+    const block = p.locator('section.block', { has: p.getByRole('heading', { name: title, exact: true }) });
+    await block.getByRole('group', { name: group2 }).getByRole('button', { name: '3 месяца', exact: true }).click();
+    await p.waitForTimeout(800);
+    const bars = await block.locator('.trend rect').count();
+    const sum = (await block.locator('.trend-sum').innerText()).replace(/\s+/g, ' ');
+    expect(bars >= 12 && bars <= 14 && /^За 3 месяца \(по неделям\): в среднем/.test(sum), title + ': 3 months as 13 weekly bars, with the average', [bars, sum]);
+    expect((await block.getByRole('table').locator('tbody tr').count()) === 4, title + ': the last four weeks too');
+  }
+  // The period stays chosen on this phone.
+  await p.reload();
+  await p.waitForSelector('.nav', { timeout: 30000 });
+  await p.waitForTimeout(1500);
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: 'Ольга' }).first().locator('.client-open').click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('tab', { name: 'Замеры' }).click();
+  await p.waitForTimeout(1200);
+  expect((await weight.getByRole('group', { name: 'Период: вес' }).getByRole('button', { name: '7 дней', exact: true }).getAttribute('aria-pressed')) === 'true', 'the chosen period is kept after a reload');
+  await p.setViewportSize({ width: 320, height: 700 });
+  await p.waitForTimeout(500);
+  const over = await p.evaluate(() => {
+    const m = document.querySelector('.main');
+    return Math.max(document.documentElement.scrollWidth - innerWidth, m ? m.scrollWidth - m.clientWidth : 0);
+  });
+  expect(over <= 1, '320 px: the measurements fit', over);
+  await p.setViewportSize({ width: 390, height: 844 });
+  await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click().catch(() => {});
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();
@@ -1292,6 +1469,34 @@ await scenario('16. Узкие экраны (320, 360, 375 px): ничего н�
       });
       expect(over <= 1, width + ' px, «' + tab + '»: no sideways scroll', over);
     }
+  }
+  // The client card's tabs and the client's own app (the tab strips scroll by themselves, the pages must not).
+  const sideways = () =>
+    p.evaluate(() => {
+      const m = document.querySelector('.main');
+      return Math.max(document.documentElement.scrollWidth - innerWidth, m ? m.scrollWidth - m.clientWidth : 0);
+    });
+  for (const width of [320, 360]) {
+    await p.setViewportSize({ width, height: 700 });
+    await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+    await p.waitForTimeout(500);
+    await p.locator('.client-row', { hasText: 'Александр' }).first().locator('.client-open').click();
+    await p.waitForTimeout(900);
+    for (const tab of ['Обзор', 'Программы', 'Замеры', 'История', 'Прогресс']) {
+      await p.getByRole('tab', { name: tab }).click();
+      await p.waitForTimeout(700);
+      expect((await sideways()) <= 1, width + ' px, карточка → «' + tab + '»: no sideways scroll', await sideways());
+    }
+    await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click();
+    await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
+    await p.waitForTimeout(1200);
+    for (const tab of ['Тренировка', 'Прогресс', 'История', 'Замеры']) {
+      await p.getByRole('tab', { name: tab }).click();
+      await p.waitForTimeout(700);
+      expect((await sideways()) <= 1, width + ' px, приложение клиента → «' + tab + '»: no sideways scroll', await sideways());
+    }
+    await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+    await p.waitForTimeout(1200);
   }
   await p.setViewportSize({ width: 390, height: 844 });
 });

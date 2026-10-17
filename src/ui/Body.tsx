@@ -1,12 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Copy, HeartPulse, Ruler, Trash2 } from 'lucide-react';
-import { ACTIVITY, actualExpenditure, calories, ffmi, latest, navyBodyFat, weeklyAverage, type BodyEntry, type BodyProfile } from '../body';
+import {
+  ACTIVITY,
+  RANGES,
+  actualExpenditure,
+  calories,
+  ffmi,
+  latest,
+  navyBodyFat,
+  rangeSeries,
+  weeklyAverage,
+  weeksBack,
+  type BodyEntry,
+  type BodyProfile,
+  type RangeId,
+  type SeriesField,
+} from '../body';
 import { fmtKg } from '../analytics';
 import { localDate } from '../clock';
-import { api, isLocal, readError } from '../transport';
+import { api, isLocal, readError, safeStorage } from '../transport';
 import { healthUrl } from '../supabase';
 import { copyLater } from './programText';
-import { Confirm, Sparkline, fmtDate } from './common';
+import { Confirm, fmtDate } from './common';
 
 const num = (v: string) => {
   const n = Number(v.replace(',', '.').trim());
@@ -66,9 +81,9 @@ export function BodyView({ clientId }: { clientId?: string }) {
   const weight = week.current ?? last.weight?.value ?? null;
   const level = ACTIVITY.find((a) => a.id === profile?.activity);
   const energy = profile && weight ? calories(profile, weight, bodyFat, stepsWeek.current) : null;
-  const weights = entries.filter((e) => typeof e.weight === 'number').slice(-60);
-  const steps = entries.filter((e) => typeof e.steps === 'number').slice(-60);
-  const eaten = entries.filter((e) => typeof e.kcal === 'number').slice(-60);
+  const weights = entries.filter((e) => typeof e.weight === 'number');
+  const steps = entries.filter((e) => typeof e.steps === 'number' && e.steps > 0);
+  const eaten = entries.filter((e) => typeof e.kcal === 'number' && e.kcal > 0);
   const kcalWeek = weeklyAverage(entries, today, 'kcal');
   const actual = actualExpenditure(entries, today);
   const index = profile && weight && bodyFat !== null ? ffmi(profile, weight, bodyFat) : null;
@@ -103,13 +118,10 @@ export function BodyView({ clientId }: { clientId?: string }) {
           )}
         </div>
         {weights.length > 1 ? (
-          <div className="body-spark">
-            <Sparkline points={weights.map((e) => ({ date: e.date, e1rm: e.weight as number }))} width={320} height={64} />
-            <div className="muted small row between">
-              <span>{fmtDate(weights[0].date)}</span>
-              <span>{fmtDate(weights[weights.length - 1].date)}</span>
-            </div>
-          </div>
+          <>
+            <Trend entries={entries} field="weight" today={today} />
+            <WeekTable entries={entries} field="weight" today={today} />
+          </>
         ) : (
           <p className="muted small">Взвешивайтесь каждое утро натощак: по среднему за неделю видно настоящую динамику, а не колебания воды.</p>
         )}
@@ -126,13 +138,10 @@ export function BodyView({ clientId }: { clientId?: string }) {
           )}
         </div>
         {steps.length > 1 ? (
-          <div className="body-spark">
-            <Sparkline points={steps.map((e) => ({ date: e.date, e1rm: e.steps as number }))} width={320} height={64} fromZero delay={180} />
-            <div className="muted small row between">
-              <span>{fmtDate(steps[0].date)}</span>
-              <span>{fmtDate(steps[steps.length - 1].date)}</span>
-            </div>
-          </div>
+          <>
+            <Trend entries={entries} field="steps" today={today} delay={180} />
+            <WeekTable entries={entries} field="steps" today={today} />
+          </>
         ) : (
           <p className="muted small">Утром вместе с весом запишите шаги за вчера (из «Здоровья» или часов) — или подключите «Здоровье» внизу, и шаги будут приходить сами. Калорийность будет считаться по реальной активности.</p>
         )}
@@ -149,13 +158,10 @@ export function BodyView({ clientId }: { clientId?: string }) {
           )}
         </div>
         {eaten.length > 1 && (
-          <div className="body-spark">
-            <Sparkline points={eaten.map((e) => ({ date: e.date, e1rm: e.kcal as number }))} width={320} height={64} fromZero delay={360} />
-            <div className="muted small row between">
-              <span>{fmtDate(eaten[0].date)}</span>
-              <span>{fmtDate(eaten[eaten.length - 1].date)}</span>
-            </div>
-          </div>
+          <>
+            <Trend entries={entries} field="kcal" today={today} delay={360} />
+            <WeekTable entries={entries} field="kcal" today={today} />
+          </>
         )}
         {actual ? (
           <div className="stat-row">
@@ -308,6 +314,221 @@ export function BodyView({ clientId }: { clientId?: string }) {
 
       {entries.length > 0 && <EntryList entries={entries} profile={profile} onDelete={(date) => save({ date, weight: null, waist: null, neck: null, hips: null, steps: null, kcal: null })} />}
     </div>
+  );
+}
+
+const signedInt = (d: number) => (d > 0 ? '+' : d < 0 ? '−' : '') + fmtSteps(Math.abs(d));
+/** How each series is written: the value, its change, the scale. */
+const SERIES: Record<SeriesField, { title: string; bars: boolean; value: (v: number) => string; change: (d: number) => string; scale: (v: number) => string }> = {
+  weight: { title: 'вес', bars: false, value: (v) => fmtKg(v) + ' кг', change: (d) => signed(d), scale: (v) => fmtKg(Math.round(v * 10) / 10) },
+  steps: { title: 'шаги', bars: true, value: (v) => fmtSteps(v), change: signedInt, scale: (v) => (v >= 1000 ? fmtKg(Math.round(v / 100) / 10) + ' тыс.' : fmtSteps(v)) },
+  kcal: { title: 'калории', bars: true, value: (v) => fmtSteps(v) + ' ккал', change: signedInt, scale: (v) => fmtSteps(v) },
+};
+const dayMonth = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' });
+const dayMonthYear = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
+const noonOf = (date: string) => new Date(date + 'T12:00:00');
+/** «22–28 сент.», «29 сент. – 5 окт.» */
+const weekLabel = (from: string, to: string) =>
+  from.slice(0, 7) === to.slice(0, 7) ? noonOf(from).getDate() + '–' + dayMonth.format(noonOf(to)) : dayMonth.format(noonOf(from)) + ' – ' + dayMonth.format(noonOf(to));
+/** «за 7 дней», «за месяц», «за 3 месяца»… */
+const periodText = (full: string) => 'за ' + full;
+
+/** The period of a chart, kept on this device for each chart (a month at first). */
+function useRange(field: SeriesField) {
+  const key = 'tl-body-range:' + field;
+  const [range, setRange] = useState<RangeId>(() => {
+    const v = safeStorage.get(key);
+    return RANGES.some((r) => r.id === v) ? (v as RangeId) : '1m';
+  });
+  return [
+    range,
+    (r: RangeId) => {
+      setRange(r);
+      safeStorage.set(key, r);
+    },
+  ] as const;
+}
+
+/** A chart with its period — 7 days, a month, 3 or 6 months, a year — and what the period comes to. */
+function Trend({ entries, field, today, delay = 0 }: { entries: BodyEntry[]; field: SeriesField; today: string; delay?: number }) {
+  const cfg = SERIES[field];
+  const [range, setRange] = useRange(field);
+  const period = RANGES.find((r) => r.id === range)!;
+  const s = rangeSeries(entries, field, today, period.days);
+  return (
+    <div className="trend-block">
+      <div className="chips range-chips" role="group" aria-label={'Период: ' + cfg.title}>
+        {RANGES.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            className={'filter' + (r.id === range ? ' on' : '')}
+            aria-pressed={r.id === range}
+            aria-label={r.full[0].toUpperCase() + r.full.slice(1)}
+            onClick={() => setRange(r.id)}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+      {s.points.length > 1 ? (
+        <TrendChart
+          key={range}
+          points={s.points}
+          from={s.from}
+          to={s.to}
+          bars={cfg.bars}
+          byWeek={s.byWeek}
+          average={cfg.bars ? s.average : null}
+          scale={cfg.scale}
+          label={`${cfg.title[0].toUpperCase() + cfg.title.slice(1)} ${periodText(period.full)}${s.average !== null ? ', в среднем ' + cfg.value(s.average) : ''}`}
+          delay={delay}
+        />
+      ) : (
+        <p className="muted small">{s.count ? 'За этот период одна запись — выберите период подольше.' : 'За этот период записей нет.'}</p>
+      )}
+      {s.average !== null && s.points.length > 1 && (
+        <p className="small trend-sum">
+          {'З' + periodText(period.full).slice(1)}
+          {s.byWeek ? ' (по неделям)' : ''}: в среднем <b className="num">{cfg.value(s.average)}</b>
+          {field !== 'weight' && ' в день'}
+          {s.min !== null && s.max !== null && s.min !== s.max && (
+            <span className="muted num">
+              {' '}
+              · от {cfg.scale(s.min)} до {cfg.scale(s.max)}
+            </span>
+          )}
+          {field === 'weight' && s.change !== null && <span className="num"> · {signed(s.change)} кг</span>}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The chart of a period: the weight as a line, steps and food as bars with the period's average dashed; the full period
+ * on the axis (a gap in the records stays a gap), the scale on the right.
+ */
+function TrendChart({
+  points,
+  from,
+  to,
+  bars,
+  byWeek,
+  average,
+  scale,
+  label,
+  delay,
+}: {
+  points: Array<{ date: string; value: number }>;
+  from: string;
+  to: string;
+  bars: boolean;
+  byWeek: boolean;
+  average: number | null;
+  scale: (v: number) => string;
+  label: string;
+  delay: number;
+}) {
+  const W = 320;
+  const H = 120;
+  const pad = 6;
+  const days = Math.round((noonOf(to).getTime() - noonOf(from).getTime()) / 86400000) + 1;
+  const idx = (date: string) => Math.round((noonOf(date).getTime() - noonOf(from).getTime()) / 86400000);
+  // A point stands for its day, or its week (from Monday) as far as it is in the period.
+  const span = (date: string) => {
+    const a = Math.max(0, idx(date));
+    return [a, Math.min(days, idx(date) + (byWeek ? 7 : 1))];
+  };
+  const px = (d: number) => pad + (d / days) * (W - pad * 2);
+  const values = points.map((p) => p.value);
+  let lo = bars ? 0 : Math.min(...values);
+  let hi = Math.max(...values);
+  if (!bars) {
+    const room = Math.max((hi - lo) * 0.12, 0.3);
+    lo -= room;
+    hi += room;
+  } else hi *= 1.06;
+  const py = (v: number) => H - pad - ((v - lo) / (hi - lo || 1)) * (H - pad * 2);
+  const xs = points.map((p) => {
+    const [a, b] = span(p.date);
+    return px((a + b) / 2);
+  });
+  const line = points.map((p, i) => (i ? 'L' : 'M') + xs[i].toFixed(1) + ' ' + py(p.value).toFixed(1)).join(' ');
+  const year = from.slice(0, 4) !== to.slice(0, 4);
+  return (
+    <div className="trend" role="img" aria-label={label} style={{ ['--spark-delay' as string]: delay + 'ms' }}>
+      <svg className="spark" viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
+        <line x1={pad} x2={W - pad} y1={py(lo)} y2={py(lo)} className="spark-grid" />
+        <line x1={pad} x2={W - pad} y1={py(hi)} y2={py(hi)} className="spark-grid" />
+        {bars ? (
+          points.map((p) => {
+            const [a, b] = span(p.date);
+            const x = px(a);
+            const w = Math.max(1, px(b) - x - (b - a > 1 ? 3 : days > 14 ? 1 : 3));
+            return <rect key={p.date} className="trend-bar" x={x + (b - a > 1 ? 1.5 : days > 14 ? 0.5 : 1.5)} y={py(p.value)} width={w} height={Math.max(0, py(lo) - py(p.value))} rx={Math.min(3, w / 3)} />;
+          })
+        ) : (
+          <>
+            <path d={line + ` L${xs[xs.length - 1].toFixed(1)} ${py(lo)} L${xs[0].toFixed(1)} ${py(lo)} Z`} className="spark-area" />
+            <path d={line} className="spark-line" pathLength={1} />
+            {points.length <= 31 && points.slice(0, -1).map((p, i) => <circle key={p.date} cx={xs[i]} cy={py(p.value)} r="2" className="trend-pt" />)}
+            <circle cx={xs[xs.length - 1]} cy={py(values[values.length - 1])} r="3.4" className="spark-dot" />
+          </>
+        )}
+        {average !== null && <line x1={pad} x2={W - pad} y1={py(average)} y2={py(average)} className="trend-avg" />}
+      </svg>
+      <div className="trend-y num" aria-hidden="true">
+        <span>{scale(bars ? Math.max(...values) : hi)}</span>
+        <span>{scale(bars ? 0 : lo)}</span>
+      </div>
+      <div className="trend-x" aria-hidden="true">
+        <span>{year ? dayMonthYear.format(noonOf(from)).replace(/\s?г\.$/, '') : dayMonth.format(noonOf(from))}</span>
+        <span>{dayMonth.format(noonOf(to))}</span>
+      </div>
+    </div>
+  );
+}
+
+/** The last 4 weeks, Monday to Sunday: the average of each, how it changed week to week and over the four. */
+function WeekTable({ entries, field, today }: { entries: BodyEntry[]; field: SeriesField; today: string }) {
+  const cfg = SERIES[field];
+  const { weeks, average, change } = weeksBack(entries, field, today, 4);
+  if (!weeks.some((w) => w.average !== null)) return null;
+  let prev: number | null = null;
+  return (
+    <table className="body-weeks" aria-label={'По неделям: ' + cfg.title}>
+      <thead>
+        <tr>
+          <th scope="col">Неделя (пн–вс)</th>
+          <th scope="col">{field === 'weight' ? 'Средний вес' : 'В день'}</th>
+          <th scope="col">За неделю</th>
+        </tr>
+      </thead>
+      <tbody>
+        {weeks.map((w) => {
+          const d = w.average !== null && prev !== null ? Math.round((w.average - prev) * 10) / 10 : null;
+          if (w.average !== null) prev = w.average;
+          return (
+            <tr key={w.from} className={w.current ? 'is-now' : undefined}>
+              <td>
+                {weekLabel(w.from, w.to)}
+                {w.current && <span className="muted"> · эта</span>}
+              </td>
+              <td className="num">{w.average !== null ? cfg.value(w.average) : '—'}</td>
+              <td className="num muted">{d !== null ? cfg.change(d) : ''}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>За 4 недели</td>
+          <td className="num">{average !== null ? cfg.value(average) : '—'}</td>
+          <td className="num">{change !== null ? cfg.change(change) : ''}</td>
+        </tr>
+      </tfoot>
+    </table>
   );
 }
 

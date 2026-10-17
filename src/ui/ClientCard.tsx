@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Clipboard, Copy, Pencil, Plus, Smartphone, Archive, RotateCcw, Share2 } from 'lucide-react';
+import { ArrowLeft, Clipboard, Copy, Pencil, Plus, Smartphone, Archive, RotateCcw, Share2, X } from 'lucide-react';
 import { api, inGym, readError } from '../transport';
 import { inviteLink } from '../invite';
 import type { AutoFinished, ClientNotes, OpenWorkout, Program, Session } from '../types';
@@ -392,6 +392,18 @@ function Overview({ data, clientId, sessionsCount }: { data: TrainerData; client
       setBusy(false);
     }
   };
+  /** A replacement from the gym forgotten: what the app picks for the client may have that exercise again. */
+  const dropSwap = async (from: string) => {
+    setBusy(true);
+    try {
+      await api.post('/api/client/' + clientId + '/update', { swaps: (client.swaps || []).filter((x) => x.from !== from) });
+      await data.reloadClients();
+    } catch (e) {
+      setErr(readError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   const field = (key: 'goal' | 'limits' | 'notes', label: string, placeholder: string, rows = 1) => (
     <label className="field">
       <span>{label}</span>
@@ -459,6 +471,30 @@ function Overview({ data, clientId, sessionsCount }: { data: TrainerData; client
             </span>
           ))}
         </div>
+        {!!client.swaps?.length && (
+          <div className="field">
+            <span>Замены из зала («В программе насовсем»)</span>
+            <ul className="swap-list" aria-label="Замены из зала">
+              {client.swaps.map((x) => (
+                <li key={x.from} className="small">
+                  <span className="grow">
+                    «{x.toName}» <span className="muted">вместо</span> «{x.fromName}»
+                  </span>
+                  <button
+                    type="button"
+                    className="icon-btn sm"
+                    aria-label={`Забыть замену: ${x.toName} вместо ${x.fromName}`}
+                    disabled={busy}
+                    onClick={() => void dropSwap(x.from)}
+                  >
+                    <X size={16} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <span className="muted small">Шаблоны, «По объёму» и «Обновить упражнения» ставят клиенту выбранное упражнение вместо заменённого.</span>
+          </div>
+        )}
         {field('notes', 'Заметки', 'Предпочтения, режим, питание…', 3)}
         <button className="btn btn-primary" disabled={saved || busy} onClick={save}>
           {saved ? 'Сохранено' : 'Сохранить заметки'}

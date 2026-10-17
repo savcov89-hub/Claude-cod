@@ -2,7 +2,7 @@ import { catalog } from './catalog';
 import { ROLES, roleOf } from './templates';
 import { EXERCISE_LOAD, PARTS, accentParts, cleanTargets, type Level, type Load } from './volume';
 import type { ProgramDay } from './types';
-import { suits as suitsRestrictions, twiceFor } from './restrictions';
+import { adaptExercises, suits as suitsRestrictions, twiceFor, type Swap } from './restrictions';
 
 /**
  * A program from weekly volume: the trainer sets sets a week for every muscle part, the planner picks exercises.
@@ -184,6 +184,8 @@ export interface PlanOptions {
   accents?: string[];
   /** The client's restrictions (src/restrictions.ts): exercises that do not suit are not picked. */
   restrictions?: string[];
+  /** Replacements the trainer made for good (src/restrictions.ts): the chosen exercise instead of the replaced one. */
+  swaps?: Swap[];
 }
 export interface PlanResult {
   days: ProgramDay[];
@@ -199,7 +201,14 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
   const perDay = Math.max(2, Math.min(12, o.perDay || 7));
   const kinds = Array.from({ length: n }, (_, i) => SEQUENCE[split][i % SEQUENCE[split].length]);
   const accent = accentParts(o.accents);
-  const CANDIDATES = ALL_CANDIDATES.filter((c) => suitsRestrictions(c.id, o.restrictions));
+  // Replaced for good by the trainer: the replaced exercise is not picked when the chosen one can be (whatever the
+  // restrictions say of it — the trainer's choice) and is a little preferred; otherwise the replaced one is picked
+  // and put back as the chosen one at the end, its volume standing for the chosen one's.
+  const swaps = o.swaps || [];
+  const chosen = new Set(swaps.filter((s) => ALL_CANDIDATES.some((c) => c.id === s.to)).map((s) => s.to));
+  const away = new Set(swaps.filter((s) => chosen.has(s.to)).map((s) => s.from));
+  const CANDIDATES = ALL_CANDIDATES.filter((c) => !away.has(c.id) && (chosen.has(c.id) || suitsRestrictions(c.id, o.restrictions)));
+  const prefOf = (c: Candidate) => c.pref + (chosen.has(c.id) ? 0.4 : 0);
   const TWICE = new Set([...TWICE_ALWAYS, ...twiceFor(o.restrictions)]);
   /** An accent counts more: when there is not room for everything, maintenance gives way. */
   const weight = (p: string) => (accent.has(p) ? 1.6 : 1);
@@ -273,7 +282,7 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
           }
           if (capped) continue;
           const score =
-            gain - 0.7 * waste - shape(sets) - 0.2 * days[d].length - (again ? 0.8 : 0) - again7(c) + c.pref + (ROLE_PREF[c.role] || 0) + 1.2 * (noise.get(c.id) || 0);
+            gain - 0.7 * waste - shape(sets) - 0.2 * days[d].length - (again ? 0.8 : 0) - again7(c) + prefOf(c) + (ROLE_PREF[c.role] || 0) + 1.2 * (noise.get(c.id) || 0);
           if (!best || score > best.score) best = { d, c, sets, score, gain };
         }
       }
@@ -334,7 +343,7 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
         for (const c of helpful) {
           if (!fits(c, d, i)) continue;
           for (let sets = MIN_SETS; sets <= 4; sets++)
-            offer({ gain: better(d, [[x.c.load, -x.sets], [c.load, sets]]) - 0.4 - again7(c) - shape(sets) + shape(x.sets) + c.pref - x.c.pref + (ROLE_PREF[c.role] || 0) - (ROLE_PREF[x.c.role] || 0), d, i, to: sets, c });
+            offer({ gain: better(d, [[x.c.load, -x.sets], [c.load, sets]]) - 0.4 - again7(c) - shape(sets) + shape(x.sets) + prefOf(c) - prefOf(x.c) + (ROLE_PREF[c.role] || 0) - (ROLE_PREF[x.c.role] || 0), d, i, to: sets, c });
         }
       }
       if (days[d].length < perDay)
@@ -380,12 +389,16 @@ export function planByVolume(targetsIn: Record<string, number>, o: PlanOptions):
     out.push({
       id: 'day-' + (out.length + 1),
       name: DAY_NAME[k] + letter,
-      exercises: [...days[d]]
-        .sort((a, b) => order(b) - order(a))
-        .map(({ c, sets }) => {
-          const [repMin, repMax, targetRir] = targetsOf(c.id, c.role);
-          return { exerciseId: c.id, exerciseName: c.name, sets, repMin, repMax, targetRir };
-        }),
+      exercises: adaptExercises(
+        [...days[d]]
+          .sort((a, b) => order(b) - order(a))
+          .map(({ c, sets }) => {
+            const [repMin, repMax, targetRir] = targetsOf(c.id, c.role);
+            return { exerciseId: c.id, exerciseName: c.name, sets, repMin, repMax, targetRir };
+          }),
+        [],
+        swaps,
+      ),
     });
   });
   for (const p of Object.keys(total)) if (Math.abs(total[p]) < 1e-9) delete total[p];

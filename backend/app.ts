@@ -1,13 +1,13 @@
 import { catalog } from '../src/catalog';
 import { groupMuscles, exerciseRules, programIssue } from '../src/trainingRules';
 import { cleanFocus, cleanMuscles, cleanTargets, type Focus } from '../src/volume';
-import { cleanRestrictions } from '../src/restrictions';
+import { cleanRestrictions, cleanSwaps, withSwap, type Swap } from '../src/restrictions';
 import { cleanPhases, type PhasePlan } from '../src/phases';
 import { clientInsights, sessionRecords, type ClientInsights } from '../src/analytics';
 import { nowIso } from '../src/clock';
 import type { AutoFinished, OpenWorkout } from '../src/types';
 import { doneDiffers, fitPlan, mergeEntries, mergeText } from '../src/draftMerge';
-import { mergeProgramDays } from '../src/programMerge';
+import { mergeProgramDays, type SwapEntry } from '../src/programMerge';
 
 // The request logic is written against this small surface so the same code runs
 // on Supabase (backend/server.ts) and in the demo build (in-browser database).
@@ -97,6 +97,8 @@ interface ClientRecord {
   avatar?: string;
   /** Specialisation plan: stages of accents one after another (src/phases.ts). */
   phases?: PhasePlan;
+  /** Replacements made «насовсем» in the gym (src/restrictions.ts): what the app picks has the chosen exercise instead. */
+  swaps?: Swap[];
 }
 interface CoachRecord {
   trainerId: string;
@@ -150,6 +152,8 @@ interface ProgramRecord {
   free?: boolean;
   /** Free program only: exercises of the last free workout, to start the next one "как в прошлый раз". */
   lastFree?: FreeExercise[];
+  /** Replacements «насовсем» from the gym, latest last: an editor opened before them knows which exercise took whose place. */
+  swapLog?: Array<SwapEntry & { at: string }>;
 }
 interface FreeExercise extends ExtraPlan {
   exerciseId: string;
@@ -507,6 +511,21 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
   }
 
   /**
+   * An open workout after `from` was replaced for good by `next`: the entry of that slot becomes the new exercise —
+   * as it is when it was swapped in today already, empty when it was still the old one (its weights were the old
+   * exercise's). Done sets of the old one (the other phone ticked them a moment ago, a workout open on another day)
+   * stay as they were done: as today's swap in the new exercise's slot; so does a swap today to something else.
+   */
+  const takeSwap = (list: SessionExercise[], from: string, next: ProgramExercise) =>
+    list.map((e): SessionExercise => {
+      if (e.extra || (e.replaces || e.exerciseId) !== from) return e;
+      const { replaces: _r, ...plain } = e;
+      if (e.exerciseId === next.exerciseId) return plain;
+      if (e.exerciseId !== from || e.sets.some((x) => x.reps > 0)) return { ...plain, replaces: next.exerciseId };
+      return { ...plain, exerciseId: next.exerciseId, exerciseName: next.exerciseName, sets: e.sets.map(() => ({ weight: 0, reps: 0, rir: null })) };
+    });
+
+  /**
    * A client who records a set herself without «Я в зале» is marked in the gym, so the trainer sees her there
    * (also from an older app). Not when she is already marked.
    */
@@ -644,7 +663,8 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         id: programId,
         record: {
           ...rest,
-          ...(days !== now.days ? { days, updatedAt: completedAt } : {}),
+          // A change of the program now (a workout may be dated back to its last set).
+          ...(days !== now.days ? { days, updatedAt: nowIso() } : {}),
           ...(latestHere
             ? {
                 nextDayId,
@@ -1197,6 +1217,11 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         if (typeof b.archived === 'boolean') patch.archived = b.archived;
         // The specialisation plan; null removes it.
         if (b.phases !== undefined) patch.phases = cleanPhases(b.phases);
+        // Remembered replacements (the trainer removes one in the client card); an empty list removes them all.
+        if (b.swaps !== undefined) {
+          const swaps = cleanSwaps(b.swaps);
+          patch.swaps = swaps.length ? swaps : undefined;
+        }
         // One of the ready-made pictures (src/ui/avatars.tsx); empty for the initial letter.
         if (typeof b.avatar === 'string') {
           if (b.avatar && !/^[a-z-]{1,24}$/.test(b.avatar)) return error('Нет такой аватарки.', 400);
@@ -1781,7 +1806,8 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         if (base && typeof base.updatedAt === 'string' && base.updatedAt !== version && Array.isArray(base.days)) {
           const baseDays = await cleanDays(trainerId, base.days);
           if (typeof baseDays !== 'string') {
-            const result = await cleanDays(trainerId, mergeProgramDays(baseDays, sent, program.days));
+            const log = (program.swapLog || []).filter((x) => x.at > base.updatedAt);
+            const result = await cleanDays(trainerId, mergeProgramDays(baseDays, sent, program.days, log));
             if (typeof result !== 'string') {
               merged = JSON.stringify(result) !== JSON.stringify(sent);
               days = result;
@@ -1891,8 +1917,10 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     ],
 
     /**
-     * One exercise of a day, from the gym journal: new sets / rep range / reserve, and/or another exercise
-     * in its place for good (targets kept). An open workout that already swapped it in today takes it as planned.
+     * One exercise of a day, from the gym journal: new sets / rep range / reserve, and/or another exercise in its place
+     * for good (targets kept). `everywhere`: the replacement goes to every workout of the program that has the exercise
+     * (each keeps its own sets and reps) and is remembered for the client — what the app picks for her later («По
+     * объёму», templates, «Обновить упражнения») has the new exercise instead. Open workouts take it as planned.
      */
     'POST /api/programs/:programId/days/:dayId/exercise': [
       requireAuth(),
@@ -1914,35 +1942,61 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           next = { ...next, sets, ...targets };
         }
         const replaceWith = b.replaceWith ? String(b.replaceWith) : '';
+        let known: Exercise | undefined;
         if (replaceWith && replaceWith !== current.exerciseId) {
           if (day.exercises.some((e) => e.exerciseId === replaceWith)) return error('Это упражнение уже есть в тренировке.', 409);
-          const known = await knownExercises(trainerId)(replaceWith);
+          known = await knownExercises(trainerId)(replaceWith);
           if (!known) return error('Упражнение не найдено.', 404);
           const { sets, repMin, repMax, targetRir } = next;
           next = toProgramExercise({ sets, repMin, repMax, targetRir }, known);
         }
+        const from = current.exerciseId;
+        const swapped = next.exerciseId !== from;
         // Saved in the program whatever the open workout is doing: the other phone may have ticked a set a moment
         // ago (live recording). The open workout is rewritten safely below (it retries on a save in between).
         const draftT = draftTable(program.clientId, programId, dayId);
         const draft = await first<DraftRecord & { id: string }>(draftT);
-        const days = program.days.map((d) =>
-          d.id === dayId ? { ...d, exercises: d.exercises.map((e) => (e.exerciseId === current.exerciseId ? next : e)) } : d,
+        // The program's other workouts with the same exercise; not one that has the new exercise already, in the
+        // program or in its workout open now (never twice in a workout).
+        const others = swapped && b.everywhere ? program.days.filter((d) => d.id !== dayId && d.exercises.some((e) => e.exerciseId === from)) : [];
+        const otherDrafts = await Promise.all(others.map((d) => first<DraftRecord & { id: string }>(draftTable(program.clientId, programId, d.id))));
+        const isOpen = (x?: DraftRecord) => !!x && !x.closed;
+        const also = others.filter(
+          (d, i) =>
+            !d.exercises.some((e) => e.exerciseId === next.exerciseId) &&
+            !(isOpen(otherDrafts[i]) && otherDrafts[i]!.exercises.some((e) => e.exerciseId === next.exerciseId)),
         );
+        const days = program.days.map((d) => {
+          if (d.id === dayId) return { ...d, exercises: d.exercises.map((e) => (e.exerciseId === from ? next : e)) };
+          if (!also.includes(d)) return d;
+          return {
+            ...d,
+            exercises: d.exercises.map((e) =>
+              e.exerciseId === from ? toProgramExercise({ sets: e.sets, repMin: e.repMin, repMax: e.repMax, targetRir: e.targetRir }, known!) : e,
+            ),
+          };
+        });
         const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
-        const [ok] = await db.update(programsTable(trainerId), [{ id: programId, record: { ...rest, days, updatedAt: nowIso() } }]);
+        const at = nowIso();
+        const swapLog = swapped
+          ? [...(program.swapLog || []), ...[day, ...also].map((d) => ({ dayId: d.id, from, to: next.exerciseId, at }))].slice(-40)
+          : program.swapLog;
+        const [ok] = await db.update(programsTable(trainerId), [
+          { id: programId, record: { ...rest, days, updatedAt: at, ...(swapLog ? { swapLog } : {}) } },
+        ]);
         if (!ok) return error('Не удалось сохранить программу.', 500);
-        const revision =
-          next.exerciseId === current.exerciseId
-            ? draft?.revision || null
-            : await rewriteDraft(draftT, draft, (list) =>
-                list.map((e) => {
-                  if ((e.replaces || e.exerciseId) !== current.exerciseId) return e;
-                  // Already swapped in today: now it is the planned one. Still the old one: it becomes the new one, sets kept.
-                  const { replaces: _r, ...plain } = e;
-                  return { ...plain, exerciseId: next.exerciseId, exerciseName: next.exerciseName };
-                }),
-              );
-        return json({ saved: true, revision, exercise: next });
+        const revision = swapped ? await rewriteDraft(draftT, draft, (list) => takeSwap(list, from, next)) : draft?.revision || null;
+        for (const [i, d] of others.entries())
+          if (also.includes(d) && isOpen(otherDrafts[i]))
+            await rewriteDraft(draftTable(program.clientId, programId, d.id), otherDrafts[i], (list) => takeSwap(list, from, next));
+        if (swapped && b.everywhere) {
+          const client = await findClient(trainerId, program.clientId);
+          if (client)
+            await saveClient(trainerId, client, {
+              swaps: withSwap(client.swaps, { from, to: next.exerciseId, fromName: current.exerciseName, toName: next.exerciseName }),
+            });
+        }
+        return json({ saved: true, revision, exercise: next, ...(also.length ? { also: also.map((d) => d.name) } : {}) });
       },
     ],
 
@@ -2159,7 +2213,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           programId,
           programName: program.name,
           trainerId,
-          days: program.days.map((d) => ({ id: d.id, name: d.name })),
+          days: program.days.map((d) => ({ id: d.id, name: d.name, exerciseIds: d.exercises.map((e) => e.exerciseId) })),
           nextDayId: program.nextDayId || program.days[0]?.id,
           day: { ...day, exercises },
           ...(autoFinished.length ? { autoFinished } : {}),
