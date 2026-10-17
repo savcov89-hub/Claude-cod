@@ -1440,13 +1440,21 @@ await scenario('39. Рацион во вкладке клиента: данны�
   await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
   await p.waitForTimeout(1500);
   const today = await p.evaluate(() => new Date().toLocaleDateString('sv-SE'));
-  await call('post', '/api/body/profile', { sex: 'm', heightCm: 182, birthYear: new Date().getFullYear() - 36, activity: 'moderate' });
-  await call('post', '/api/body', { date: today, weight: 84.6 });
+  // No data in «Замеры» yet: the tab asks once and saves it there.
   await p.getByRole('tab', { name: 'Рацион' }).click();
+  await p.locator('.ration-account').waitFor({ timeout: 10000 });
+  await p.getByRole('group', { name: 'Пол' }).getByRole('button', { name: 'Мужчина' }).click();
+  await p.locator('#ration-height').fill('182');
+  await p.locator('#ration-year').fill(String(new Date().getFullYear() - 36));
+  await p.locator('#ration-weight').fill('84,6');
+  await p.locator('.ration-account select').selectOption('moderate');
+  await p.getByRole('button', { name: 'Сохранить и открыть рацион' }).click();
   const f = p.frameLocator('.ration-box iframe');
   await f.getByRole('heading', { name: /Недельный рацион/ }).waitFor({ timeout: 20000 });
-  const fields = await f.locator('input.field').evaluateAll((els) => els.map((e) => e.value));
-  expect(fields.includes('84.6') && fields.includes('182') && fields.includes('36'), 'the questionnaire has his weight, height and age from «Замеры»', fields);
+  const body = await call('get', '/api/body');
+  expect(body.profile?.heightCm === 182 && body.profile?.sex === 'm' && body.entries.some((e) => e.date === today && e.weight === 84.6), 'saved to his «Замеры»', [body.profile, body.entries.slice(-1)]);
+  const account = (await f.getByTestId('from-account').innerText()).replace(/\s+/g, ' ');
+  expect(/мужчина, 36 лет, рост 182 см, вес 84,6 кг/.test(account) && (await f.locator('input.field').count()) === 0, 'the questionnaire shows his data from the account, not to be typed', account);
   const intro = await f.locator('header').first().innerText();
   expect(!/Новосибирск|Сибир/.test(intro), 'no city in the intro', intro.slice(0, 160));
   for (let i = 0; i < 4; i++) await f.getByRole('button', { name: 'Дальше' }).click();
@@ -1476,6 +1484,17 @@ await scenario('39. Рацион во вкладке клиента: данны�
   await p.getByRole('tab', { name: 'Рацион' }).click();
   await f.getByRole('heading', { name: 'Рацион на неделю' }).waitFor({ timeout: 20000 });
   expect(true, 'the app opened again: the menu shows at once, nothing to work out');
+  // The weight in «Замеры» went down by 2 kg: the ration says so and is rebuilt in one tap.
+  await call('post', '/api/body', { date: today, weight: 82.4 });
+  await p.reload();
+  await p.waitForSelector('.subtabs', { timeout: 30000 });
+  await p.waitForTimeout(1500);
+  await p.getByRole('tab', { name: 'Рацион' }).click();
+  await f.getByText(/изменились данные профиля \(вес 84,6 → 82,4 кг\)/).waitFor({ timeout: 20000 });
+  await f.getByRole('button', { name: 'Пересобрать' }).click();
+  await f.getByText(/изменились данные профиля/).waitFor({ state: 'detached', timeout: 90000 });
+  const head = (await f.getByRole('heading', { name: 'Рацион на неделю' }).locator('xpath=..').innerText()).replace(/\s+/g, ' ');
+  expect(/82(,|\.)4 кг/.test(head), 'weight changed in «Замеры»: «Пересобрать» — the ration for 82.4 kg', head.slice(0, 120));
   const box = await p.locator('.ration-box').boundingBox();
   const over = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   expect(box && box.height >= 420 && over <= 1, 'the ration fills the screen under the tabs, nothing sideways', [box?.height, over]);

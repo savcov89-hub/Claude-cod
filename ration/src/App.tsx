@@ -63,6 +63,16 @@ export default function App() {
   };
   const retier = (t: Tier) => { const p = { ...profile, tier: t }; setProfile(p); void run(p); };
   const needsPlan = view === "week" || view === "shop" || view === "norms";
+  // Во вкладке Training Log пол, возраст, рост и вес — из «Замеров»; вес ушёл на килограмм и больше — рацион пора пересобрать.
+  const fromAccount = !!embed && ["sex", "age", "heightCm", "weightKg"].every((k) => k in embed.always);
+  const changed = plan && fromAccount
+    ? [
+        Math.abs(plan.profile.weightKg - profile.weightKg) >= 1 && `вес ${String(plan.profile.weightKg).replace(".", ",")} → ${String(profile.weightKg).replace(".", ",")} кг`,
+        plan.profile.age !== profile.age && `возраст ${profile.age}`,
+        plan.profile.heightCm !== profile.heightCm && `рост ${profile.heightCm} см`,
+        plan.profile.sex !== profile.sex && "пол",
+      ].filter(Boolean).join(", ")
+    : "";
 
   return (
     <div className={embed ? "app embedded" : "app"}>
@@ -81,7 +91,9 @@ export default function App() {
       <main className="main">
         {error && <div className="rounded-[10px] bg-danger-soft p-3 text-sm text-danger">Ошибка: {error}</div>}
 
-        {view === "form" && <Questionnaire profile={profile} onChange={setProfile} onSubmit={() => run(profile)} busy={busy} products={products} />}
+        {view === "form" && (
+          <Questionnaire profile={profile} onChange={setProfile} onSubmit={() => run(profile)} busy={busy} products={products} fromAccount={fromAccount} />
+        )}
 
         {needsPlan && !plan && (
           <section className="card grid gap-3">
@@ -93,6 +105,12 @@ export default function App() {
         {needsPlan && plan && plan.solverStatus !== "Optimal" && <SolverFailed plan={plan} onBack={() => setView("form")} />}
         {needsPlan && plan && plan.solverStatus === "Optimal" && (
           <>
+            {changed && (
+              <div className="no-print flex flex-wrap items-center justify-between gap-2 rounded-[10px] bg-warn-soft p-3 text-sm">
+                <span>С прошлого расчёта изменились данные профиля ({changed}). Рацион собран по старым.</span>
+                <button className="btn btn-sm" disabled={busy} onClick={() => void run(profile)}>{busy ? "Считаем…" : "Пересобрать"}</button>
+              </div>
+            )}
             <ResultHeader plan={plan} products={products} onEdit={() => setView("form")} onPrint={embed ? () => window.print() : undefined} compact={view !== "week"} />
             {view === "week" && <WeekView plan={plan} products={products} />}
             {view === "shop" && <ShopView plan={plan} products={products} onRetier={retier} busy={busy} />}

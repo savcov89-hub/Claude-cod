@@ -4,11 +4,15 @@ import { energyPlan } from "../core";
 import { Card, Chip, Field, Segmented } from "./bits";
 import { ACTIVITY, CKD, DIABETES, EXCLUSIONS, GOAL, LACTATION, PREGNANCY, TIER, CATEGORY_LABEL, CATEGORY_ORDER } from "./labels";
 
-interface Props { profile: Profile; onChange: (p: Profile) => void; onSubmit: () => void; busy: boolean; products: Product[] }
+interface Props {
+  profile: Profile; onChange: (p: Profile) => void; onSubmit: () => void; busy: boolean; products: Product[];
+  /** Во вкладке Training Log: пол, возраст, рост и вес — из аккаунта клиента («Замеры»), здесь не меняются. */
+  fromAccount?: boolean;
+}
 
 const STEPS = ["Профиль", "Цель и бюджет", "Здоровье", "Исключения", "Проверка"];
 
-export default function Questionnaire({ profile: p, onChange, onSubmit, busy, products }: Props) {
+export default function Questionnaire({ profile: p, onChange, onSubmit, busy, products, fromAccount = false }: Props) {
   const [step, setStep] = useState(0);
   const set = <K extends keyof Profile>(k: K, v: Profile[K]) => onChange({ ...p, [k]: v });
   const toggleEx = (id: Exclusion) => set("exclusions", p.exclusions.includes(id) ? p.exclusions.filter((e) => e !== id) : [...p.exclusions, id]);
@@ -45,14 +49,23 @@ export default function Questionnaire({ profile: p, onChange, onSubmit, busy, pr
 
       {step === 0 && (
         <Card className="grid gap-5">
-          <Field label="Пол">
-            <Segmented value={p.sex} onChange={(v) => set("sex", v)} options={[{ value: "female", label: "Женский" }, { value: "male", label: "Мужской" }]} />
-          </Field>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field input label="Возраст, лет"><input className="field num" type="number" min={18} max={100} value={p.age} onChange={(e) => set("age", +e.target.value)} /></Field>
-            <Field input label="Рост, см"><input className="field num" type="number" min={130} max={220} value={p.heightCm} onChange={(e) => set("heightCm", +e.target.value)} /></Field>
-            <Field input label="Вес, кг"><input className="field num" type="number" min={35} max={250} step={0.5} value={p.weightKg} onChange={(e) => set("weightKg", +e.target.value)} /></Field>
-          </div>
+          {fromAccount ? (
+            <div className="rounded-[10px] bg-surface-2 p-3 text-sm" data-testid="from-account">
+              <b>Из вашего профиля:</b> {p.sex === "female" ? "женщина" : "мужчина"}, {p.age} лет, рост {p.heightCm} см, вес {String(p.weightKg).replace(".", ",")} кг
+              <span className="mt-1 block text-muted">Вес — средний за неделю из «Замеров». Изменить данные — во вкладке «Замеры».</span>
+            </div>
+          ) : (
+            <>
+              <Field label="Пол">
+                <Segmented value={p.sex} onChange={(v) => set("sex", v)} options={[{ value: "female", label: "Женский" }, { value: "male", label: "Мужской" }]} />
+              </Field>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Field input label="Возраст, лет"><input className="field num" type="number" min={18} max={100} value={p.age} onChange={(e) => set("age", +e.target.value)} /></Field>
+                <Field input label="Рост, см"><input className="field num" type="number" min={130} max={220} value={p.heightCm} onChange={(e) => set("heightCm", +e.target.value)} /></Field>
+                <Field input label="Вес, кг"><input className="field num" type="number" min={35} max={250} step={0.5} value={p.weightKg} onChange={(e) => set("weightKg", +e.target.value)} /></Field>
+              </div>
+            </>
+          )}
           <Field label="Физическая активность" hint="Группы по МР 2.3.1.0253‑21. Энергия считается по Миффлину – Сан Жеору × КФА.">
             <Segmented value={p.activity} onChange={(v) => set("activity", v)} options={(Object.keys(ACTIVITY) as Array<keyof typeof ACTIVITY>).map((k) => ({ value: k, ...ACTIVITY[k] }))} />
           </Field>
