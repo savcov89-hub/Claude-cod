@@ -172,7 +172,7 @@ export default function App() {
                 <button className="btn btn-sm" disabled={busy} onClick={() => void run(profile)}>{busy ? "Считаем…" : "Пересобрать"}</button>
               </div>
             )}
-            {embed && (
+            {embed && (embed.role === "client" || embed.assign) && (
               <HostBar
                 role={embed.role} name={embed.name} info={info} assigned={assigned} assigning={assigning} error={assignError}
                 onAssign={assign} onShow={() => assigned && adopt(assigned)}
@@ -188,7 +188,7 @@ export default function App() {
 
         <footer className="pt-4 text-xs text-muted">
           <p>Приложение не является медицинской услугой и не заменяет консультацию врача или диетолога. При хронических заболеваниях, беременности и приёме лекарств согласуйте рацион с лечащим врачом.</p>
-          <p className="mt-1">Нормы: МР 2.3.1.0253‑21, ВОЗ, KDIGO 2024, КР Минздрава (ХБП 2024, Ожирение 2024, СД2 2022), ADA 2026. Состав продуктов: USDA FoodData Central. {embed?.role === "trainer"
+          <p className="mt-1">Нормы: МР 2.3.1.0253‑21, ВОЗ, KDIGO 2024, КР Минздрава (ХБП 2024, Ожирение 2024, СД2 2022), ADA 2026. Состав продуктов: USDA FoodData Central. {embed?.role === "trainer" && embed.assign
             ? "Расчёты выполняются в браузере. Назначенный рацион вместе с ответами опросника сохраняется в дневнике клиента — его видят только клиент и тренер."
             : "Расчёты выполняются в вашем браузере, данные никуда не отправляются."}</p>
         </footer>

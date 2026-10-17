@@ -3,6 +3,7 @@
 // loses focus, taps that take long to answer.
 //   npm run dev  (or APP=…)   then   node scripts/check-ui.mjs [--slow=4] [--shots=dir]
 import { chromium } from 'playwright';
+import { readFileSync } from 'node:fs';
 
 const APP = process.env.APP || 'http://127.0.0.1:5173/?demo=1';
 const arg = (k, d) => (process.argv.find((a) => a.startsWith('--' + k + '=')) || '').split('=')[1] || d;
@@ -1436,12 +1437,22 @@ await scenario('38. Замеры: вес по неделям за 4 недели
   await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click().catch(() => {});
 });
 
-await scenario('39. Рацион во вкладке клиента: данные из «Замеров», меню на неделю, цены без привязки к городу', async () => {
-  await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
-  await p.waitForTimeout(1500);
-  const today = await p.evaluate(() => new Date().toLocaleDateString('sv-SE'));
-  // No data in «Замеры» yet: the tab asks once and saves it there.
+// Clients have «Рацион» only while src/ui/Ration.tsx says so (hidden for now: built in the trainer's card).
+const rationForClients = /RATION_FOR_CLIENTS = true/.test(readFileSync(new URL('../src/ui/Ration.tsx', import.meta.url), 'utf8'));
+const openRation = async (name) => {
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(500);
+  await p.locator('.client-row', { hasText: name }).first().locator('.client-open').click();
+  await p.waitForTimeout(900);
   await p.getByRole('tab', { name: 'Рацион' }).click();
+};
+
+await scenario('39. Рацион в карточке клиента: данные из «Замеров», меню на неделю, цены без привязки к городу', async () => {
+  const today = await p.evaluate(() => new Date().toLocaleDateString('sv-SE'));
+  const alex = (await call('get', '/api/clients')).clients.find((c) => c.clientName === 'Александр');
+  const q = '?clientId=' + encodeURIComponent(alex.clientId);
+  // No data in his «Замеры» yet: the tab asks once and saves it there.
+  await openRation('Александр');
   await p.locator('.ration-account').waitFor({ timeout: 10000 });
   await p.getByRole('group', { name: 'Пол' }).getByRole('button', { name: 'Мужчина' }).click();
   await p.locator('#ration-height').fill('182');
@@ -1451,10 +1462,10 @@ await scenario('39. Рацион во вкладке клиента: данны�
   await p.getByRole('button', { name: 'Сохранить и открыть рацион' }).click();
   const f = p.frameLocator('.ration-box iframe');
   await f.getByRole('heading', { name: /Недельный рацион/ }).waitFor({ timeout: 20000 });
-  const body = await call('get', '/api/body');
+  const body = await call('get', '/api/body' + q);
   expect(body.profile?.heightCm === 182 && body.profile?.sex === 'm' && body.entries.some((e) => e.date === today && e.weight === 84.6), 'saved to his «Замеры»', [body.profile, body.entries.slice(-1)]);
   const account = (await f.getByTestId('from-account').innerText()).replace(/\s+/g, ' ');
-  expect(/мужчина, 36 лет, рост 182 см, вес 84,6 кг/.test(account) && (await f.locator('input.field').count()) === 0, 'the questionnaire shows his data from the account, not to be typed', account);
+  expect(/клиента \(Александр\).*мужчина, 36 лет, рост 182 см, вес 84,6 кг/.test(account) && (await f.locator('input.field').count()) === 0, 'the questionnaire shows his data from «Замеры», not to be typed', account);
   const intro = await f.locator('header').first().innerText();
   expect(!/Новосибирск|Сибир/.test(intro), 'no city in the intro', intro.slice(0, 160));
   for (let i = 0; i < 4; i++) await f.getByRole('button', { name: 'Дальше' }).click();
@@ -1463,33 +1474,34 @@ await scenario('39. Рацион во вкладке клиента: данны�
   await f.getByRole('button', { name: 'Собрать рацион на неделю' }).click();
   await f.getByRole('heading', { name: 'Рацион на неделю' }).waitFor({ timeout: 90000 });
   expect(await f.getByText(/84,6 кг|84.6 кг/).count() > 0, 'the week is worked out for 84.6 kg');
-  await f.getByRole('button', { name: 'Покупки' }).click();
+  const sections = f.getByRole('navigation', { name: 'Разделы' });
+  await sections.getByRole('button', { name: 'Покупки' }).click();
   await p.waitForTimeout(800);
   const shop = (await f.locator('main').innerText()).replace(/\s+/g, ' ');
   expect(/Цены примерные/.test(shop) && !/Новосибирск|НГС|Сибир/.test(shop), 'shopping list: prices are approximate, no city', shop.match(/Цены[^.]*\./)?.[0]);
-  await f.getByRole('button', { name: 'Источники' }).click();
+  await sections.getByRole('button', { name: 'Источники' }).click();
   await p.waitForTimeout(500);
   const sources = await f.locator('main').innerText();
   expect(!/Новосибирск|НГС|Сибир/.test(sources), 'sources: no city either');
   // Another tab and back: the menu is still there; after the app is opened again — too (kept on the phone).
-  await f.getByRole('button', { name: 'Меню' }).click();
-  await p.getByRole('tab', { name: 'Тренировка' }).click();
+  await sections.getByRole('button', { name: 'Меню' }).click();
+  await p.getByRole('tab', { name: 'Обзор' }).click();
   await p.waitForTimeout(500);
   await p.getByRole('tab', { name: 'Рацион' }).click();
   await p.waitForTimeout(500);
   expect(await f.getByRole('heading', { name: 'Рацион на неделю' }).isVisible(), 'back on the tab: the same menu');
-  await p.reload();
-  await p.waitForSelector('.nav, .subtabs', { timeout: 30000 });
-  await p.waitForTimeout(1500);
-  await p.getByRole('tab', { name: 'Рацион' }).click();
+  const reopen = async () => {
+    await p.reload();
+    await p.waitForSelector('.nav', { timeout: 30000 });
+    await p.waitForTimeout(1500);
+    await openRation('Александр');
+  };
+  await reopen();
   await f.getByRole('heading', { name: 'Рацион на неделю' }).waitFor({ timeout: 20000 });
   expect(true, 'the app opened again: the menu shows at once, nothing to work out');
   // The weight in «Замеры» went down by 2 kg: the ration says so and is rebuilt in one tap.
-  await call('post', '/api/body', { date: today, weight: 82.4 });
-  await p.reload();
-  await p.waitForSelector('.subtabs', { timeout: 30000 });
-  await p.waitForTimeout(1500);
-  await p.getByRole('tab', { name: 'Рацион' }).click();
+  await call('post', '/api/body', { date: today, weight: 82.4, clientId: alex.clientId });
+  await reopen();
   await f.getByText(/изменились данные профиля \(вес 84,6 → 82,4 кг\)/).waitFor({ timeout: 20000 });
   await f.getByRole('button', { name: 'Пересобрать' }).click();
   await f.getByText(/изменились данные профиля/).waitFor({ state: 'detached', timeout: 90000 });
@@ -1498,11 +1510,10 @@ await scenario('39. Рацион во вкладке клиента: данны�
   const box = await p.locator('.ration-box').boundingBox();
   const over = await p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   expect(box && box.height >= 420 && over <= 1, 'the ration fills the screen under the tabs, nothing sideways', [box?.height, over]);
-  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
-  await p.waitForTimeout(800);
+  await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click();
 });
 
-await scenario('40. Рацион от тренера: собрать в карточке клиента, назначить, клиент видит у себя', async () => {
+await scenario('40. Рацион от тренера: собрать в карточке клиента; клиенту — пока скрыт (или назначить, и клиент видит у себя)', async () => {
   await p.setViewportSize({ width: 390, height: 844 });
   const clients = (await call('get', '/api/clients')).clients;
   const maria = clients.find((c) => c.clientName === 'Мария');
@@ -1535,17 +1546,6 @@ await scenario('40. Рацион от тренера: собрать в карт
   await f.getByRole('button', { name: 'Дальше' }).click();
   await f.getByRole('button', { name: 'Собрать рацион на неделю' }).click();
   await f.getByRole('heading', { name: 'Рацион на неделю' }).waitFor({ timeout: 90000 });
-  const bar = f.getByTestId('assign-bar');
-  expect(/Мария увидит рацион/.test(await bar.innerText()), 'not assigned yet: says who will see it', await bar.innerText());
-  const stats = async () => {
-    const t = (await f.getByRole('heading', { name: 'Рацион на неделю' }).locator('xpath=../../..').innerText()).replace(/\s+/g, ' ');
-    return t.slice(t.indexOf('Рацион на неделю'), t.indexOf('Приложение не является'));
-  };
-  const built = await stats();
-  await f.getByRole('button', { name: 'Назначить клиенту' }).click();
-  await f.getByText(/Назначен клиенту .* Мария видит его во вкладке «Рацион»/).waitFor({ timeout: 10000 });
-  const saved = (await call('get', '/api/ration?clientId=' + encodeURIComponent(maria.clientId))).ration;
-  expect(saved?.plan?.profile?.weightKg === 61.2 && saved.plan.solverStatus === 'Optimal' && saved.trainerName, 'the ration is kept for her on the server', saved && [saved.assignedAt, saved.trainerName]);
   const box = await p.locator('.ration-box').boundingBox();
   const nav = await p.locator('.app > .nav').boundingBox();
   expect(box && nav && box.height >= 420 && box.y + box.height <= nav.y + 1, 'the frame ends above the trainer\'s menu', [box, nav?.y]);
@@ -1557,6 +1557,33 @@ await scenario('40. Рацион от тренера: собрать в карт
   expect(/Цены примерные/.test(await f.locator('main').innerText()), 'the top tab «Покупки» opens the shopping list');
   await f.getByRole('navigation', { name: 'Разделы' }).getByRole('button', { name: 'Меню' }).click();
   await p.waitForTimeout(400);
+  if (!rationForClients) {
+    // Hidden from clients for now: nothing to assign, and her app has no «Рацион».
+    expect((await f.getByTestId('assign-bar').count()) === 0 && (await f.getByRole('button', { name: 'Назначить клиенту' }).count()) === 0, 'clients do not see rations yet: no «Назначить клиенту»');
+    await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click();
+    await p.locator('.testbar').getByRole('button', { name: 'Клиент' }).click();
+    await p.waitForTimeout(800);
+    await p.locator('#demo-client').selectOption({ label: 'Мария' });
+    await p.waitForTimeout(1500);
+    expect((await p.getByRole('tab', { name: 'Рацион' }).count()) === 0 && (await p.getByRole('tab', { name: 'Замеры' }).count()) === 1, 'her app: no «Рацион» tab for now');
+    await p.locator('#demo-client').selectOption({ label: 'Александр' });
+    await p.waitForTimeout(800);
+    expect((await p.getByRole('tab', { name: 'Рацион' }).count()) === 0, 'his app: no «Рацион» tab either');
+    await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+    await p.waitForTimeout(800);
+    return;
+  }
+  const bar = f.getByTestId('assign-bar');
+  expect(/Мария увидит рацион/.test(await bar.innerText()), 'not assigned yet: says who will see it', await bar.innerText());
+  const stats = async () => {
+    const t = (await f.getByRole('heading', { name: 'Рацион на неделю' }).locator('xpath=../../..').innerText()).replace(/\s+/g, ' ');
+    return t.slice(t.indexOf('Рацион на неделю'), t.indexOf('Приложение не является'));
+  };
+  const built = await stats();
+  await f.getByRole('button', { name: 'Назначить клиенту' }).click();
+  await f.getByText(/Назначен клиенту .* Мария видит его во вкладке «Рацион»/).waitFor({ timeout: 10000 });
+  const saved = (await call('get', '/api/ration?clientId=' + encodeURIComponent(maria.clientId))).ration;
+  expect(saved?.plan?.profile?.weightKg === 61.2 && saved.plan.solverStatus === 'Optimal' && saved.trainerName, 'the ration is kept for her on the server', saved && [saved.assignedAt, saved.trainerName]);
   // Another tab of the card and back: the assigned ration is still there.
   await p.getByRole('tab', { name: 'Обзор' }).click();
   await p.waitForTimeout(400);

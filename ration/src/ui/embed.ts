@@ -9,6 +9,8 @@ export interface Embed {
   /** Кто открыл: клиент у себя или тренер в карточке клиента (`name` — имя клиента). */
   role: "client" | "trainer";
   name: string;
+  /** Тренер может назначить рацион клиенту (у клиентов есть вкладка «Рацион»). */
+  assign: boolean;
   /** У дневника своё меню внизу: разделы рациона — вкладками сверху. */
   menu: "top" | "bottom";
   theme: "light" | "dark" | null;
@@ -47,6 +49,7 @@ export function readEmbed(): Embed | null {
     key: (q.get("key") || "").slice(0, 120),
     role: q.get("role") === "trainer" ? "trainer" : "client",
     name: (q.get("name") || "").slice(0, 80),
+    assign: q.get("assign") === "1",
     menu: q.get("menu") === "top" ? "top" : "bottom",
     theme: theme === "dark" || theme === "light" ? theme : null,
     always,

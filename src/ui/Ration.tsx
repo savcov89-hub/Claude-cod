@@ -10,6 +10,12 @@ const tagOf = (s: string) => {
   return s ? h.toString(36) : '';
 };
 
+/**
+ * Clients have the «Рацион» tab, and the trainer can assign a ration to them. Off for now (the owner's call): the
+ * trainer builds rations in the client's card, clients do not see the tab, and there is no «Назначить клиенту».
+ */
+export const RATION_FOR_CLIENTS = false;
+
 /** The trainer in the client's card: whose ration is built there (the client's name). */
 interface ForClient {
   clientId: string;
@@ -22,6 +28,7 @@ function rationSrc(person: string, profile: BodyProfile, weight: number, forClie
   if (forClient) {
     q.set('role', 'trainer');
     q.set('name', forClient.clientName);
+    if (RATION_FOR_CLIENTS) q.set('assign', '1');
   }
   // The app has its own menu at the bottom (the trainer's): the ration's sections go on top, not as a second row.
   if (document.querySelector('.app.has-nav > .nav')) q.set('menu', 'top');

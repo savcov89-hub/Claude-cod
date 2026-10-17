@@ -24,8 +24,8 @@
 - Изменения подсчёта объёма и программы по объёму (`src/volume.ts`, `src/volumePlanner.ts`, мышцы упражнений):
   `npx tsx scripts/check-volume.ts`.
 - Изменения слияния программы с правками из зала (`src/programMerge.ts`): `npx tsx scripts/check-merge.ts`.
-- «Рацион» (`ration/`): `npm run test:ration` (нормы на 7 профилях) и check-ui сценарии 39 (вкладка клиента)
-  и 40 (тренер назначает рацион).
+- «Рацион» (`ration/`): `npm run test:ration` (нормы на 7 профилях) и check-ui сценарии 39 (карточка клиента у тренера)
+  и 40 (у клиентов скрыт; с `RATION_FOR_CLIENTS = true` — тренер назначает, клиент видит).
 - Картинки упражнений (`src/ui/figure/`): `npx tsx scripts/check-figures.tsx лист.html фото/` — суставы, опора, равновесие,
   и посмотреть лист глазами рядом с фото из `scripts/figure-refs.json`.
 - Изменения прогрессии или журнала: `npx tsx scripts/simulate-month.ts отчёт.md` — 30 клиентов, месяц Пн/Ср/Пт;
@@ -56,9 +56,11 @@
   (`mergeProgramDays(base, mine, theirs, log)`).
 - Замеры (`src/body.ts`): `rangeSeries` — график за период (до месяца по дням, дальше по неделям пн–вс), `weeksBack` —
   последние 4 недели; в интерфейсе — check-ui сценарий 38.
-- «Рацион» (`ration/`, из репозитория Diet): отдельная страница `dist/ration/` в рамке вкладки клиента «Рацион»
-  (`src/ui/Ration.tsx`): данные из «Замеров» после `#` (`embed=1&key&sex&age&h&w&act&strength&theme`), ответы и последний
-  рацион — в localStorage по `key`. Стили — Tailwind 4 только там (`ration/vite.config.ts`), service worker её не трогает.
+- «Рацион» (`ration/`, из репозитория Diet): отдельная страница `dist/ration/` в рамке вкладки «Рацион»
+  (`src/ui/Ration.tsx`). У клиентов вкладка пока скрыта по просьбе владельца (`RATION_FOR_CLIENTS = false`: нет вкладки
+  у клиента и кнопки «Назначить клиенту», `assign=1` не передаётся) — работает только в карточке клиента у тренера.
+  Данные из «Замеров» после `#` (`embed=1&key&sex&age&h&w&act&strength&theme`), ответы и последний рацион —
+  в localStorage по `key`. Стили — Tailwind 4 только там (`ration/vite.config.ts`), service worker её не трогает.
   Цены примерные, без привязки к городу — так и писать в текстах.
   Тренер — та же страница в карточке клиента (`role=trainer&name`), данные из «Замеров» клиента; у дневника своё меню
   внизу — разделы рациона строкой сверху (`menu=top`, класс `.app.menu-top`). «Назначить клиенту»:

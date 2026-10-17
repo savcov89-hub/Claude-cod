@@ -9,7 +9,7 @@ import { ProgressView } from './Progress';
 import { PhasesBlock } from './Phases';
 import { HistoryList } from './History';
 import { BodyView } from './Body';
-import { RationTab } from './Ration';
+import { RATION_FOR_CLIENTS, RationTab } from './Ration';
 import { Avatar, Empty, VisitGrid, autoFinishedText, fmtDate } from './common';
 import { RecordsSheet } from './Records';
 import type { PersonalRecord } from '../analytics';
@@ -237,8 +237,8 @@ export function ClientApp({ profile, header, onSwitchRole }: { profile: Profile;
                   ['progress', 'Прогресс'],
                   ['history', 'История'],
                   ['body', 'Замеры'],
-                  // The ration is a page of its own, not in the one-file test build.
-                  ...(isArtifactBuild ? [] : [['ration', 'Рацион']]),
+                  // The ration is a page of its own, not in the one-file test build; hidden from clients for now.
+                  ...(isArtifactBuild || !RATION_FOR_CLIENTS ? [] : [['ration', 'Рацион']]),
                 ] as [Tab, string][]
               ).map(([k, label]) => (
                 <button
