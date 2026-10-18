@@ -148,6 +148,7 @@
   (`POST /api/client/:id/ration`), клиент получает его через `GET /api/ration` и видит с пометкой «от тренера».
   Цены — `ration/data/etl/catalog.py` (в приложении подписаны как примерные), после правки:
   `python3 ration/data/etl/build_products.py` (скачает состав продуктов USDA, 6 МБ) → `ration/src/data/products.json`.
+  Как считается рацион, данные, источники и ограничения — `ration/README.md`; исходный план и идеи — `ration/docs/PLAN.md`.
 
 ## Команды
 - `npm run check` — проверка типов.
