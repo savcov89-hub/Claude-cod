@@ -14,13 +14,22 @@ export function dayRange(days: number[]): string {
 }
 /** «Гречка (ядрица)» → «Гречка»: в меню хватает короткого названия */
 export const shortName = (p: Product) => p.name.replace(/\s*\([^)]*\)/g, "").replace(/\s*«[^»]*»/g, "").trim();
-/** «110 г · 2 шт.» для штучного */
+const frac = (r: number) => { const w = Math.floor(r), h = r - w >= 0.5 ? "½" : ""; return w ? `${w}${h}` : h || "0"; };
+/** «110 г · 2 шт.» для штучного, «20 г · ½ шт.» для сладостей по половинке */
 export function amount(id: string, grams: number): string {
   const u = UNITS[id];
   if (!u || grams < u[0] * 0.4) return fmtG(grams);
   const n = grams / u[0];
-  const r = Math.max(1, Math.round(n * 2) / 2);
-  return `${fmtG(grams)} · ${Math.abs(r - n) / n > 0.1 ? "≈" : ""}${String(r).replace(".", ",")} ${u[1]}`;
+  const r = Math.max(0.5, Math.round(n * 2) / 2);
+  return `${fmtG(grams)} · ${Math.abs(r - n) / n > 0.1 ? "≈" : ""}${frac(r)} ${u[1]}`;
+}
+/** Масло и соль на кухне меряют ложками: столовая ≈ 14 г масла, чайная ≈ 5 г масла или 6 г соли. */
+export function spoons(id: string, grams: number): string {
+  const q = (v: number) => { const w = Math.floor(v), f = v - w; const t = f < 0.125 ? "" : f < 0.375 ? "¼" : f < 0.625 ? "½" : f < 0.875 ? "¾" : ""; return `${f >= 0.875 ? w + 1 : w || ""}${t}` || "¼"; };
+  if (id === "salt_iodized") return grams < 1.5 ? "щепотка" : `${q(grams / 6)} ч. л.`;
+  const half = (v: number) => frac(Math.max(0.5, Math.round(v * 2) / 2));
+  if (id === "sunflower_oil" || id === "olive_oil" || id === "flax_oil") return grams >= 14 ? `${half(grams / 14)} ст. л.` : `${half(grams / 5)} ч. л.`;
+  return "";
 }
 export const fmtMin = (m: number) => (m < 60 ? `${m} мин` : `${Math.floor(m / 60)} ч${m % 60 ? ` ${m % 60} мин` : ""}`);
 const SESSION: Record<SessionDay, { title: string; eve: string }> = {
@@ -204,7 +213,11 @@ function Ingredients({ items, byId, note }: { items: MealItem[]; byId: Map<strin
           </div>
         );
       })}
-      {pantry.length > 0 && <div className="mt-1 text-xs text-muted">{pantry.map((it) => `${byId.get(it.productId) ? shortName(byId.get(it.productId)!).toLowerCase() : it.productId} ${fmtG(it.grams)}`).join(", ")}</div>}
+      {pantry.length > 0 && <div className="mt-1 text-xs text-muted">{pantry.map((it) => {
+        const name = byId.get(it.productId) ? shortName(byId.get(it.productId)!).toLowerCase() : it.productId;
+        const sp = spoons(it.productId, it.grams);
+        return it.productId === "salt_iodized" ? `${name} ${sp}` : `${name} ${fmtG(it.grams)}${sp ? ` (≈${sp})` : ""}`;
+      }).join(", ")}</div>}
     </div>
   );
 }

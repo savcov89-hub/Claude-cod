@@ -1,6 +1,7 @@
 import { TREAT_KCAL, type Day, type MealItem, type MenuPlan, type NutrientKey, type PlanAddon, type PlanDish, type Product, type Targets, type Tier } from "./types";
 import { ADDONS, COMP_RANGE, DISHES, type Comp, type Dish, type Slot } from "./recipes";
 import { LAYOUT } from "./planner";
+import { humanGrams, repairRounding, type Adjustable } from "./portions";
 import { isFruit, isVegetable, type LpInput, type LpSolution, type SolveFn } from "./solver";
 
 /**
@@ -318,6 +319,7 @@ function readSolution(input: LpInput, built: ReturnType<typeof buildMenuLp>, col
   const { pairs, layout, byId } = built;
   const val = (v: string) => col[v] ?? 0;
   const dishes: PlanDish[] = [];
+  const raw = new Map<string, number>();
   for (let k = 0; k < layout.length; k++) {
     const chosen = pairs.filter((p) => p.k === k && Math.round(val(`d${p.j}_${p.k}`)) > 0);
     if (chosen.reduce((a, p) => a + Math.round(val(`d${p.j}_${p.k}`)), 0) !== 7) return null;
@@ -331,7 +333,7 @@ function readSolution(input: LpInput, built: ReturnType<typeof buildMenuLp>, col
       dishes.push({
         dish: p.dish.id, name: p.dish.name, slot: k,
         days: Array.from({ length: n }, (_, i) => start + i),
-        serving: [...serving.entries()].filter(([, g]) => g > 0.05).map(([productId, g]) => ({ productId, grams: round(g) })),
+        serving: [...serving.entries()].map(([productId, g]) => { raw.set(`${k}:${p.dish.id}:${productId}`, g); return { productId, grams: humanGrams(byId.get(productId)!, g) }; }).filter((x) => x.grams > 0),
       });
       start += n;
     }
@@ -346,12 +348,17 @@ function readSolution(input: LpInput, built: ReturnType<typeof buildMenuLp>, col
   const addons: PlanAddon[] = [];
   for (const a of built.addons) {
     const g = val(`a_${a.id}`);
-    if (g > 1) addons.push({ productId: a.id, perDay: round(g / 7), slot: slotOf(a.slot) });
+    if (g > 1) { addons.push({ productId: a.id, perDay: humanGrams(a.p, g / 7), slot: slotOf(a.slot) }); raw.set(`+${a.id}`, g / 7); }
   }
   for (const t of built.treats) {
     const g = val(`t_${t.id}`);
-    if (g > 1) addons.push({ productId: t.id, perDay: round(g / 7), slot: slotOf("snack"), treat: true });
+    if (g > 1) { addons.push({ productId: t.id, perDay: humanGrams(t, g / 7), slot: slotOf("snack"), treat: true }); raw.set(`+${t.id}`, g / 7); }
   }
+  // Граммы округлены по-человечески — калории и пределы поправить шагами округления
+  repairRounding([
+    ...dishes.flatMap((d) => d.serving.map((it): Adjustable => ({ p: byId.get(it.productId)!, grams: it.grams, raw: raw.get(`${d.slot}:${d.dish}:${it.productId}`) ?? it.grams, count: d.days.length, set: (g) => { it.grams = g; } }))),
+    ...addons.map((a): Adjustable => ({ p: byId.get(a.productId)!, grams: a.perDay, raw: raw.get(`+${a.productId}`) ?? a.perDay, count: 7, set: (g) => { a.perDay = g; } })),
+  ], input.targets);
 
   const days: Day[] = Array.from({ length: 7 }, (_, i) => ({
     index: i,

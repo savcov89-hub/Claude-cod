@@ -43,4 +43,5 @@ export const EXCLUSIONS: Array<{ id: Exclusion; label: string; hint?: string }> 
 export const DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 export const fmtInt = (v: number) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(v);
 export const fmtRub = (v: number) => `${fmtInt(v)} ₽`;
-export const fmtG = (v: number) => (v < 20 ? v.toFixed(1).replace(".", ",") : fmtInt(v)) + " г";
+/** 5 г, 17,5 г, 0,5 г — без «,0» */
+export const fmtG = (v: number) => (v < 20 ? String(Math.round(v * 10) / 10).replace(".", ",") : fmtInt(v)) + " г";

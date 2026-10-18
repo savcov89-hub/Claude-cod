@@ -1,5 +1,6 @@
 import type { Cooking, MealItem, MenuPlan } from "./types";
 import { DISH_MAP, type Step } from "./recipes";
+import { humanTotal } from "./portions";
 
 /**
  * План готовки по меню из блюд. Блюда впрок готовятся в воскресенье перед неделей (а в режиме «два раза» то, что идёт
@@ -43,7 +44,6 @@ export interface CookPlan {
 }
 
 const sum = (steps: Step[], kinds: Step["k"][]) => steps.filter((s) => kinds.includes(s.k)).reduce((a, s) => a + s.min, 0);
-const round = (g: number) => (g < 20 ? Math.round(g * 10) / 10 : Math.round(g));
 
 export function cookingPlan(menu: MenuPlan, mode: Cooking = menu.cooking ?? "once"): CookPlan {
   const sessions = new Map<SessionDay, BatchDish[]>();
@@ -83,7 +83,7 @@ export function cookingPlan(menu: MenuPlan, mode: Cooking = menu.cooking ?? "onc
       if (!sessions.has(s)) sessions.set(s, []);
       sessions.get(s)!.push({
         dish: pd.dish, name: pd.name, slot: pd.slot, portions,
-        total: pd.serving.map((it) => ({ productId: it.productId, grams: round(it.grams * days.length) })),
+        total: pd.serving.map((it) => ({ productId: it.productId, grams: humanTotal(it.productId, it.grams * days.length) })),
         steps, serve: def.serve, ahead: def.ahead,
         minutes: sum(steps, ["prep", "stove", "oven", "wait"]), active: sum(steps, ["prep"]) + Math.round(sum(steps, ["stove"]) / 2),
       });
