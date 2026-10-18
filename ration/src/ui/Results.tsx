@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { NUTRIENT_LABELS, SOURCE_MAP, compliance, dayNutrients, sumItems, toXE, weekAverage, type Compliance, type NutrientKey, type PlanResult, type Product, type Tier, type Warning } from "../core";
+import { DISH_MAP, NUTRIENT_LABELS, PANTRY, SOURCE_MAP, compliance, dayNutrients, sumItems, toXE, weekAverage, type Compliance, type CookPlan, type Meal, type NutrientKey, type PlanResult, type Product, type Tier, type Warning } from "../core";
+import { amount, fmtMin, shortName, useCookPlan } from "./Cooking";
 import { isFruit, isVegetable } from "../core/solver";
 import { Badge, Bar, Card, Icon, Stat } from "./bits";
 import { CATEGORY_LABEL, CATEGORY_ORDER, DAYS, TIER, fmtG, fmtInt, fmtRub } from "./labels";
@@ -69,6 +70,7 @@ function WarningRow({ w }: { w: Warning }) {
 
 export function WeekView({ plan, products }: { plan: PlanResult; products: Product[] }) {
   const byId = useById(products);
+  const cp = useCookPlan(plan);
   const [day, setDay] = useState(0);
   const [all, setAll] = useState(false);
   const E = plan.energy.target;
@@ -92,36 +94,86 @@ export function WeekView({ plan, products }: { plan: PlanResult; products: Produ
             </div>
             <div className="mt-2"><Bar pct={(n.kcal / E) * 100} status={Math.abs(n.kcal - E) / E < 0.1 ? "ok" : "low"} /></div>
             <div className="mt-3 grid gap-2 md:grid-cols-2">
-              {d.meals.map((m, i) => {
-                const mn = sumItems(m.items, byId);
-                return (
-                  <div key={i} className="rounded-[10px] border border-line p-3">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <h3>{m.title}</h3>
-                      <span className="num text-xs text-muted whitespace-nowrap">{fmtInt(mn.kcal)} ккал{diabetic ? ` · ${toXE(mn.carbs)} ХЕ` : ""}</span>
-                    </div>
-                    <div className="mt-1">
-                      {m.items.map((it) => {
-                        const p = byId.get(it.productId)!;
-                        return (
-                          <div key={it.productId} className="rowline text-sm">
-                            <span>{p.name}{p.tags.includes("treat") && <span className="pill ml-1.5 bg-accent-soft text-accent">десерт</span>}</span>
-                            <span className="num whitespace-nowrap text-xs text-muted">{fmtG(it.grams)} · {fmtInt((p.per100g.kcal * it.grams) / 100)} ккал</span>
-                          </div>
-                        );
-                      })}
-                      {m.items.length === 0 && <div className="text-sm text-muted">— пусто</div>}
-                    </div>
-                    <div className="mt-2 text-xs text-muted num">Б {fmtInt(mn.protein)} · Ж {fmtInt(mn.fat)} · У {fmtInt(mn.carbs)} г</div>
-                  </div>
-                );
-              })}
+              {d.meals.map((m, i) => (cp && m.dish
+                ? <DishMeal key={i} m={m} slot={i} day={d.index} cp={cp} byId={byId} diabetic={diabetic} />
+                : <ItemsMeal key={i} m={m} byId={byId} diabetic={diabetic} />))}
             </div>
           </Card>
         );
       })}
-      <p className="text-xs text-muted">Граммовки для сырых продуктов, крупы — сухие. Нормы оцениваются в среднем за неделю, отдельный день может отличаться на ±10 %.</p>
+      <p className="text-xs text-muted">Граммовки для сырых продуктов, крупы — сухие. Нормы оцениваются в среднем за неделю, отдельный день может отличаться на ±10 %.{cp ? " Как готовить блюда и что когда размораживать — в разделе «Готовка»." : ""}</p>
     </>
+  );
+}
+
+const WHERE: Record<string, { label: string; tone: "info" | "muted" | "ok" }> = {
+  fridge: { label: "из холодильника", tone: "ok" },
+  freezer: { label: "из морозилки, разморозить с вечера", tone: "info" },
+  cook: { label: "приготовить", tone: "muted" },
+  ready: { label: "без готовки", tone: "muted" },
+};
+
+/** Приём пищи из меню блюд: блюдо, где оно ждёт (холодильник, морозилка, готовить), что в порции и что к нему. */
+function DishMeal({ m, slot, day, cp, byId, diabetic }: { m: Meal; slot: number; day: number; cp: CookPlan; byId: Map<string, Product>; diabetic: boolean }) {
+  const mn = sumItems(m.items, byId);
+  const pd = cp && m.dish ? planDish(cp, m.dish, slot) : null;
+  const def = m.dish ? DISH_MAP.get(m.dish) : undefined;
+  const w = cp.where[`${slot}:${day}`];
+  const extras = new Set(m.extras ?? []);
+  const serving = pd?.serving ?? m.items.filter((it) => !extras.has(it.productId));
+  const extraItems = m.items.filter((it) => extras.has(it.productId)).map((it) => ({ ...it, grams: it.grams - (serving.find((x) => x.productId === it.productId)?.grams ?? 0) })).filter((it) => it.grams > 0.5);
+  const quick = w?.kind === "cook" && def ? ` · ${fmtMin(def.steps.reduce((a, s) => a + s.min, 0))}` : "";
+  return (
+    <div className="rounded-[10px] border border-line p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3>{m.title}</h3>
+        <span className="num text-xs text-muted whitespace-nowrap">{fmtInt(mn.kcal)} ккал{diabetic ? ` · ${toXE(mn.carbs)} ХЕ` : ""}</span>
+      </div>
+      <div className="mt-1 font-medium">{pd?.name ?? def?.name ?? m.dish}</div>
+      {w && <div className="mt-0.5"><Badge tone={WHERE[w.kind].tone}>{WHERE[w.kind].label}{quick}</Badge></div>}
+      <div className="mt-1 text-xs text-muted">{serving.filter((it) => !PANTRY.has(it.productId) && byId.has(it.productId)).map((it) => `${shortName(byId.get(it.productId)!)} ${amount(it.productId, it.grams)}`).join(" · ")}</div>
+      {extraItems.map((it) => {
+        const p = byId.get(it.productId)!;
+        return (
+          <div key={it.productId} className="rowline text-sm">
+            <span>+ {shortName(p)}{p.tags.includes("treat") && <span className="pill ml-1.5 bg-accent-soft text-accent">десерт</span>}</span>
+            <span className="num whitespace-nowrap text-xs text-muted">{amount(it.productId, it.grams)}</span>
+          </div>
+        );
+      })}
+      <div className="mt-2 text-xs text-muted num">Б {fmtInt(mn.protein)} · Ж {fmtInt(mn.fat)} · У {fmtInt(mn.carbs)} г</div>
+    </div>
+  );
+}
+function planDish(cp: CookPlan, dish: string, slot: number) {
+  for (const s of cp.sessions) for (const d of s.dishes) if (d.dish === dish && d.slot === slot) return { name: d.name, serving: d.total.map((it) => ({ ...it, grams: it.grams / d.portions.length })) };
+  for (const d of [...cp.daily, ...cp.ready]) if (d.dish === dish && d.slot === slot) return { name: d.name, serving: d.serving };
+  return null;
+}
+
+/** Приём пищи из отдельных продуктов (рацион без блюд). */
+function ItemsMeal({ m, byId, diabetic }: { m: Meal; byId: Map<string, Product>; diabetic: boolean }) {
+  const mn = sumItems(m.items, byId);
+  return (
+    <div className="rounded-[10px] border border-line p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3>{m.title}</h3>
+        <span className="num text-xs text-muted whitespace-nowrap">{fmtInt(mn.kcal)} ккал{diabetic ? ` · ${toXE(mn.carbs)} ХЕ` : ""}</span>
+      </div>
+      <div className="mt-1">
+        {m.items.map((it) => {
+          const p = byId.get(it.productId)!;
+          return (
+            <div key={it.productId} className="rowline text-sm">
+              <span>{p.name}{p.tags.includes("treat") && <span className="pill ml-1.5 bg-accent-soft text-accent">десерт</span>}</span>
+              <span className="num whitespace-nowrap text-xs text-muted">{fmtG(it.grams)} · {fmtInt((p.per100g.kcal * it.grams) / 100)} ккал</span>
+            </div>
+          );
+        })}
+        {m.items.length === 0 && <div className="text-sm text-muted">— пусто</div>}
+      </div>
+      <div className="mt-2 text-xs text-muted num">Б {fmtInt(mn.protein)} · Ж {fmtInt(mn.fat)} · У {fmtInt(mn.carbs)} г</div>
+    </div>
   );
 }
 
@@ -174,6 +226,11 @@ export function ShopView({ plan, products, onRetier, busy }: { plan: PlanResult;
           );
         })}
       </Card>
+      {plan.menu && (
+        <div className="rounded-[10px] bg-info-soft p-3 text-sm">
+          Всё на неделю — одним походом перед воскресной готовкой: {Object.keys(plan.basket).length} {Object.keys(plan.basket).length % 10 >= 2 && Object.keys(plan.basket).length % 10 <= 4 && (Object.keys(plan.basket).length % 100 < 12 || Object.keys(plan.basket).length % 100 > 14) ? "продукта" : "продуктов"}, из них соль и масло обычно уже есть дома. {plan.menu.cooking === "twice" ? "Мясо, птицу и рыбу для средней готовки после покупки уберите в морозилку." : "Мясо, птица и рыба в воскресенье сразу идут в блюда, сырыми их не храним."}
+        </div>
+      )}
       <p className="text-xs text-muted">Нормы считаются по граммам «за неделю», а покупать удобнее упаковками и тушками: ниже для каждого продукта указано, сколько взять. Остаток идёт в морозилку или на следующую неделю.</p>
       {groups.map((g) => (
         <Card key={g.cat} className="print-block">

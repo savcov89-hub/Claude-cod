@@ -2,8 +2,11 @@ import { TREAT_KCAL, type NutrientKey, type Product, type Profile, type Targets,
 import type { MacroNotes } from "./norms";
 import type { Restrictions } from "./rules";
 
-export interface LpSolution { status: string; objective: number; columns: Record<string, number> }
-export type SolveFn = (lp: string) => LpSolution;
+/** reduced — приведённые стоимости переменных (только у непрерывной задачи): насколько дороже станет решение на единицу */
+export interface LpSolution { status: string; objective: number; columns: Record<string, number>; reduced?: Record<string, number> }
+/** gap — допустимый разрыв до оптимума (доля), timeLimit — секунды; по умолчанию 0,02 и 12. */
+export interface SolveOpts { gap?: number; timeLimit?: number }
+export type SolveFn = (lp: string, opts?: SolveOpts) => LpSolution;
 
 export interface LpInput {
   products: Product[];

@@ -38,7 +38,10 @@ export interface Profile {
   treats: Treats;
   /** любимые десерты (id продуктов); пусто — любые */
   favTreats: string[];
+  /** готовка: раз в неделю (воскресенье) с заморозкой или два раза (воскресенье и среда); нет — «once» */
+  cooking?: Cooking;
 }
+export type Cooking = "once" | "twice";
 export type Treats = "none" | "some" | "more";
 export const TREAT_KCAL: Record<Treats, number> = { none: 0, some: 120, more: 220 };
 
@@ -145,7 +148,16 @@ export interface Warning {
 }
 
 export interface MealItem { productId: string; grams: number }
-export interface Meal { slot: "breakfast" | "snack" | "lunch" | "dinner"; title: string; items: MealItem[] }
+export interface Meal {
+  slot: "breakfast" | "snack" | "lunch" | "dinner";
+  title: string;
+  /** все продукты приёма: блюдо и добавки — по ним считаются нормы */
+  items: MealItem[];
+  /** блюдо из книги рецептов (id из recipes.ts); у рационов до книги блюд его нет */
+  dish?: string;
+  /** добавки к блюду (фрукт, хлеб, кефир …) — id продуктов из items */
+  extras?: string[];
+}
 export interface Day { index: number; meals: Meal[] }
 
 export interface PlanResult {
@@ -161,4 +173,12 @@ export interface PlanResult {
   solverStatus: string;
   /** недобор по «мягким» ограничениям: нутриенты и группы (veg, fruit, fish, legume ...) */
   shortfalls: Array<{ key: string; fraction: number }>;
+  /** меню из блюд: какие блюда в какие дни и порция; нет — старый рацион из продуктов */
+  menu?: MenuPlan;
 }
+
+/** Блюдо в недельном меню: приём пищи (индекс в раскладке дня), дни недели 0–6 и одна порция. */
+export interface PlanDish { dish: string; name: string; slot: number; days: number[]; serving: MealItem[] }
+/** Добавка каждый день: граммы в день и приём пищи. */
+export interface PlanAddon { productId: string; perDay: number; slot: number; treat?: boolean }
+export interface MenuPlan { dishes: PlanDish[]; addons: PlanAddon[]; cooking: Cooking }

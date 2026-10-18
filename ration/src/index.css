@@ -77,7 +77,7 @@ h3 { font-size: 17px; font-weight: 600; line-height: 1.25; }
 .app { min-height: 100dvh; padding-top: env(safe-area-inset-top, 0px); padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px)); }
 .main { width: 100%; max-width: 1000px; margin: 0 auto; padding: 8px 12px 32px; display: grid; gap: 10px; min-width: 0; }
 .main > * { min-width: 0; }
-.nav { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.nav { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(6, 1fr); background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
 .nav-item { position: relative; height: var(--nav-h); display: grid; place-items: center; align-content: center; gap: 1px; font-size: 10px; font-weight: 500; color: var(--ink-2); background: none; border: 0; cursor: pointer; }
 .nav-item svg { width: 19px; height: 19px; }
 .nav-item.on { color: var(--accent); }

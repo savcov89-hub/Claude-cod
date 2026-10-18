@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import data from "./data/products.json";
-import { generatePlan, getSolver, type PlanResult, type Product, type Profile, type Tier } from "./core";
+import { generatePlan, getSolver, type Cooking, type PlanResult, type Product, type Profile, type Tier } from "./core";
 import Questionnaire from "./ui/Questionnaire";
 import { ResultHeader, WeekView, ShopView, NormsView, SolverFailed } from "./ui/Results";
 import Evidence from "./ui/Evidence";
+import { CookView } from "./ui/Cooking";
 import { Icon } from "./ui/bits";
 import { defaultProfile, loadPlan, loadPlanInfo, loadSavedProfile, loadTheme, savePlan, savePlanInfo, saveProfile, saveTheme, setStorageScope, type PlanInfo } from "./ui/storage";
 import { readEmbed } from "./ui/embed";
@@ -20,10 +21,11 @@ function startProfile(): Profile {
   if (!embed) return saved ?? defaultProfile();
   return { ...(saved ?? { ...defaultProfile(), ...embed.first }), ...embed.always };
 }
-type View = "form" | "week" | "shop" | "norms" | "sources";
-const NAV: Array<{ id: View; label: string; icon: "form" | "menu" | "cart" | "pulse" | "book" }> = [
+type View = "form" | "week" | "cook" | "shop" | "norms" | "sources";
+const NAV: Array<{ id: View; label: string; icon: "form" | "menu" | "pot" | "cart" | "pulse" | "book" }> = [
   { id: "form", label: "Опросник", icon: "form" },
   { id: "week", label: "Меню", icon: "menu" },
+  { id: "cook", label: "Готовка", icon: "pot" },
   { id: "shop", label: "Покупки", icon: "cart" },
   { id: "norms", label: "Нормы", icon: "pulse" },
   { id: "sources", label: "Источники", icon: "book" },
@@ -109,7 +111,14 @@ export default function App() {
     setTheme(current === "dark" ? "light" : "dark");
   };
   const retier = (t: Tier) => { const p = { ...profile, tier: t }; setProfile(p); void run(p); };
-  const needsPlan = view === "week" || view === "shop" || view === "norms";
+  /** Раз в неделю или два: меню то же, меняется только план готовки. */
+  const setCooking = (m: Cooking) => {
+    setProfile((p) => ({ ...p, cooking: m }));
+    if (!plan?.menu) return;
+    const next = { ...plan, profile: { ...plan.profile, cooking: m }, menu: { ...plan.menu, cooking: m } };
+    setPlan(next); savePlan(next);
+  };
+  const needsPlan = view === "week" || view === "cook" || view === "shop" || view === "norms";
   // Во вкладке Training Log пол, возраст, рост и вес — из «Замеров»; вес ушёл на килограмм и больше — рацион пора пересобрать.
   const fromAccount = !!embed && ["sex", "age", "heightCm", "weightKg"].every((k) => k in embed.always);
   const changed = plan && fromAccount
@@ -159,7 +168,7 @@ export default function App() {
         {needsPlan && !plan && (
           <section className="card grid gap-3">
             <h2>Сначала заполните опросник</h2>
-            <p className="text-muted">Меню, список покупок и нормы появятся после расчёта. Это пять коротких шагов, расчёт занимает несколько секунд.</p>
+            <p className="text-muted">Меню, план готовки, список покупок и нормы появятся после расчёта. Это пять коротких шагов, расчёт занимает несколько секунд.</p>
             <button className="btn btn-primary" onClick={() => setView("form")}>К опроснику</button>
           </section>
         )}
@@ -180,6 +189,7 @@ export default function App() {
             )}
             <ResultHeader plan={plan} products={products} onEdit={() => setView("form")} onPrint={embed ? () => window.print() : undefined} compact={view !== "week"} />
             {view === "week" && <WeekView plan={plan} products={products} />}
+            {view === "cook" && <CookView plan={plan} products={products} onMode={setCooking} />}
             {view === "shop" && <ShopView plan={plan} products={products} onRetier={retier} busy={busy} />}
             {view === "norms" && <NormsView plan={plan} products={products} />}
           </>

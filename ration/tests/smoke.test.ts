@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 const T = 120_000;
 import data from "../src/data/products.json";
-import { generatePlan, getSolver, weekAverage, compliance, type Product, type Profile } from "../src/core";
+import { DISH_MAP, cookingPlan, generatePlan, getSolver, weekAverage, compliance, type PlanResult, type Product, type Profile } from "../src/core";
 
 const products = data.products as unknown as Product[];
 
@@ -10,6 +10,32 @@ const base: Profile = {
   sex: "female", age: 34, heightCm: 168, weightKg: 78, activity: "low", strength: false, goal: "lose", tier: "econom", mealsPerDay: 4,
   pregnancy: "none", lactation: "none", ckd: "none", hyperkalemia: false, diabetes: "none", exclusions: [], dislikes: [], season: "winter", treats: "some", favTreats: [],
 };
+
+/** Меню из блюд: каждый приём каждый день — блюдо, не больше двух блюд на приём, блюдо идёт дни подряд;
+ *  по плану готовки в холодильнике порция лежит не дольше срока, а что нельзя заморозить — не в морозилке. */
+function checkMenu(r: PlanResult, label: string) {
+  const menu = r.menu!;
+  for (const d of r.days) for (const m of d.meals) expect(m.dish, `${label}: ${d.index} ${m.title}`).toBeTruthy();
+  const slots = new Set(menu.dishes.map((d) => d.slot));
+  for (const k of slots) {
+    const ds = menu.dishes.filter((d) => d.slot === k);
+    expect(ds.length, `${label}: блюд в приёме ${k}`).toBeLessThanOrEqual(2);
+    expect(ds.reduce((a, d) => a + d.days.length, 0), label).toBe(7);
+    for (const d of ds) expect(d.days[d.days.length - 1] - d.days[0] + 1, `${label}: ${d.name} подряд`).toBe(d.days.length);
+  }
+  for (const mode of ["once", "twice"] as const) {
+    const cp = cookingPlan(menu, mode);
+    for (const s of cp.sessions) for (const b of s.dishes) {
+      const def = DISH_MAP.get(b.dish)!;
+      for (const p of b.portions) {
+        if (p.where === "fridge") expect(p.day - s.day, `${label} ${mode}: ${b.name} ${p.day}`).toBeLessThanOrEqual(def.fridge);
+        else expect(def.freeze, `${label} ${mode}: ${b.name} в морозилке`).toBe(true);
+      }
+    }
+    // каждая порция где-то есть: холодильник, морозилка, готовить в тот же день или без готовки
+    for (const d of r.days) d.meals.forEach((_, k) => expect(cp.where[`${k}:${d.index}`], `${label} ${mode}: ${k}:${d.index}`).toBeTruthy());
+  }
+}
 
 describe("generatePlan", () => {
   it("solves econom weight-loss plan and meets hard norms", async () => {
@@ -28,8 +54,10 @@ describe("generatePlan", () => {
     expect(highs).toEqual([]);
     console.log("econom cost/week", r.costWeek, "items", Object.keys(r.basket).length, "shortfalls", r.shortfalls.map((s) => `${s.key}:${(s.fraction * 100).toFixed(0)}%`).join(", "));
     console.log(Object.entries(r.basket).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}=${v}`).join(" "));
-    // минимальные закупочные объёмы соблюдены
-    for (const [id, g] of Object.entries(r.basket)) { const p = byId.get(id)!; expect(g, id).toBeGreaterThanOrEqual(Math.min(p.min_week_g, p.max_week_g ?? 1e9) - 0.6); }
+    // простое меню из блюд, у него план готовки
+    expect(r.menu).toBeTruthy();
+    checkMenu(r, "econom");
+    expect(Object.keys(r.basket).length).toBeLessThanOrEqual(28);
   }, T);
 
   it("handles pregnancy t3, CKD s3b, diabetes t1, vegan", async () => {
@@ -49,6 +77,9 @@ describe("generatePlan", () => {
     for (const c of cases) {
       const r = generatePlan({ ...base, ...c }, products, solve);
       expect(r.solverStatus, JSON.stringify(c)).toBe("Optimal");
+      // при ХБП с 3-й стадии — продукты без блюд (калий, фосфор, белок), остальные — меню из блюд
+      if (c.ckd && c.ckd !== "s1_2") { expect(r.menu).toBeUndefined(); expect(r.warnings.some((w) => w.text.includes("отдельных продуктов"))).toBe(true); }
+      else { expect(r.menu, JSON.stringify(c)).toBeTruthy(); checkMenu(r, JSON.stringify(c)); }
       const byId = new Map(products.map((p) => [p.id, p]));
       const avg = weekAverage(r.days, byId);
       const comp = compliance(avg, r.targets);

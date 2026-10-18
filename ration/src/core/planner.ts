@@ -2,7 +2,7 @@ import type { Day, Meal, Product, Profile } from "./types";
 
 type Slot = Meal["slot"];
 
-const LAYOUT: Record<3 | 4 | 5, Array<{ slot: Slot; title: string; share: number }>> = {
+export const LAYOUT: Record<3 | 4 | 5, Array<{ slot: Slot; title: string; share: number }>> = {
   3: [
     { slot: "breakfast", title: "Завтрак", share: 0.3 },
     { slot: "lunch", title: "Обед", share: 0.4 },

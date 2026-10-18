@@ -4,27 +4,38 @@ import { buildTargets } from "./norms";
 import { applyRules } from "./rules";
 import { solveBasket, type SolveFn } from "./solver";
 import { layoutWeek } from "./planner";
+import { solveMenu } from "./menu";
 import { basketCost } from "./evaluate";
 
 export function generatePlan(profile: Profile, products: Product[], solve: SolveFn): PlanResult {
   const energy = energyPlan(profile);
   const { targets, macro } = buildTargets(profile, energy.target);
   const restrictions = applyRules(profile, products);
-  const outcome = solveBasket({ products, profile, targets, macro, restrictions, energyKcal: energy.target }, solve);
+  const input = { products, profile, targets, macro, restrictions, energyKcal: energy.target };
+  // Меню из простых блюд; при ХБП с 3-й стадии (калий, фосфор, белок) и если блюд с ограничениями не сложилось —
+  // корзина продуктов, как раньше
+  const strictKidney = profile.ckd !== "none" && (profile.ckd !== "s1_2" || profile.hyperkalemia);
+  const menu = strictKidney ? null : solveMenu(input, solve);
+  const outcome = menu ?? solveBasket(input, solve);
+  const warnings = [...restrictions.warnings];
+  if (!menu) warnings.push({ level: "info", text: strictKidney
+    ? "При ХБП с 3-й стадии и при повышенном калии готовые блюда не проходят по калию, фосфору и белку, поэтому рацион собран из отдельных продуктов, без плана готовки."
+    : "С выбранными ограничениями меню из простых блюд не сложилось, поэтому рацион собран из отдельных продуктов, без плана готовки.", sources: [] });
   const byId = new Map(products.map((p) => [p.id, p]));
-  const days = outcome.status === "Optimal" ? layoutWeek(outcome.basket, products, profile, energy.target) : [];
+  const days = menu ? menu.days : outcome.status === "Optimal" ? layoutWeek(outcome.basket, products, profile, energy.target) : [];
   const costByTier = Object.fromEntries((["econom", "business", "premium"] as Tier[]).map((t) => [t, basketCost(outcome.basket, byId, t)])) as Record<Tier, number | null>;
   return {
     profile,
     energy,
     targets,
-    warnings: restrictions.warnings,
+    warnings,
     basket: outcome.basket,
     days,
     costWeek: costByTier[profile.tier] ?? 0,
     costByTier,
     solverStatus: outcome.status,
     shortfalls: outcome.shortfalls,
+    ...(menu ? { menu: menu.menu } : {}),
   };
 }
 
@@ -35,3 +46,5 @@ export { applyRules } from "./rules";
 export { getSolver } from "./highs";
 export * from "./evaluate";
 export { SOURCES, SOURCE_MAP } from "./evidence";
+export { DISHES, DISH_MAP, PANTRY, UNITS, type Dish, type Step } from "./recipes";
+export { cookingPlan, type BatchDish, type CookPlan, type CookSession, type DayDish, type SessionDay } from "./cooking";
