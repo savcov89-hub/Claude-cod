@@ -541,8 +541,8 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     });
 
   /**
-   * A client who records a set herself without «Я в зале» is marked in the gym, so the trainer sees her there
-   * (also from an older app). Not when she is already marked.
+   * A client whose set is recorded without «Я в зале» / «Пришёл» (by herself, or by the trainer who opened her from the
+   * client card) is marked in the gym, so she is in «Зал» and the visit counts. Not when she is already marked.
    */
   async function checkInByRecording(trainerId: string, clientId: string, localDay: unknown) {
     const client = await findClient(trainerId, clientId);
@@ -2356,8 +2356,8 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
             if (attempt < 5) continue;
             return error('Не удалось сохранить: телефоны сохраняют одновременно. Повторите.', 503);
           }
-          // A new set ticked by the client herself: she is in the gym.
-          if (access.role === 'client' && doneCount(saved) > doneCount(current && !current.closed ? current.exercises : []))
+          // A new set ticked (by the client herself, or by the trainer from the client card): she is in the gym.
+          if (doneCount(saved) > doneCount(current && !current.closed ? current.exercises : []))
             await checkInByRecording(b.trainerId, access.ownerId, b.localDate);
           // Merged with the other phone's entries or fitted to the program: the journal takes this version.
           const changed = merged || JSON.stringify(fitted) !== JSON.stringify(submitted);

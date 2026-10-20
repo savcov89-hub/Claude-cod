@@ -300,8 +300,12 @@ await scenario('5. «Ушёл» записывает тренировку', asyn
   expect(after.length === before + 1 && after[0].exercises.reduce((n, e) => n + e.sets.length, 0) === 2, '«Ушёл» recorded the 2 sets', after.length);
 });
 
-await scenario('6. Журнал из карточки клиента', async () => {
+await scenario('6. Журнал из карточки клиента: подход отмечает «Пришёл»', async () => {
   const before = (await historyOf('Мария')).length;
+  const marked = async () => !!(await call('get', '/api/clients')).clients.find((c) => c.clientName === 'Мария')?.checkedInAt;
+  if (await marked())
+    await call('post', '/api/attendance', { clientId: idOf('Мария'), present: false, localDate: new Date().toISOString().slice(0, 10), at: new Date().toISOString() });
+  expect(!(await marked()), 'Мария is not in the gym before the workout');
   const prog = await programOf('Мария');
   await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
   await p.waitForTimeout(500);
@@ -314,6 +318,8 @@ await scenario('6. Журнал из карточки клиента', async () 
   await p.waitForTimeout(1200);
   const j = p.locator('.main .journal').first();
   await tickNext(j, 20);
+  await p.waitForTimeout(1500);
+  expect(await marked(), 'a set recorded from the client card marks her «Пришёл» — no «В зале» needed');
   await tickNext(j, 20);
   await tickNext(j, 20);
   await finishHere(j);
@@ -655,7 +661,9 @@ await scenario('20. Брошенная тренировка прошлых дн�
   expect(/завершена сама/.test(await p.innerText('body')), 'the history says it was finished by itself');
   await auto.getByRole('button', { name: 'Понятно' }).click();
   const away = (await call('get', '/api/clients')).clients.find((x) => x.clientId === c.clientId);
-  expect(!away.checkedInAt && !(away.visits || []).includes(today), 'not marked in the gym and no visit today', [away.checkedInAt, away.visits?.slice(-3)]);
+  // Its set (ticked two days ago) marked the client «Пришёл» back then; today the card marks nothing.
+  const inGymNow = !!away.checkedInAt && Date.now() - Date.parse(away.checkedInAt) < 12 * 3600000;
+  expect(!inGymNow && !(away.visits || []).includes(today), 'not in the gym now and no visit today', [away.checkedInAt, away.visits?.slice(-3)]);
 
   // Two hours ago (not abandoned yet): «Открыть» in the card opens it there, not in the gym, the client not marked here.
   const recent = pr.days.find((d) => d.id !== old.id);
