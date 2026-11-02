@@ -406,6 +406,25 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
     if (!permitted || (!(program.free && profile.role === 'trainer') && !(await hasAssignment(program.clientId, trainerId, programId)))) return null;
     return { program, ownerId: program.clientId, role: profile.role, name: profile.name };
   }
+  /** The client's hidden program of free workouts (and of workouts brought from notes); created on first use. */
+  async function freeProgramOf(trainerId: string, trainerName: string, client: ClientRecord) {
+    const existing = (await listAll<ProgramRecord>(programsTable(trainerId))).find((p) => p.free && p.clientId === client.clientId);
+    if (existing) return { id: (existing as ProgramRecord & { id: string }).id, program: existing as ProgramRecord, created: false };
+    const at = nowIso();
+    const record: ProgramRecord = {
+      trainerId,
+      trainerName,
+      clientId: client.clientId,
+      clientName: client.clientName,
+      name: 'Без программы',
+      days: [{ id: 'free', name: 'Свободная тренировка', exercises: [] }],
+      createdAt: at,
+      updatedAt: at,
+      free: true,
+    };
+    const [id] = await db.add(programsTable(trainerId), [record]);
+    return id ? { id, program: record, created: true } : null;
+  }
   const withVisit = (visits: string[] | undefined, date: string) =>
     Array.from(new Set([...(visits || []), date])).sort().slice(-180);
 
@@ -2054,22 +2073,109 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const trainerId = ctx.user!.userId;
         const client = await findClient(trainerId, ctx.params.clientId);
         if (!client) return error('Клиент не найден.', 404);
-        const existing = (await listAll<ProgramRecord>(programsTable(trainerId))).find((p) => p.free && p.clientId === client.clientId);
-        if (existing) return json({ trainerId, programId: existing.id, dayId: 'free' });
-        const at = nowIso();
-        const record: ProgramRecord = {
-          trainerId,
-          trainerName: profile.name,
-          clientId: client.clientId,
-          clientName: client.clientName,
-          name: 'Без программы',
-          days: [{ id: 'free', name: 'Свободная тренировка', exercises: [] }],
-          createdAt: at,
-          updatedAt: at,
-          free: true,
-        };
-        const [programId] = await db.add(programsTable(trainerId), [record]);
-        return programId ? json({ trainerId, programId, dayId: 'free' }, 201) : error('Не удалось начать тренировку.', 500);
+        const free = await freeProgramOf(trainerId, profile.name, client);
+        if (!free) return error('Не удалось начать тренировку.', 500);
+        return json({ trainerId, programId: free.id, dayId: 'free' }, free.created ? 201 : 200);
+      },
+    ],
+
+    /**
+     * Workouts written as text (src/workoutText.ts): recorded into history with their dates — into a program day
+     * (a workout just assembled from text), or into the client's hidden program of free workouts (notes from the
+     * phone). The weight hints of the journal come from the latest of them. The same workout sent again is skipped.
+     */
+    'POST /api/client/:clientId/import': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        const profile = await trainerOnly(ctx);
+        if (!profile) return error('Доступ только для тренера.', 403);
+        const trainerId = ctx.user!.userId;
+        const client = await findClient(trainerId, ctx.params.clientId);
+        if (!client) return error('Клиент не найден.', 404);
+        const b = ctx.body || {};
+        const list: any[] = Array.isArray(b.workouts) ? b.workouts : [];
+        if (!list.length || list.length > 60) return error('Нет тренировок для записи (не больше 60 за раз).', 400);
+        let program: ProgramRecord & { id?: string };
+        let programId: string;
+        let dayId: string;
+        if (b.programId) {
+          programId = String(b.programId);
+          dayId = String(b.dayId || '');
+          const [found] = await db.get<ProgramRecord>(programsTable(trainerId), [programId]);
+          if (!found || found.trainerId !== trainerId || found.clientId !== client.clientId) return error('Программа не найдена.', 404);
+          if (!found.days.some((d) => d.id === dayId)) return error('Тренировка не найдена.', 404);
+          program = found;
+        } else {
+          const free = await freeProgramOf(trainerId, profile.name, client);
+          if (!free) return error('Не удалось записать.', 500);
+          program = free.program;
+          programId = free.id;
+          dayId = 'free';
+        }
+        const findKnown = knownExercises(trainerId);
+        const nowMs = new Date(nowIso()).getTime();
+        const clean: Array<{ completedAt: string; dayName: string; exercises: SessionExercise[] }> = [];
+        for (const w of list) {
+          const at = Date.parse(String(w?.completedAt || ''));
+          if (!Number.isFinite(at) || at > nowMs + 60000 || at < nowMs - 5 * 366 * 86400000) return error('Проверьте даты тренировок.', 400);
+          const exercises: SessionExercise[] = [];
+          for (const x of Array.isArray(w?.exercises) ? w.exercises.slice(0, 30) : []) {
+            const known = await findKnown(String(x?.exerciseId));
+            if (!known) return error('Упражнение не найдено: ' + text(x?.exerciseName, 100), 400);
+            const sets = Array.isArray(x?.sets) ? x.sets : [];
+            if (sets.length > 10 || !sets.every(validSet)) return error('Проверьте вес и повторы: ' + known.name, 400);
+            const done = sets.map(cleanSet).filter((s: SetEntry) => s.reps > 0);
+            if (!done.length || exercises.some((e) => e.exerciseId === known.id)) continue;
+            const extra = program.free ? cleanExtra(x) : null;
+            const note = text(x?.note, 200);
+            exercises.push({
+              exerciseId: known.id,
+              exerciseName: known.name,
+              ...(extra ? { extra } : {}),
+              ...(note ? { note } : {}),
+              ...(known.muscles?.length && known.id.startsWith('custom:') ? { muscles: known.muscles } : {}),
+              sets: done,
+            });
+          }
+          if (exercises.length) clean.push({ completedAt: new Date(at).toISOString(), dayName: text(w?.dayName, 80), exercises });
+        }
+        if (!clean.length) return error('Нет подходов с повторами — записывать нечего.', 400);
+        const table = sessionsTable(client.clientId);
+        const existing = (await listAll<SessionRecord>(table, 400)).filter((s) => s.programId === programId);
+        const sig = (date: string, ex: SessionExercise[]) =>
+          date.slice(0, 10) + JSON.stringify(ex.map((e) => [e.exerciseId, e.sets.map((s) => [s.weight, s.reps])]));
+        const seen = new Set(existing.map((s) => sig(s.completedAt, s.exercises)));
+        let added = 0;
+        let skipped = 0;
+        const records: unknown[] = [];
+        // Oldest first: each later one is the latest for its hints and records.
+        for (const w of clean.sort((x, y) => x.completedAt.localeCompare(y.completedAt))) {
+          if (seen.has(sig(w.completedAt, w.exercises))) {
+            skipped++;
+            continue;
+          }
+          const [fresh] = await db.get<ProgramRecord>(programsTable(trainerId), [programId]);
+          const now = fresh || program;
+          const day = now.days.find((d) => d.id === dayId)!;
+          const done = await recordWorkout({
+            access: { program: now, ownerId: client.clientId, role: 'trainer', name: profile.name },
+            table: draftTable(client.clientId, programId, dayId),
+            trainerId,
+            programId,
+            day: { ...day, name: w.dayName || day.name },
+            sessionId: randomId(),
+            completedAt: w.completedAt,
+            feedback: '',
+            matched: w.exercises,
+            performed: w.exercises,
+            before: undefined,
+          });
+          if (!done) return error(`Записано ${added}, дальше не удалось сохранить. Повторите — записанные не задвоятся.`, 500);
+          seen.add(sig(w.completedAt, w.exercises));
+          records.push(...done.records);
+          added++;
+        }
+        return json({ added, skipped, programId, dayId, records }, added ? 201 : 200);
       },
     ],
 

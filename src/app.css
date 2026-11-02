@@ -3828,3 +3828,58 @@ h2 {
   border: 0;
   background: var(--bg);
 }
+
+/* «Тренировка из текста»: lines or voice → exercises of the base (src/ui/TextWorkout.tsx) */
+.text-workout {
+  display: grid;
+  gap: 12px;
+}
+.text-workout textarea {
+  font-size: 16px;
+  line-height: 1.45;
+}
+.tw-preview {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.tw-workout {
+  display: grid;
+  gap: 6px;
+}
+.tw-row {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.tw-workout .tw-row:last-child {
+  border-bottom: 0;
+}
+.tw-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  text-align: left;
+  min-width: 0;
+}
+.tw-sets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+}
+.tw-choose {
+  display: grid;
+  gap: 6px;
+  margin-block: 10px;
+}
+.tw-option {
+  justify-content: flex-start;
+  text-align: left;
+}

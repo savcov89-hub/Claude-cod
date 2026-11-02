@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Clipboard, Copy, Pencil, Plus, Smartphone, Archive, RotateCcw, Share2, X } from 'lucide-react';
+import { ArrowLeft, Clipboard, Copy, Mic, Pencil, Plus, Smartphone, Archive, RotateCcw, Share2, X } from 'lucide-react';
 import { api, inGym, isArtifactBuild, readError } from '../transport';
 import { inviteLink, loginLink } from '../invite';
 import type { AutoFinished, ClientNotes, OpenWorkout, Program, Session } from '../types';
@@ -14,6 +14,7 @@ import { RationTab } from './Ration';
 import { AUTO_FINISH_IDLE_MS, Journal } from './Journal';
 import { RecordsSheet } from './Records';
 import { copyLater, programText } from './programText';
+import { TextWorkout } from './TextWorkout';
 import type { PersonalRecord } from '../analytics';
 
 type Tab = 'overview' | 'progress' | 'history' | 'body' | 'ration' | 'programs';
@@ -64,6 +65,9 @@ export function ClientCard({
   const [renameBusy, setRenameBusy] = useState(false);
   const [pickingAvatar, setPickingAvatar] = useState(false);
   const [newRecords, setNewRecords] = useState<PersonalRecord[] | null>(null);
+  // «Тренировка из текста»: open (and for what), and what it did.
+  const [fromText, setFromText] = useState<'program' | 'history' | null>(null);
+  const [textDone, setTextDone] = useState('');
   const chooseAvatar = async (avatar: string) => {
     try {
       await api.post('/api/client/' + clientId + '/update', { avatar });
@@ -241,6 +245,27 @@ export function ClientCard({
         </div>
       ))}
 
+      {textDone && (
+        <div className="review-bar" role="status">
+          <span>{textDone}</span>
+          <button className="btn btn-sm" onClick={() => setTextDone('')}>
+            Понятно
+          </button>
+        </div>
+      )}
+      {fromText && (
+        <TextWorkout
+          data={data}
+          clientId={clientId}
+          initialMode={fromText}
+          onClose={() => setFromText(null)}
+          onDone={(message) => {
+            setFromText(null);
+            setTextDone(message);
+            void loadHistory();
+          }}
+        />
+      )}
       {tab === 'overview' && <Overview data={data} clientId={clientId} sessionsCount={sessions.length} />}
       {tab === 'progress' &&
         (loading ? (
@@ -272,6 +297,11 @@ export function ClientCard({
               </button>
             </div>
           )}
+          <div className="row gap wrap">
+            <button className="btn btn-sm" onClick={() => setFromText('history')}>
+              <Mic size={14} /> Из заметок или голосом
+            </button>
+          </div>
           {loading ? <div className="loader-block"><span className="loader" /></div> : <HistoryList
               sessions={sessions}
               programs={data.programs.filter((p) => p.clientId === clientId)}
@@ -300,6 +330,7 @@ export function ClientCard({
           clientId={clientId}
           onOpenDay={(program, dayId) => setJournal({ trainerId: program.trainerId, programId: program.id, dayId })}
           openBuilder={openBuilder}
+          onFromText={() => setFromText('program')}
         />
       )}
     </div>
@@ -618,11 +649,13 @@ function ClientPrograms({
   clientId,
   onOpenDay,
   openBuilder,
+  onFromText,
 }: {
   data: TrainerData;
   clientId: string;
   onOpenDay: (p: Program, dayId: string) => void;
   openBuilder: (opts: { clientId: string; program?: Program; copy?: boolean }) => void;
+  onFromText: () => void;
 }) {
   const [showArchived, setShowArchived] = useState(false);
   const all = data.programs.filter((p) => p.clientId === clientId);
@@ -632,6 +665,9 @@ function ClientPrograms({
       <div className="row gap wrap">
         <button className="btn btn-primary" onClick={() => openBuilder({ clientId })}>
           <Plus size={16} /> Новая программа
+        </button>
+        <button className="btn" onClick={onFromText}>
+          <Mic size={16} /> Текстом или голосом
         </button>
         {all.some((p) => p.archived) && (
           <button className="btn btn-quiet" onClick={() => setShowArchived(!showArchived)}>

@@ -1637,6 +1637,82 @@ await scenario('40. Рацион от тренера: собрать в карт
   await p.waitForTimeout(800);
 });
 
+await scenario('41. Тренировка из текста: «Жим ногами 45 3х15» → программа и история; заметки с датами → история', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  await p.reload();
+  await p.waitForSelector('.nav', { timeout: 30000 });
+  await p.waitForTimeout(1500);
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: 'Павел' }).first().locator('.client-open').click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('tab', { name: 'Программы' }).click();
+  await p.waitForTimeout(500);
+  await p.getByRole('button', { name: 'Текстом или голосом' }).click();
+  await p.locator('#text-workout-input').fill('Жим ногами 45 3х15\nРумынская тяга 20 3х12,10,8\nОтжимания от пола 30,27,16');
+  await p.waitForTimeout(400);
+  const preview = (await p.locator('.tw-preview').innerText()).replace(/\s+/g, ' ');
+  expect(
+    /Жим ногами 45 кг · 3×15/.test(preview) && /Румынская тяга 20 кг · 12, 10, 8/.test(preview) && /Отжимания от пола новое свой вес · 30, 27, 16/.test(preview),
+    'the lines become exercises of the base with their sets; push-ups are a new exercise',
+    preview,
+  );
+  await p.locator('#text-workout-day').fill('Ноги и грудь');
+  await p.locator('#text-workout-save').click();
+  await p.waitForTimeout(2000);
+  const done = (await p.locator('.review-bar[role="status"]').first().innerText()).replace(/\s+/g, ' ');
+  expect(/Собрано: «Ноги и грудь» в программе «Программа», 3 упр\., сделанное записано/.test(done), 'says what was made', done);
+  const prog = (await call('get', '/api/programs')).programs.find((x) => x.clientId === idOf('Павел') && x.days.some((d) => d.name === 'Ноги и грудь'));
+  const day = prog?.days.find((d) => d.name === 'Ноги и грудь');
+  const plan = day?.exercises.map((e) => `${e.exerciseName} ${e.sets}×${e.repMin}–${e.repMax}`).join(', ');
+  expect(plan === 'Жим ногами 3×12–15, Румынская тяга 3×8–12, Отжимания от пола 3×16–30', 'the program day: sets and rep ranges from what was written', plan);
+  const w = prog && (await call('get', `/api/workout/${prog.trainerId}/${prog.id}/${day.id}`));
+  const prev = (n) => w?.day.exercises.find((e) => e.exerciseName === n)?.previousSets.map((s) => s.weight + '×' + s.reps).join(' ');
+  expect(prev('Жим ногами') === '45×15 45×15 45×15' && prev('Румынская тяга') === '20×12 20×10 20×8', 'opening the workout shows what was done as last time', [prev('Жим ногами'), prev('Румынская тяга')]);
+
+  // Notes from the phone: dates, body weight, headings, «вес×повторы; …» → history; sent again — not twice.
+  await p.getByRole('tab', { name: 'История' }).click();
+  await p.waitForTimeout(600);
+  await p.getByRole('button', { name: 'Из заметок или голосом' }).click();
+  const notes =
+    'Павел\n24 августа 44,6;\n\nСпина\nПодтягивания 10; 10,7,\nВертикальная блочная тяга 38x17;\n\nГрудь\nЖим в тренажёре красный 25x15; 32x10;\n32x13,12,10;\nБрусья 8,\n\nНоги\nПриседания на блине\nПендулум 70x20(не глубоко)\n\n31 августа\nСпина\nПодтягивания 11; 10,8';
+  await p.locator('#text-workout-input').fill(notes);
+  await p.waitForTimeout(400);
+  const pv = (await p.locator('.tw-preview').innerText()).replace(/\s+/g, ' ');
+  expect(/24 августа · вес тела 44,6 кг/.test(pv) && /31 августа/.test(pv), 'two dates, body weight', pv.slice(0, 200));
+  expect(/Вертикальная тяга ← Вертикальная блочная тяга/.test(pv) && /Маятниковый присед ← Пендулум/.test(pv) && /Отжимания на брусьях ← Брусья/.test(pv), 'gym names matched to the base', pv);
+  expect((await p.getByRole('tab', { name: 'Только в историю' }).count()) + (await p.locator('.seg-toggle button.on', { hasText: 'Только в историю' }).count()) >= 1, 'dated notes go to history');
+  await p.locator('#text-workout-save').click();
+  await p.waitForTimeout(2500);
+  const said = (await p.locator('.review-bar[role="status"]').first().innerText()).replace(/\s+/g, ' ');
+  expect(/В историю записаны 2 тренировки, вес тела — в «Замеры» \(1\)/.test(said), 'says what was recorded', said);
+  const hist = (await call('get', '/api/client/' + idOf('Павел') + '/history')).sessions;
+  const aug24 = hist.find((s) => s.completedAt.slice(5, 10) === '08-24');
+  const pull = aug24?.exercises.find((e) => e.exerciseId === 'pull-up')?.sets.map((s) => s.reps).join(',');
+  expect(pull === '10,10,7' && /Спина, Грудь, Ноги/.test(aug24.dayName), 'the workout of 24 August: pull-ups 10, 10, 7', [pull, aug24?.dayName]);
+  const press = aug24?.exercises.find((e) => e.exerciseId === 'machine-chest-press')?.sets.map((s) => s.weight + '×' + s.reps).join(' ');
+  expect(press === '25×15 32×10 32×13 32×12 32×10', 'sets carried to the next line belong to the exercise', press);
+  const pend = aug24?.exercises.find((e) => e.exerciseId === 'pendulum-squat');
+  expect(pend?.note === 'не глубоко', 'the comment in brackets is the note', pend);
+  const body = (await call('get', '/api/body?clientId=' + idOf('Павел'))).entries.find((e) => e.date.endsWith('-08-24'));
+  expect(body?.weight === 44.6, 'body weight of the date in «Замеры»', body);
+  // The latest pull-ups (31 August) are the hint; today's leg press stays the latest for it.
+  const free = (await call('get', '/api/programs')).programs.find((x) => x.clientId === idOf('Павел') && x.free);
+  expect(!free, 'the hidden program of free workouts is not listed', free?.name);
+  // Again: nothing doubled.
+  await p.getByRole('button', { name: 'Из заметок или голосом' }).click();
+  await p.locator('#text-workout-input').fill(notes);
+  await p.waitForTimeout(300);
+  await p.locator('#text-workout-save').click();
+  await p.waitForTimeout(2000);
+  const again = (await p.locator('.review-bar[role="status"]').first().innerText()).replace(/\s+/g, ' ');
+  expect(/записано 0 тренировок, 2 уже были — пропущено/.test(again), 'the same notes again are skipped', again);
+  // Undo the made program so later scenarios see the client as before.
+  if (prog) await call('post', '/api/programs/' + prog.id + '/archive', { archived: true });
+  await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click().catch(() => {});
+});
+
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {
   await goGym();
   await p.locator('.gym-tab').first().click();

@@ -28,6 +28,8 @@
   и 40 (у клиентов скрыт; с `RATION_FOR_CLIENTS = true` — тренер назначает, клиент видит).
 - Картинки упражнений (`src/ui/figure/`): `npx tsx scripts/check-figures.tsx лист.html фото/` — суставы, опора, равновесие,
   и посмотреть лист глазами рядом с фото из `scripts/figure-refs.json`.
+- Тренировка из текста (`src/workoutText.ts`, `src/exerciseMatch.ts`, `src/ui/TextWorkout.tsx`):
+  `npx tsx scripts/check-text-workout.ts` (форматы, голос, заметки, названия) и check-ui сценарий 41.
 - Изменения прогрессии или журнала: `npx tsx scripts/simulate-month.ts отчёт.md` — 30 клиентов, месяц Пн/Ср/Пт;
   сравнить «в диапазоне / легко / тяжело» и число колебаний с прошлым прогоном.
   После `npm run build:api` перезапускать контейнер `supabase_edge_runtime_training-log`.
@@ -73,5 +75,10 @@
   `{plan, assignedAt, trainerName}`). Рамка по готовности (`tl-ration:ready`) и при каждом открытии вкладки получает
   `tl-ration:assigned` из `GET /api/ration`; у клиента новое назначение (`assignedAt` ≠ `seen` в localStorage) заменяет
   показанный рацион, свой пересобранный — нет (`ration/src/ui/host.ts`, `storage.ts` `PlanInfo`).
+- Тренировка из текста (`src/ui/TextWorkout.tsx`): строки или голос (Web Speech API) → `parseWorkoutText`
+  (вес, подходы×повторы, «;», даты и вес тела заметок, заголовки групп) → `matchExercise` (основы слов, синонимы зала,
+  заголовок как подсказка; выбранное руками — в localStorage `tl-name-aliases`), нет в базе — своё упражнение.
+  «Собрать тренировку» — `POST /api/free/:clientId/save` (новый день) и `POST /api/client/:id/import` (сделанное в
+  историю этого дня); «Только в историю» — `import` в скрытую программу свободных тренировок, по дате, без повторов.
 - Брошенная тренировка (есть подходы, 3 ч без сохранений) записывается сервером сама датой последнего сохранения,
   когда её черновик читают по пути: приложение клиента, карточка, «Зал», открытие тренировки (`finishStale`).
