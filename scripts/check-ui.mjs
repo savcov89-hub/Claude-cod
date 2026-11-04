@@ -268,6 +268,8 @@ async function finishHere(scope) {
   await dismiss();
 }
 async function pick(name) {
+  // As a person does it: a tap on the search, then the name (the list changing under the typing is expected).
+  await p.locator('#picker-search').click();
   await p.locator('#picker-search').fill(name);
   await p.waitForTimeout(300);
   await p.locator('.pick', { hasText: name }).first().click();
@@ -331,12 +333,24 @@ await scenario('6. Журнал из карточки клиента: подхо
 await scenario('7. Замена упражнения на сегодня', async () => {
   await checkIn('Дмитрий');
   const first = (await pane().locator('.ex h3').first().innerText()).trim();
-  await pane().getByRole('button', { name: 'Действия с упражнением: ' + first }).click();
-  await p.locator('.menu-item', { hasText: 'Заменить' }).first().click();
+  // «⇄ заменить» on the card, the exercise picked: replaced for today at once — two taps.
+  await pane().getByRole('button', { name: 'Заменить упражнение: ' + first }).click();
   await p.waitForTimeout(500);
-  await pick('Тяга каната к лицу');
-  await p.getByRole('button', { name: 'Только сегодня' }).click();
-  await p.waitForTimeout(800);
+  const chips = await p.locator('.sheet .filters').evaluate((el) => Math.round(el.getBoundingClientRect().height));
+  expect(chips >= 28, 'the muscle group chips of the list are visible', chips);
+  const top = await p.locator('.sheet .pick-list > *').evaluateAll((els) => els.slice(0, 3).map((e) => e.innerText.split('\n')[0]));
+  expect(top[0] === 'Похожие' && top.length > 1, '«Похожие» on top of the list', top);
+  // Typing narrows the list down to one row; the search field must not move down with the sheet while it is typed in.
+  const searchTop = () => p.locator('#picker-search').evaluate((el) => Math.round(el.getBoundingClientRect().top));
+  const y0 = await searchTop();
+  await p.locator('#picker-search').click();
+  await p.keyboard.type('Тяга каната к лицу');
+  await p.waitForTimeout(300);
+  const y1 = await searchTop();
+  expect(y1 === y0, 'the search field stays where it is while a name is typed', [y0, y1]);
+  await p.locator('.pick', { hasText: 'Тяга каната к лицу' }).first().click();
+  await p.waitForTimeout(1200);
+  expect(!(await p.locator('.sheet').count()), 'no second question for a swap today');
   const now = (await pane().locator('.ex h3').first().innerText()).trim();
   expect(now === 'Тяга каната к лицу', 'the swapped exercise is on the card', now);
   await tickNext(pane(), 15);
@@ -1300,10 +1314,13 @@ await scenario('37. Замена «насовсем»: во всех трени�
   await p.locator('.menu-item', { hasText: 'Заменить' }).first().click();
   await p.waitForTimeout(500);
   await pick('Пуловер лёжа на боку');
+  // Swapped for today at once; «насовсем» on the card.
+  await j.getByRole('button', { name: 'Оставить «Пуловер лёжа на боку» в программе насовсем' }).click();
+  await p.waitForTimeout(400);
   const sheet = (await p.locator('.sheet').last().innerText()).replace(/\s+/g, ' ');
   expect(/Во всех тренировках с «Вертикальная тяга»: «Верх A» и «Верх B»/.test(sheet), 'the choice says it goes to both workouts with the exercise', sheet.slice(0, 300));
   expect(/Запомнится/.test(sheet) && (await p.getByRole('button', { name: 'Насовсем только в «Верх A»' }).count()) === 1, 'and that it is remembered; «only in this workout» is there too');
-  await p.getByRole('button', { name: 'В программе насовсем' }).click();
+  await p.getByRole('button', { name: 'В программе насовсем', exact: true }).click();
   await p.waitForTimeout(1500);
   const after = (await call('get', '/api/programs')).programs.find((x) => x.id === two.id);
   const idsIn = (d) => after.days.find((x) => x.id === d).exercises.map((e) => e.exerciseId + ':' + e.sets).join(',');
@@ -1711,6 +1728,109 @@ await scenario('41. Тренировка из текста: «Жим ногам�
   // Undo the made program so later scenarios see the client as before.
   if (prog) await call('post', '/api/programs/' + prog.id + '/archive', { archived: true });
   await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click().catch(() => {});
+});
+
+await scenario('42. Замена посреди упражнения: отмеченные подходы остаются; «вернуть», «насовсем», «Это был…», недавние сверху', async () => {
+  const { client: c } = await call('post', '/api/clients', { clientName: 'Глеб' });
+  const ex = (id) => ({ exerciseId: id, sets: 3, repMin: 8, repMax: 12, targetRir: 2 });
+  const { program: pr } = await call('post', '/api/programs', {
+    clientId: c.clientId,
+    name: 'Глеб',
+    days: [{ id: 'g-1', name: 'Глеб: верх', exercises: [ex('bench-press'), ex('lat-pulldown'), ex('lateral-raise')] }],
+  });
+  await p.reload();
+  await p.waitForSelector('.nav');
+  await p.waitForTimeout(2000);
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  await checkIn('Глеб');
+  const card = (n) => pane().locator('section.ex').filter({ has: p.getByRole('heading', { name: n, exact: true }) });
+  const lines = () => pane().locator('.exercise-list > [data-slot]').evaluateAll((els) => els.map((e) => e.innerText.replace(/\s+/g, ' ').trim()));
+  const draft = async () =>
+    (await call('get', `/api/draft/${pr.trainerId}/${pr.id}/g-1`)).exercises.map(
+      (e) => e.exerciseId + ':' + e.sets.filter((x) => x.reps > 0).length + '/' + e.sets.length + (e.extra?.instead ? '>' + e.extra.instead : ''),
+    );
+  await tickNext(pane(), 60);
+  await tickNext(pane(), 60);
+  // A tapped number is typed over at once (no erasing first); left untouched, it comes back.
+  const w3 = card('Жим штанги лёжа').locator('[data-w="0-2"]');
+  await w3.tap();
+  const tapped = [await w3.inputValue(), await w3.getAttribute('placeholder')];
+  await p.evaluate(() => document.activeElement?.blur());
+  await p.waitForTimeout(200);
+  expect(tapped[0] === '' && tapped[1] === '60' && (await w3.inputValue()) === '60', 'a tapped weight waits greyed and comes back when nothing is typed', [...tapped, await w3.inputValue()]);
+  await w3.tap();
+  await p.keyboard.type('62,5', { delay: 60 });
+  await p.evaluate(() => document.activeElement?.blur());
+  await p.waitForTimeout(200);
+  expect((await w3.inputValue()) === '62,5', 'typed over: the new weight', await w3.inputValue());
+  // Two of the three sets done, then the shoulder: the rest on the machine.
+  await card('Жим штанги лёжа').getByRole('button', { name: 'Заменить упражнение: Жим штанги лёжа' }).click();
+  await p.waitForTimeout(500);
+  const top = await p.locator('.sheet .pick-list > *').evaluateAll((els) => els.slice(0, 3).map((e) => e.innerText.split('\n')[0]));
+  expect(top[0] === 'Похожие' && top[1] === 'Жим в тренажёре', 'a press for a press, first', top);
+  await p.locator('.sheet .pick', { hasText: 'Жим в тренажёре' }).first().click();
+  await p.waitForTimeout(400);
+  const ask = (await p.locator('.sheet').last().innerText()).replace(/\s+/g, ' ');
+  expect(/отмечено 2 из 3/.test(ask) && /Дальше 1 подход — «Жим в тренажёре»/.test(ask), 'sets ticked already: asked whose they are', ask);
+  await p.getByRole('button', { name: 'Оставить их за «Жим штанги лёжа»' }).click();
+  await p.waitForTimeout(900);
+  let l = await lines();
+  expect(/^Жим штанги лёжа 60×\d+.*60×\d+$/.test(l[0]) && /Жим в тренажёре 1×8–12/.test(l[1]) && /вместо «Жим штанги лёжа»/.test(l[1]), 'the bench keeps its two sets, the machine press does the third', l.slice(0, 2));
+  await p.waitForTimeout(1500);
+  let d = await draft();
+  expect(d.slice(0, 2).join(',') === 'bench-press:2/2,machine-chest-press:0/1>bench-press', 'saved that way', d);
+  // «вернуть»: the third set goes back to the bench.
+  await card('Жим в тренажёре').getByRole('button', { name: 'Вернуть «Жим штанги лёжа»' }).click();
+  await p.waitForTimeout(900);
+  const bench = card('Жим штанги лёжа');
+  expect(
+    (await bench.locator('.set-row:not(.set-labels)').count()) === 3 && (await bench.locator('.set-row.is-done').count()) === 2 && !(await card('Жим в тренажёре').count()),
+    '«вернуть»: the bench has its three sets again, two done',
+  );
+  // Swapped again: what was picked for it before comes first.
+  await bench.getByRole('button', { name: 'Заменить упражнение: Жим штанги лёжа' }).click();
+  await p.waitForTimeout(500);
+  const again = (await p.locator('.sheet .pick-list .pick').first().innerText()).replace(/\s+/g, ' ');
+  expect(/Жим в тренажёре/.test(again) && /выбирали раньше/.test(again), 'the one picked before is first, marked', again);
+  await p.locator('.sheet .pick-list .pick').first().click();
+  await p.waitForTimeout(400);
+  await p.getByRole('button', { name: 'Оставить их за «Жим штанги лёжа»' }).click();
+  await p.waitForTimeout(800);
+  // For good: the machine press in the program; today the bench keeps its two sets, the machine press its one.
+  await card('Жим в тренажёре').getByRole('button', { name: 'Оставить «Жим в тренажёре» в программе насовсем' }).click();
+  await p.waitForTimeout(400);
+  await p.getByRole('button', { name: 'В программе насовсем', exact: true }).click();
+  await p.waitForTimeout(2500);
+  const plan = async () => (await call('get', '/api/programs')).programs.find((x) => x.id === pr.id).days[0].exercises.map((e) => e.exerciseId + ':' + e.sets).join(',');
+  expect((await plan()) === 'machine-chest-press:3,lat-pulldown:3,lateral-raise:3', 'the program: the machine press in place of the bench', await plan());
+  l = await lines();
+  expect(/^Жим штанги лёжа 60×\d+.*60×\d+$/.test(l[0]) && /Жим в тренажёре/.test(l[1]) && !/вместо/.test(l[1]), 'today: the bench with its two sets, the machine press planned now', l.slice(0, 2));
+  expect((await card('Жим в тренажёре').locator('.set-row:not(.set-labels)').count()) === 1, 'the machine press keeps the one set left today');
+  // The pulldown: a set ticked, then it turns out it was the machine — the set goes over to it.
+  await tickNext(card('Вертикальная тяга'), 40);
+  await card('Вертикальная тяга').getByRole('button', { name: 'Заменить упражнение: Вертикальная тяга' }).click();
+  await p.waitForTimeout(500);
+  await pick('Тяга сверху рычажная (стек)');
+  await p.getByRole('button', { name: 'Это был «Тяга сверху рычажная (стек)»' }).click();
+  await p.waitForTimeout(800);
+  const moved = card('Тяга сверху рычажная (стек)').locator('.set-row.is-done [data-w]');
+  expect((await moved.count()) === 1 && (await moved.first().inputValue()) === '40', 'the ticked set went over as it was done', await moved.count());
+  // Nothing ticked: replaced at once.
+  await card('Отведение гантелей в стороны').getByRole('button', { name: 'Заменить упражнение: Отведение гантелей в стороны' }).click();
+  await p.waitForTimeout(500);
+  await pick('Отведение рук в тренажёре');
+  await p.waitForTimeout(600);
+  expect(!(await p.locator('.sheet').count()) && (await card('Отведение рук в тренажёре').count()) === 1, 'nothing ticked: replaced at once');
+  await tickNext(card('Жим в тренажёре'), 50);
+  await p.waitForTimeout(1200);
+  d = await draft();
+  expect(d.join(',') === 'bench-press:2/2,machine-chest-press:1/1,stack-lat-pulldown:1/3,machine-lateral-raise:0/3', 'saved: every set where it was done', d);
+  await finishHere(pane());
+  const h = (await call('get', `/api/client/${c.clientId}/history`)).sessions;
+  const rec = h[0]?.exercises.map((e) => e.exerciseId + ':' + e.sets.length).join(',');
+  expect(rec === 'bench-press:2,machine-chest-press:1,stack-lat-pulldown:1', 'the record: bench 2 sets, machine press 1, the pulldown machine 1', rec);
+  expect((await plan()) === 'machine-chest-press:3,lat-pulldown:3,lateral-raise:3', 'the program: only the swap «насовсем» changed it', await plan());
 });
 
 await scenario('17. Картинка упражнения: начало, конец, движение', async () => {

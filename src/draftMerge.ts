@@ -18,7 +18,7 @@ function pick<T>(hasBase: boolean, base: T, local: T, remote: T, key: (v: T) => 
   if (hasBase && same(key(local), key(base))) return remote;
   return local;
 }
-const extraKey = (x?: SessionExercise['extra']) => (x ? [x.repMin, x.repMax, x.targetRir, !!x.once] : null);
+const extraKey = (x?: SessionExercise['extra']) => (x ? [x.repMin, x.repMax, x.targetRir, !!x.once, x.instead || ''] : null);
 
 function sameEntry(a: SessionExercise, b: SessionExercise) {
   return (

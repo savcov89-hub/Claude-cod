@@ -639,6 +639,60 @@ async function main() {
     expect(!after?.art, 'back to its own drawing', after);
   }
 
+  console.log('23. Замена посреди упражнения: сделанное остаётся за ним, остальное — у замены; «насовсем» для неё');
+  {
+    const s = await setup('x', ['bench-press', 'lat-pulldown'], ['bench-press']);
+    await s.T.open();
+    await s.C.open();
+    s.T.set('bench-press', 0, { weight: 60, reps: 10 });
+    s.T.set('bench-press', 1, { weight: 60, reps: 9 });
+    await s.T.save();
+    // The journal's split: the bench keeps its two done sets, the machine press does the third, for today.
+    const bench = s.T.entries.find((e) => e.exerciseId === 'bench-press')!;
+    bench.sets = bench.sets.filter((x) => x.reps > 0);
+    s.T.entries.splice(1, 0, {
+      exerciseId: 'machine-chest-press',
+      exerciseName: '?',
+      extra: { repMin: 8, repMax: 12, targetRir: 2, once: true, instead: 'bench-press' },
+      sets: [{ weight: 0, reps: 0, rir: null }],
+    });
+    // Something standing in for an exercise that is not in this workout: no such mark is kept.
+    s.T.entries.push({ exerciseId: 'cable-fly', exerciseName: '?', extra: { repMin: 8, repMax: 12, targetRir: 2, instead: 'leg-press' }, sets: [{ weight: 0, reps: 0, rir: null }] });
+    s.T.pending = true;
+    expect((await s.T.save()).status === 200, 'the split is accepted');
+    const stored: SessionExercise[] = (await call(s.trainer, 'GET', '/api/draft/' + s.T.path)).exercises;
+    const part = stored.find((e) => e.exerciseId === 'machine-chest-press');
+    expect(part?.extra?.instead === 'bench-press' && part.extra.once === true && part.exerciseName === 'Жим в тренажёре', 'the rest of the bench: the machine press, for today', part);
+    expect(stored.find((e) => e.exerciseId === 'bench-press')?.sets.length === 2, 'the bench keeps its two done sets');
+    expect(!stored.find((e) => e.exerciseId === 'cable-fly')?.extra?.instead, 'a mark for an exercise not planned today is dropped', stored.find((e) => e.exerciseId === 'cable-fly'));
+    expect((await s.C.poll()) === 'adopted', "the client's phone takes the split");
+    s.C.set('machine-chest-press', 0, { weight: 40, reps: 12 });
+    expect((await s.C.save()).status === 200, 'and records the third set on the machine press');
+    // For good: the machine press in place of the bench, in both workouts that have it.
+    await call(s.trainer, 'POST', `/api/programs/${s.program.id}/days/day-1/exercise`, {
+      exerciseId: 'bench-press',
+      replaceWith: 'machine-chest-press',
+      everywhere: true,
+      baseRevision: s.C.rev,
+    });
+    const w = await s.T.open();
+    const days = (await call(s.trainer, 'GET', '/api/programs')).programs.find((x: any) => x.id === s.program.id).days;
+    const ids = (d: any) => d.exercises.map((e: any) => e.exerciseId + ':' + e.sets).join(',');
+    expect(ids(days[0]) === 'machine-chest-press:3,lat-pulldown:3' && ids(days[1]) === 'machine-chest-press:3', 'in the program: the machine press instead of the bench, in both workouts', days.map(ids));
+    const now = w.draft.exercises.map((e: SessionExercise) => e.exerciseId + ':' + e.sets.filter((x) => x.reps > 0).length + '/' + e.sets.length + (e.extra ? (e.extra.once ? ' once' : ' added') : ''));
+    expect(now.join(',') === 'bench-press:2/2 once,machine-chest-press:1/1,lat-pulldown:0/3,cable-fly:0/1 added', 'the open workout: the bench keeps its done sets for today, the machine press is planned with its set', now);
+    const fitted = Math.max(Date.parse(w.draft.updatedAt), w.draft.programAt ? Date.parse(w.draft.programAt) : 0);
+    expect(!(Date.parse(w.programUpdatedAt) > fitted), 'the journal does not fit it to the program again: the one set stays one', [w.programUpdatedAt, w.draft.updatedAt, w.draft.programAt]);
+    s.T.set('lat-pulldown', 0, { weight: 50, reps: 10 });
+    s.T.entries = s.T.entries.filter((e) => e.exerciseId !== 'cable-fly');
+    const fin = await s.T.finish();
+    expect(!!fin.sessionId, 'finished', fin);
+    const rec = (await history(s)).sessions[0]?.exercises.map((e: any) => e.exerciseId + ':' + e.sets.length).join(',');
+    expect(rec === 'bench-press:2,machine-chest-press:1,lat-pulldown:1', 'the record: every set where it was done', rec);
+    const after = (await call(s.trainer, 'GET', '/api/programs')).programs.find((x: any) => x.id === s.program.id).days[0];
+    expect(ids(after) === 'machine-chest-press:3,lat-pulldown:3', 'the bench done today does not come back into the program', ids(after));
+  }
+
   console.log(`\n${checks} проверок, ошибок: ${failures}`);
   process.exit(failures ? 1 : 0);
 }

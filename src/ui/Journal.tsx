@@ -1,5 +1,5 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, Check, ChevronDown, ListOrdered, Minus, MoreHorizontal, Pencil, Plus, SkipForward, Trash2, Undo2 } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowLeftRight, ArrowUp, Check, ChevronDown, ListOrdered, Minus, MoreHorizontal, Pencil, Pin, Plus, SkipForward, Trash2, Undo2 } from 'lucide-react';
 import { api, inGym, isLocal, live, readError, safeStorage, type LiveLink } from '../transport';
 import { equipmentOf, fmtKg, isStack, suggestNext, weightUnit, type PersonalRecord, type Suggestion } from '../analytics';
 import { localDate } from '../clock';
@@ -9,6 +9,20 @@ import type { AutoFinished, Exercise, SessionExercise, SetEntry, WorkoutExercise
 import { Confirm, Sheet, autoFinishedText, clock, elapsed, fmtDate, fmtSets, nextDayName, plural, useNow } from './common';
 import { ExercisePicker } from './ProgramBuilder';
 import { ArtPicker, ExerciseInfoSheet, ExerciseThumb } from './exerciseArt';
+import { keepInView } from './keepInView';
+import { withRecent } from '../similar';
+
+/** What was picked to replace each exercise on this phone, newest first («Похожие» in the swap list show it on top). */
+const RECENT_KEY = 'tl-swap-recent';
+const readRecent = (): Record<string, string[]> => {
+  try {
+    const v = JSON.parse(safeStorage.get(RECENT_KEY) || '{}');
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
+};
+const rememberSwap = (from: string, to: string) => safeStorage.set(RECENT_KEY, JSON.stringify(withRecent(readRecent(), from, to)));
 
 let exerciseList: Promise<Exercise[]> | null = null;
 // A drawing picked for an exercise (src/ui/exerciseArt.tsx): the list is read again.
@@ -284,7 +298,9 @@ function JournalBody({
   const cacheUsable = !!localPending && matchesPlan(localPending.results);
   // The program was edited after this workout was started: its set counts apply (done sets stay).
   const programChanged =
-    !!draftOf && !!workout.programUpdatedAt && Date.parse(workout.programUpdatedAt) > Date.parse(draftOf.updatedAt);
+    !!draftOf &&
+    !!workout.programUpdatedAt &&
+    Date.parse(workout.programUpdatedAt) > Math.max(Date.parse(draftOf.updatedAt), draftOf.programAt ? Date.parse(draftOf.programAt) : 0);
   const fitToPlan = (list: SessionExercise[]) =>
     list.map((e) => {
       const p = e.extra ? null : workout.day.exercises.find((x) => x.exerciseId === slotOf(e));
@@ -354,6 +370,8 @@ function JournalBody({
   const editTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startEditing = (slot: string) => {
     if (editTimer.current) clearTimeout(editTimer.current);
+    // A finished card left for another one folds now: the card being typed in stays where it is.
+    if (editing && editing !== slot) prepareFlip();
     setEditing(slot);
   };
   const stopEditing = () => {
@@ -366,14 +384,23 @@ function JournalBody({
   // True when ✓ is pressed while a number in the same row is being typed.
   const confirmTap = useRef(false);
   // Smooth list: when exercises fold, open or move, the others slide to their new place instead of jumping.
+  // What the eye is on stays put: the card tapped (`keep`), or else the card with the field being typed in —
+  // an exercise folding above it while the next one is filled in no longer pulls the field away.
   const listRef = useRef<HTMLFieldSetElement>(null);
   const flipFrom = useRef<Map<string, number> | null>(null);
   const listItems = () => Array.from(listRef.current?.querySelectorAll<HTMLElement>(':scope > [data-slot]') || []);
-  const prepareFlip = () => {
+  const prepareFlip = (keep?: string) => {
     const list = listRef.current;
     if (!list || flipFrom.current) return;
-    const top = list.getBoundingClientRect().top;
-    flipFrom.current = new Map(listItems().map((el) => [el.dataset.slot!, el.getBoundingClientRect().top - top]));
+    flipFrom.current = new Map(listItems().map((el) => [el.dataset.slot!, el.getBoundingClientRect().top]));
+    if (anchor.current) return;
+    const typing = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement;
+    const el = keep
+      ? listItems().find((x) => x.dataset.slot === keep)
+      : typing
+        ? (document.activeElement!.closest('[data-slot]') as HTMLElement | null)
+        : null;
+    if (el && list.contains(el)) anchor.current = { slot: el.dataset.slot!, top: el.getBoundingClientRect().top };
   };
   // Entries from the other phone: the exercise at the top of the screen stays where it is (Safari has no scroll anchoring).
   const anchor = useRef<{ slot: string; top: number } | null>(null);
@@ -398,11 +425,11 @@ function JournalBody({
     const from = flipFrom.current;
     flipFrom.current = null;
     if (!from || !listRef.current || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-    const top = listRef.current.getBoundingClientRect().top;
+    // On screen, after the scroll above: the card kept in place does not move, the others slide.
     for (const el of listItems()) {
       const was = from.get(el.dataset.slot!);
       if (was === undefined) continue;
-      const dy = was - (el.getBoundingClientRect().top - top);
+      const dy = was - el.getBoundingClientRect().top;
       if (Math.abs(dy) > 2) el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 280, easing: 'cubic-bezier(.2,.8,.2,1)' });
     }
   });
@@ -420,7 +447,7 @@ function JournalBody({
     }, 900);
   };
   const toggleExpanded = (i: string) => {
-    prepareFlip();
+    prepareFlip(i);
     setExpanded((cur) => {
       const next = new Set(cur);
       if (next.has(i)) next.delete(i);
@@ -444,8 +471,10 @@ function JournalBody({
   /** The trainer can change the program from the journal. */
   const canProgram = workout.actorRole === 'trainer' && !isFree;
   const since = inGym(workout.checkedInAt) ? new Date(workout.checkedInAt!).getTime() : null;
-  // A replacement picked for a planned exercise: today only, or in the program for good.
-  const [swapChoice, setSwapChoice] = useState<{ ei: number; ex: Exercise } | null>(null);
+  // Sets ticked already when the exercise is replaced (or brought back): whose they were.
+  const [doneChoice, setDoneChoice] = useState<{ ei: number; next: Exercise | null } | null>(null);
+  // Today's replacement kept in the program for good (trainer): this workout only, or everywhere.
+  const [keepSwap, setKeepSwap] = useState<number | null>(null);
   const [swapError, setSwapError] = useState('');
   // Sets / rep range being changed for the exercise at this index.
   const [targetsFor, setTargetsFor] = useState<number | null>(null);
@@ -458,14 +487,23 @@ function JournalBody({
     setMenu(null);
     setMenuConfirm(null);
   };
-  const askRevert = (ei: number) => {
-    setSwapping(null);
-    if (latest.current[ei].sets.some((x) => x.reps > 0)) {
-      setMenu(ei);
-      setMenuConfirm('revert');
-    } else void swapExercise(ei, null);
-  };
   const plannedOf = (r: SessionExercise) => workout.day.exercises.find((p) => p.exerciseId === slotOf(r))!;
+  /** The planned entry whose remaining sets an added one took over (swapped mid-exercise); -1 when it is not here. */
+  const holderOf = (list: SessionExercise[], r: SessionExercise) => {
+    const slot = r.extra?.instead;
+    return slot && workout.day.exercises.some((p) => p.exerciseId === slot) ? list.findIndex((x) => !x.extra && slotOf(x) === slot) : -1;
+  };
+  const programNameOf = (slot: string) => workout.day.exercises.find((p) => p.exerciseId === slot)?.exerciseName || '';
+  /** What a replacement is remembered for (on this phone): the planned exercise of the slot, or the added one. */
+  const swapKeyOf = (r: SessionExercise) => (r.extra ? r.extra.instead || r.exerciseId : slotOf(r));
+  /** What today's replacement stands in for: the planned exercise (or, for the rest of its sets, the one done before). */
+  const standsFor = (r: SessionExercise, list: SessionExercise[] = results): { name: string; slot: string } | null => {
+    if (r.extra) {
+      const h = holderOf(list, r);
+      return h >= 0 ? { name: list[h].exerciseName, slot: r.extra.instead! } : null;
+    }
+    return r.replaces ? { name: plannedOf(r).exerciseName, slot: r.replaces } : null;
+  };
   // Entries follow the journal's own order, which may differ from the program for this workout.
   const plan = useMemo<WorkoutExercise[]>(
     () =>
@@ -877,8 +915,11 @@ function JournalBody({
       const j = latest.current[i].sets.findIndex((x) => x.reps === 0);
       if (j >= 0 && !latest.current[i].skipped) next = field(i, j);
     }
-    if (next) next.focus();
-    else (document.activeElement as HTMLElement | null)?.blur();
+    if (!next) return (document.activeElement as HTMLElement | null)?.blur();
+    // One smooth scroll of our own, only when the next row (with room under it) is not in sight above the
+    // keyboard — instead of the browser's jump to the field and a second correction after it.
+    next.focus({ preventScroll: true });
+    keepInView(next);
   };
   // A double tap on ✓ (wet fingers, a laggy phone) marks the set once instead of marking and clearing it.
   const lastToggle = useRef<{ key: string; at: number } | null>(null);
@@ -903,7 +944,11 @@ function JournalBody({
       // No weight yet (first workout): ask for it instead of saving 0 kg.
       setNudge(ei + '-' + si);
       const input = rootRef.current?.querySelector('[data-w="' + ei + '-' + si + '"]') as HTMLInputElement | null;
-      input?.focus();
+      if (input) {
+        // The row is on screen already (its ✓ was tapped): no jump to the field, only room above the keyboard.
+        input.focus({ preventScroll: true });
+        keepInView(input);
+      }
       return;
     }
     setNudge(null);
@@ -921,43 +966,117 @@ function JournalBody({
     update(latest.current.map((x, i) => (i === ei ? { ...x, sets: x.sets.slice(0, -1) } : x)));
   };
 
-  /** Puts `next` in place of the planned exercise at `ei` for this workout only; `null` restores the plan. */
-  const swapExercise = async (ei: number, next: Exercise | null) => {
+  /** An exercise's last results (read once), for its weights and «было». */
+  const infoFor = async (ex: Exercise): Promise<Previous> => {
+    let info: Previous;
+    try {
+      info = swapInfo[ex.id] || (await fetchPrevious(ex.id));
+    } catch {
+      info = { previousSets: [], previousAt: null };
+    }
+    info = { ...info, equipment: ex.equipment };
+    setSwapInfo((cur) => ({ ...cur, [ex.id]: info }));
+    return info;
+  };
+  /** `count` sets of `target`, nothing done: weights from its suggestion, else from its last result. */
+  const freshSets = (target: Parameters<typeof suggestNext>[0], previous: SetEntry[], count: number): SetEntry[] => {
+    const sug = suggestNext(target, previous);
+    return Array.from({ length: Math.max(1, Math.min(10, count)) }, (_, si) => ({
+      weight: sug.weight || previous[si]?.weight || previous.at(-1)?.weight || 0,
+      reps: 0,
+      rir: null,
+    }));
+  };
+  /** Sets done in one exercise that were really the other's: kept where they are, the empty ones get its weights. */
+  const doneKept = (sets: SetEntry[], fresh: SetEntry[]) => sets.map((x, si) => (x.reps > 0 ? x : fresh[si] || fresh.at(-1)!));
+
+  /**
+   * Puts `next` in place of the exercise at `ei` for this workout only; `null` brings back the planned one.
+   * Sets ticked already: `keep` — they stay with the exercise they were done in, the new one takes the remaining
+   * sets (for today; a planned slot keeps its exercise with the done sets); `move` — they were the new exercise's.
+   */
+  const swapExercise = async (ei: number, next: Exercise | null, mode: DoneMode = 'move') => {
+    setSwapping(null);
+    setDoneChoice(null);
+    closeMenu();
+    const was = latest.current[ei];
+    if (!was) return;
+    if (!next) {
+      if (was.extra) return giveBack(ei, mode);
+      if (!was.replaces) return;
+    }
+    const info = next ? await infoFor(next) : null;
+    // The list may have changed meanwhile (the other phone): the same entry as it is now.
+    const at = latest.current.findIndex((x) => x.exerciseId === was.exerciseId);
+    const cur = latest.current[at];
+    if (!cur) return;
+    const done = cur.sets.filter((x) => x.reps > 0);
+    const keep = mode === 'keep' && done.length > 0;
+    const left = Math.max(1, cur.sets.length - done.length);
+    const note = !keep && done.length && cur.note ? { note: cur.note } : {};
+    const list = [...latest.current];
+    if (cur.extra) {
+      // An added exercise (or the rest of a planned one): the new one has its targets and marks.
+      const target = { exerciseId: next!.id, exerciseName: next!.name, equipment: next!.equipment, sets: cur.sets.length, ...cur.extra };
+      const fresh = freshSets(target, info!.previousSets, keep ? left : cur.sets.length);
+      const entry: SessionExercise = { exerciseId: next!.id, exerciseName: next!.name, extra: cur.extra, ...note, sets: keep ? fresh : doneKept(cur.sets, fresh) };
+      // The done sets stay as they were done; that one no longer joins the program — the new one took its place.
+      list.splice(at, 1, ...(keep ? [{ ...cur, extra: { ...cur.extra, once: true }, sets: done }, entry] : [entry]));
+    } else {
+      const planned = plannedOf(cur);
+      const slot = planned.exerciseId;
+      const targets = { repMin: planned.repMin, repMax: planned.repMax, targetRir: planned.targetRir };
+      const id = next ? next.id : slot;
+      const name = next ? next.name : planned.exerciseName;
+      const target = { ...planned, exerciseId: id, exerciseName: name, equipment: next ? next.equipment : planned.equipment };
+      const fresh = freshSets(target, info ? info.previousSets : planned.previousSets, keep ? left : cur.sets.length);
+      const inSlot = (sets: SetEntry[]): SessionExercise => ({ exerciseId: id, exerciseName: name, ...(next ? { replaces: slot } : {}), ...note, sets });
+      if (!keep) list[at] = inSlot(doneKept(cur.sets, fresh));
+      else if (next)
+        // The planned slot keeps what was done in it; the new exercise does the rest, for today.
+        list.splice(at, 1, { ...cur, sets: done }, { exerciseId: id, exerciseName: name, extra: { ...targets, once: true, instead: slot }, sets: fresh });
+      else {
+        // Back to the planned exercise for the remaining sets; today's replacement keeps the sets done in it.
+        const { replaces: _r, ...plain } = cur;
+        list.splice(at, 1, { ...plain, extra: { ...targets, once: true, instead: slot }, sets: done }, inSlot(fresh));
+      }
+    }
+    if (next) rememberSwap(swapKeyOf(cur), next.id);
+    prepareFlip(slotOf(cur));
+    update(list);
+  };
+  /**
+   * The rest of a planned exercise's sets (taken over mid-exercise) goes back to it. Sets ticked here: `keep` — they
+   * stay with this exercise, only the empty ones go back; `move` — they were the planned one's.
+   */
+  const giveBack = (ei: number, mode: DoneMode) => {
+    const cur = latest.current[ei];
+    const h = holderOf(latest.current, cur);
+    if (h < 0) return;
+    const holder = latest.current[h];
+    const done = cur.sets.filter((x) => x.reps > 0);
+    const keep = mode === 'keep' && done.length > 0;
+    const weight = holder.sets.filter((x) => x.reps > 0).at(-1)?.weight || holder.sets.at(-1)?.weight || 0;
+    const empty = (): SetEntry => ({ weight, reps: 0, rir: null });
+    const back = keep ? cur.sets.filter((x) => x.reps === 0).map(empty) : cur.sets.map((x) => (x.reps > 0 ? x : empty()));
+    if (keep && !back.length) return;
+    prepareFlip(slotOf(holder));
+    update(
+      latest.current.flatMap((x, i): SessionExercise[] => {
+        if (i === h) return [{ ...holder, sets: [...holder.sets, ...back].slice(0, 10) }];
+        if (i === ei) return keep ? [{ ...cur, sets: done }] : [];
+        return [x];
+      }),
+    );
+  };
+  /** Replace or bring back: with sets ticked already, the trainer says whose they were first. */
+  const askSwap = (ei: number, next: Exercise | null) => {
+    const cur = latest.current[ei];
+    if (!cur) return;
     setSwapping(null);
     closeMenu();
-    const cur = latest.current[ei];
-    if (cur.extra) {
-      if (next) update(latest.current.map((x, i) => (i === ei ? null : x)).flatMap((x) => (x ? [x] : [])));
-      if (next) await addExercise(next, { sets: cur.sets.length, ...cur.extra }, ei);
-      return;
-    }
-    const planned = plannedOf(cur);
-    const id = next ? next.id : planned.exerciseId;
-    let info: Previous = { previousSets: planned.previousSets, previousAt: planned.previousAt || null };
-    if (next) {
-      try {
-        info = swapInfo[id] || (await fetchPrevious(id));
-      } catch {
-        info = { previousSets: [], previousAt: null };
-      }
-      info = { ...info, equipment: next.equipment };
-      setSwapInfo((cur) => ({ ...cur, [id]: info }));
-    }
-    const sug = suggestNext(
-      next ? { ...planned, exerciseId: id, exerciseName: next.name, equipment: next.equipment } : planned,
-      info.previousSets,
-    );
-    const entry: SessionExercise = {
-      exerciseId: id,
-      exerciseName: next ? next.name : planned.exerciseName,
-      ...(next ? { replaces: planned.exerciseId } : {}),
-      sets: Array.from({ length: latest.current[ei].sets.length }, (_, si) => ({
-        weight: sug.weight || info.previousSets[si]?.weight || info.previousSets.at(-1)?.weight || 0,
-        reps: 0,
-        rir: null,
-      })),
-    };
-    update(latest.current.map((x, i) => (i === ei ? entry : x)));
+    if (cur.sets.some((x) => x.reps > 0)) setDoneChoice({ ei, next });
+    else void swapExercise(ei, next);
   };
   const openSwap = async (ei: number) => {
     closeMenu();
@@ -1036,12 +1155,14 @@ function JournalBody({
   };
   const setSkipped = (ei: number, skipped: boolean) => {
     closeMenu();
-    prepareFlip();
+    // Brought back by a tap on its line: that line opens where it is.
+    prepareFlip(skipped ? undefined : slotOf(latest.current[ei]));
     update(latest.current.map((x, i) => (i === ei ? { ...x, skipped } : x)));
   };
   /** Arrows on the card: the order of this workout; the trainer can then keep it in the program. */
   const move = (ei: number, step: -1 | 1) => {
-    prepareFlip();
+    // The card stays under the finger, so the arrow can be pressed again to move it further.
+    prepareFlip(slotOf(latest.current[ei]));
     update(moveBy(latest.current, ei, step));
   };
   const moveBy = (list: SessionExercise[], ei: number, step: -1 | 1) => {
@@ -1114,7 +1235,7 @@ function JournalBody({
     const sets = resizeSets(ei, t.sets);
     if (e.extra) {
       const { sets: _n, ...targets } = t;
-      const extra = { ...targets, ...(e.extra.once ? { once: true } : {}) };
+      const extra = { ...targets, ...(e.extra.once ? { once: true } : {}), ...(e.extra.instead ? { instead: e.extra.instead } : {}) };
       update(latest.current.map((x, i) => (i === ei ? { ...x, sets, extra } : x)));
       setTargetsFor(null);
       return;
@@ -1122,11 +1243,15 @@ function JournalBody({
     update(latest.current.map((x, i) => (i === ei ? { ...x, sets } : x)));
     if (await saveExerciseToProgram(slotOf(e), t)) setTargetsFor(null);
   };
-  /** A replacement for good: swapped in today, then put in the program in place of the planned one. */
-  const replaceInProgram = async (ei: number, ex: Exercise, everywhere: boolean) => {
-    const slot = slotOf(latest.current[ei]);
-    if (latest.current[ei].exerciseId !== ex.id) await swapExercise(ei, ex);
-    return saveExerciseToProgram(slot, { replaceWith: ex.id, everywhere });
+  /**
+   * Today's replacement for good: put in the program in place of the planned one (for the rest of its sets too —
+   * then the sets done before stay as they were, for today).
+   */
+  const keepInProgram = async (ei: number, everywhere: boolean) => {
+    const r = latest.current[ei];
+    const was = r && standsFor(r, latest.current);
+    if (!was) return false;
+    return saveExerciseToProgram(was.slot, { replaceWith: r.exerciseId, everywhere });
   };
   /** The program's other workouts that have this exercise too: a replacement «насовсем» goes there as well. */
   const otherDaysWith = (exerciseId: string) =>
@@ -1386,7 +1511,7 @@ function JournalBody({
           const sug = planSuggestions[ei];
           const r = results[ei];
           const slot = slotOf(r);
-          const original = r.replaces ? plannedOf(r) : null;
+          const original = standsFor(r);
           const exDone = r.sets.filter((s) => s.reps > 0).length;
           const complete = exDone === r.sets.length;
           if (r.skipped)
@@ -1436,20 +1561,51 @@ function JournalBody({
                   <span className="ex-plan">
                     {e.sets}×{e.repMin}–{e.repMax} · RIR {e.targetRir}
                     {e.previousAt ? ' · прошл. ' + fmtDate(e.previousAt) : ''}
-                    {r.extra && !isFree ? (r.extra.once ? ' · перенесено' : addsJoin ? ' · войдёт в программу' : ' · добавлено сегодня') : ''}
+                    {r.extra && !isFree && !original ? (r.extra.once ? ' · перенесено' : addsJoin ? ' · войдёт в программу' : ' · добавлено сегодня') : ''}
                   </span>
                   {original && (
                     <span className="ex-swapped">
-                      вместо «{original.exerciseName}»
-                      <button className="link-btn" onClick={(ev) => { ev.stopPropagation(); askRevert(ei); }}>
+                      <span>вместо «{original.name}»</span>
+                      <button
+                        className="link-btn"
+                        aria-label={'Вернуть «' + original.name + '»'}
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          askSwap(ei, null);
+                        }}
+                      >
                         <Undo2 size={13} /> вернуть
                       </button>
+                      {canProgram && (
+                        <button
+                          className="link-btn"
+                          aria-label={'Оставить «' + e.exerciseName + '» в программе насовсем'}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            setSwapError('');
+                            setKeepSwap(ei);
+                          }}
+                        >
+                          <Pin size={13} /> насовсем
+                        </button>
+                      )}
                     </span>
                   )}
                 </div>
                 <span className={'hint hint-' + sug.kind} title={sug.text}>
                   {shortHint(sug)}
                 </span>
+                {/* One tap to the list of replacements: a busy machine, a movement that does not suit today. */}
+                <button
+                  className="ex-swap"
+                  aria-label={'Заменить упражнение: ' + e.exerciseName}
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    void openSwap(ei);
+                  }}
+                >
+                  <ArrowLeftRight size={14} /> заменить
+                </button>
                 <span className="ex-move">
                   <button
                     aria-label={'Выше: ' + e.exerciseName}
@@ -1503,7 +1659,7 @@ function JournalBody({
                   const target = sug.reps[si] ?? sug.reps.at(-1) ?? e.repMin;
                   const prev = e.previousSets[si];
                   return (
-                    <div className={'set-row' + (s.reps > 0 ? ' is-done' : '')} role="row" key={si}>
+                    <div className={'set-row' + (s.reps > 0 ? ' is-done' : '')} role="row" key={si} data-keep>
                       <span className="set-n num">{si + 1}</span>
                       <span className="set-prev num">{prev ? fmtKg(prev.weight) + '×' + prev.reps : '—'}</span>
                       <NumberInput
@@ -1629,21 +1785,24 @@ function JournalBody({
           }}
         />
       )}
-      {swapping && (
+      {swapping && results[swapping.ei] && (
         <ExercisePicker
           title={'Замена: ' + plan[swapping.ei].exerciseName}
           exercises={swapping.list}
           restrictions={workout.restrictions}
           exclude={[...workout.day.exercises.map((x) => x.exerciseId), ...plan.map((x) => x.exerciseId)]}
           initialGroup={
-            (swapping.list.find((x) => x.id === slotOf(results[swapping.ei]))?.muscleGroup || '').split(' / ')[0]
+            (swapping.list.find((x) => x.id === swapKeyOf(results[swapping.ei]))?.muscleGroup || '').split(' / ')[0]
           }
+          // The closest replacements first: what was picked for it before, then the same movement and muscles.
+          similarTo={swapping.list.find((x) => x.id === swapKeyOf(results[swapping.ei])) || { id: swapKeyOf(results[swapping.ei]) }}
+          recent={readRecent()[swapKeyOf(results[swapping.ei])] || []}
           top={
-            results[swapping.ei]?.replaces ? (
-              <button className="pick pick-original" onClick={() => askRevert(swapping.ei)}>
+            standsFor(results[swapping.ei]) ? (
+              <button className="pick pick-original" onClick={() => askSwap(swapping.ei, null)}>
                 <span className="grow">
-                  <strong>{plannedOf(results[swapping.ei]).exerciseName}</strong>
-                  <span className="muted small">было в программе · вернуть</span>
+                  <strong>{standsFor(results[swapping.ei])!.name}</strong>
+                  <span className="muted small">{results[swapping.ei].extra ? 'было до замены' : 'было в программе'} · вернуть</span>
                 </span>
                 <Undo2 size={18} />
               </button>
@@ -1654,12 +1813,8 @@ function JournalBody({
           onCreated={() => {
             exerciseList = null;
           }}
-          onPick={(x) => {
-            if (canProgram && !results[swapping.ei].extra) {
-              setSwapping(null);
-              setSwapChoice({ ei: swapping.ei, ex: x });
-            } else void swapExercise(swapping.ei, x);
-          }}
+          // Picked: replaced for today at once (for good — «насовсем» on the card afterwards).
+          onPick={(x) => askSwap(swapping.ei, x)}
           onClose={() => setSwapping(null)}
         />
       )}
@@ -1674,11 +1829,13 @@ function JournalBody({
           removeBlocked={!results[menu].extra && latest.current.length === 1}
           canEditTargets={canProgram || !!results[menu].extra}
           canJoin={canProgram}
-          elsewhere={otherDaysWith(slotOf(results[menu]))}
+          elsewhere={otherDaysWith(standsFor(results[menu])?.slot || slotOf(results[menu]))}
           busy={programBusy}
           onConfirm={setMenuConfirm}
+          backTo={standsFor(results[menu])?.name}
+          keepFor={standsFor(results[menu]) ? programNameOf(standsFor(results[menu])!.slot) : undefined}
           onSwap={() => void openSwap(menu)}
-          onRevert={() => void swapExercise(menu, null)}
+          onRevert={() => askSwap(menu, null)}
           onSkip={() => setSkipped(menu, true)}
           onDrop={() => removeExtra(menu)}
           onJoin={async () => {
@@ -1690,9 +1847,10 @@ function JournalBody({
             setTargetsFor(menu);
             closeMenu();
           }}
-          onKeepSwap={async () => {
-            const entry = latest.current[menu];
-            if (entry.replaces && (await saveExerciseToProgram(entry.replaces, { replaceWith: entry.exerciseId, everywhere: true }))) closeMenu();
+          onKeepSwap={() => {
+            setSwapError('');
+            setKeepSwap(menu);
+            closeMenu();
           }}
           onRemove={async () => {
             const keep = latest.current.filter((_, i) => i !== menu);
@@ -1794,26 +1952,30 @@ function JournalBody({
           )}
         </Sheet>
       )}
-      {swapChoice && (
-        <SwapChoice
-          ex={swapChoice.ex}
-          name={plan[swapChoice.ei]?.exerciseName || ''}
-          planned={plannedOf(results[swapChoice.ei])?.exerciseName || ''}
+      {keepSwap !== null && results[keepSwap] && standsFor(results[keepSwap]) && (
+        <KeepSwap
+          name={results[keepSwap].exerciseName}
+          planned={programNameOf(standsFor(results[keepSwap])!.slot)}
           dayName={workout.day.name}
-          elsewhere={otherDaysWith(slotOf(results[swapChoice.ei]))}
+          elsewhere={otherDaysWith(standsFor(results[keepSwap])!.slot)}
           busy={programBusy}
           error={swapError}
-          onToday={() => {
-            void swapExercise(swapChoice.ei, swapChoice.ex);
-            setSwapChoice(null);
-          }}
           onProgram={async (everywhere) => {
             setSwapError('');
             // Closed only once it is in the program; otherwise it says so here (today the swap stays).
-            if (await replaceInProgram(swapChoice.ei, swapChoice.ex, everywhere)) setSwapChoice(null);
-            else setSwapError('Не сохранилось в программе — сегодня упражнение уже заменено. Нажмите ещё раз.');
+            if (await keepInProgram(keepSwap, everywhere)) setKeepSwap(null);
+            else setSwapError('Не сохранилось в программе — сегодня замена остаётся. Нажмите ещё раз.');
           }}
-          onClose={() => setSwapChoice(null)}
+          onClose={() => setKeepSwap(null)}
+        />
+      )}
+      {doneChoice && results[doneChoice.ei] && (
+        <DoneChoice
+          entry={results[doneChoice.ei]}
+          to={doneChoice.next ? doneChoice.next.name : standsFor(results[doneChoice.ei])?.name || ''}
+          back={!doneChoice.next && !!results[doneChoice.ei].extra}
+          onPick={(mode) => void swapExercise(doneChoice.ei, doneChoice.next, mode)}
+          onClose={() => setDoneChoice(null)}
         />
       )}
 
@@ -1859,7 +2021,7 @@ function JournalBody({
   );
 }
 
-type MenuConfirm = 'swap' | 'revert' | 'remove' | 'drop';
+type MenuConfirm = 'remove' | 'drop';
 
 /** «A», «B» и «C». */
 const quoteList = (names: string[]) => {
@@ -1867,50 +2029,45 @@ const quoteList = (names: string[]) => {
   return q.length > 1 ? q.slice(0, -1).join(', ') + ' и ' + q[q.length - 1] : q[0] || '';
 };
 
+type DoneMode = 'keep' | 'move';
+
 /**
- * A replacement picked for a planned exercise: today only, or in the program for good — in every workout of the
- * program that has the exercise, remembered for the client (what the app picks for her later has the new one), or,
- * when other workouts have it too, in this workout only.
+ * Today's replacement kept in the program for good: in every workout of the program that has the planned exercise,
+ * remembered for the client (what the app picks for her later has the new one), or, when other workouts have it too,
+ * in this workout only.
  */
-function SwapChoice({
-  ex,
+function KeepSwap({
   name,
   planned,
   dayName,
   elsewhere,
   busy,
   error,
-  onToday,
   onProgram,
   onClose,
 }: {
-  ex: Exercise;
-  /** What is in the slot now (the planned exercise, or today's replacement). */
+  /** Today's replacement. */
   name: string;
-  /** The program's exercise that is replaced. */
+  /** The program's exercise it replaces. */
   planned: string;
   dayName: string;
   /** Other workouts of the program with the planned exercise. */
   elsewhere: string[];
   busy: boolean;
   error: string;
-  onToday: () => void;
   onProgram: (everywhere: boolean) => void;
   onClose: () => void;
 }) {
   return (
-    <Sheet title={'Замена: ' + ex.name} onClose={onClose}>
-      <p className="muted small">Вместо «{name}». Подходы, повторы и RIR останутся прежними.</p>
+    <Sheet title={'«' + name + '» насовсем'} onClose={onClose}>
+      <p className="muted small">Вместо «{planned}» в программе. Подходы, повторы и RIR останутся прежними.</p>
       <div className="order-actions">
-        <button className="btn btn-block" disabled={busy} onClick={onToday}>
-          Только сегодня
-        </button>
         <button className="btn btn-primary btn-block" disabled={busy} onClick={() => onProgram(true)}>
           {busy ? 'Сохраняем…' : 'В программе насовсем'}
         </button>
         <p className="muted small center-text">
           {elsewhere.length ? `Во всех тренировках с «${planned}»: ${quoteList([dayName, ...elsewhere])}. ` : ''}
-          Запомнится клиенту: при подборе упражнений будет «{ex.name}» вместо «{planned}».
+          Запомнится клиенту: при подборе упражнений будет «{name}» вместо «{planned}».
         </p>
         {elsewhere.length > 0 && (
           <button className="btn btn-quiet btn-block" disabled={busy} onClick={() => onProgram(false)}>
@@ -1919,6 +2076,53 @@ function SwapChoice({
         )}
       </div>
       {error && <div className="alert">{error}</div>}
+    </Sheet>
+  );
+}
+
+/**
+ * Sets ticked already when the exercise is replaced or brought back: they stay with the one they were done in (the
+ * other one does the remaining sets), or they were the other one's.
+ */
+function DoneChoice({
+  entry,
+  to,
+  back,
+  onPick,
+  onClose,
+}: {
+  entry: SessionExercise;
+  /** The exercise coming in. */
+  to: string;
+  /** The rest of a planned exercise's sets going back to it. */
+  back: boolean;
+  onPick: (mode: DoneMode) => void;
+  onClose: () => void;
+}) {
+  const done = entry.sets.filter((x) => x.reps > 0).length;
+  const left = entry.sets.length - done;
+  const rest = back ? left : Math.max(1, left);
+  return (
+    <Sheet title="Подходы уже отмечены" onClose={onClose}>
+      <p className="muted small">
+        В «{entry.exerciseName}» отмечено {done} из {entry.sets.length}.
+      </p>
+      <div className="order-actions">
+        {rest > 0 && (
+          <>
+            <button className="btn btn-primary btn-block" onClick={() => onPick('keep')}>
+              Оставить их за «{entry.exerciseName}»
+            </button>
+            <p className="muted small center-text">
+              {back ? 'Оставшиеся' : 'Дальше'} {rest} {plural(rest, 'подход', 'подхода', 'подходов')} — «{to}».
+            </p>
+          </>
+        )}
+        <button className={'btn btn-block' + (rest > 0 ? '' : ' btn-primary')} onClick={() => onPick('move')}>
+          Это был «{to}»
+        </button>
+        <p className="muted small center-text">Отмеченные подходы перейдут к нему.</p>
+      </div>
     </Sheet>
   );
 }
@@ -1948,12 +2152,18 @@ function ExerciseMenu({
   onRemove,
   onClose,
   elsewhere = [],
+  backTo,
+  keepFor,
 }: {
   entry: SessionExercise;
   name: string;
   planned: WorkoutExercise;
   /** Other workouts of the program with the planned exercise: a replacement for good goes there too. */
   elsewhere?: string[];
+  /** Today's replacement: what «Вернуть» brings back. */
+  backTo?: string;
+  /** The program's exercise it would replace for good (trainer). */
+  keepFor?: string;
   confirm: MenuConfirm | null;
   canProgram: boolean;
   /** The only exercise of the workout: deleting it would leave the program day empty. */
@@ -1978,16 +2188,7 @@ function ExerciseMenu({
   const targets = extra || planned;
   return (
     <Sheet title={name} onClose={onClose}>
-      {confirm === 'swap' ? (
-        <Confirm text={'Заменить упражнение?' + lost} confirmLabel="Выбрать замену" onConfirm={onSwap} onCancel={() => onConfirm(null)} />
-      ) : confirm === 'revert' ? (
-        <Confirm
-          text={`Вернуть «${planned.exerciseName}»?` + lost}
-          confirmLabel="Вернуть"
-          onConfirm={onRevert}
-          onCancel={() => onConfirm(null)}
-        />
-      ) : confirm === 'drop' ? (
+      {confirm === 'drop' ? (
         <Confirm text={`Удалить «${name}» из этой тренировки?` + lost} confirmLabel="Удалить" onConfirm={onDrop} onCancel={() => onConfirm(null)} />
       ) : confirm === 'remove' ? (
         <Confirm
@@ -1999,31 +2200,36 @@ function ExerciseMenu({
         />
       ) : (
         <div className="ex-menu">
-          <button className="menu-item" onClick={() => (ticked ? onConfirm('swap') : onSwap())}>
+          <button className="menu-item" onClick={onSwap}>
             <ArrowLeftRight size={18} />
             <span className="grow">
-              {extra ? 'Заменить другим' : 'Заменить'}
+              {extra && !extra.instead ? 'Заменить другим' : 'Заменить'}
               <small>
-                {extra ? 'с теми же подходами и повторами' : canProgram ? 'на сегодня или в программе насовсем' : `в программе останется «${planned.exerciseName}»`}
+                {extra && !extra.instead
+                  ? 'с теми же подходами и повторами'
+                  : canProgram
+                    ? 'на эту тренировку — оставить насовсем можно потом'
+                    : `на эту тренировку, в программе останется «${planned.exerciseName}»`}
+                {ticked ? ' · отмеченные подходы не пропадут' : ''}
               </small>
             </span>
           </button>
-          {entry.replaces && (
-            <button className="menu-item" onClick={() => (ticked ? onConfirm('revert') : onRevert())}>
+          {backTo && (
+            <button className="menu-item" onClick={onRevert}>
               <Undo2 size={18} />
               <span className="grow">
-                Вернуть «{planned.exerciseName}»
-                <small>как в программе</small>
+                Вернуть «{backTo}»
+                <small>{extra ? 'оставшиеся подходы — снова ему' : 'как в программе'}</small>
               </span>
             </button>
           )}
-          {entry.replaces && canProgram && (
+          {keepFor && canProgram && (
             <button className="menu-item" onClick={onKeepSwap} disabled={busy}>
-              <Check size={18} />
+              <Pin size={18} />
               <span className="grow">
-                {busy ? 'Сохраняем…' : `Оставить «${name}» в программе`}
+                Оставить «{name}» в программе
                 <small>
-                  вместо «{planned.exerciseName}» насовсем{elsewhere.length ? ` — и в ${quoteList(elsewhere)}` : ''}
+                  вместо «{keepFor}» насовсем{elsewhere.length ? ` — можно и в ${quoteList(elsewhere)}` : ''}
                 </small>
               </span>
             </button>
@@ -2049,7 +2255,7 @@ function ExerciseMenu({
               </span>
             </button>
           )}
-          {extra && canJoin && (
+          {extra && !extra.instead && canJoin && (
             <button className="menu-item" onClick={onJoin} disabled={busy}>
               <Plus size={18} />
               <span className="grow">
@@ -2065,7 +2271,7 @@ function ExerciseMenu({
               <Trash2 size={18} />
               <span className="grow">
                 Удалить упражнение
-                <small>добавлено сегодня{canJoin ? ' — в программу не попадёт' : ''}</small>
+                <small>{extra.instead ? 'замена на эту тренировку' : 'добавлено сегодня' + (canJoin ? ' — в программу не попадёт' : '')}</small>
               </span>
             </button>
           ) : canProgram ? (
@@ -2310,29 +2516,39 @@ function NumberInput({
 }) {
   const show = (v: number | null) => (v === null || (v === 0 && !showZero) ? '' : String(v).replace('.', ','));
   const [textValue, setText] = useState(show(value));
+  // The number in the field when it was tapped: shown greyed until a digit is typed over it (and back if none is).
+  const [ghost, setGhost] = useState<string | null>(null);
   const focused = useRef(false);
   // Typed and passed on, not back in `value` yet: a field left right away still shows it.
   const sent = useRef<number | null | undefined>(undefined);
   useEffect(() => {
     sent.current = undefined;
     if (!focused.current) setText(show(value));
+    // Changed on the other phone while this field is tapped and nothing typed yet.
+    else if (ghost !== null && textValue === '') setGhost(show(value) || null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
   return (
     <input
-      className={'num-input num' + (small ? ' small' : '') + (nudge ? ' nudge' : '')}
+      className={'num-input num' + (small ? ' small' : '') + (nudge ? ' nudge' : '') + (ghost !== null ? ' ghost' : '')}
       data-w={dataW}
       data-r={dataR}
       aria-label={label}
       inputMode={decimal ? 'decimal' : 'numeric'}
       value={textValue}
-      placeholder={placeholder}
-      onFocus={(e) => {
+      placeholder={ghost ?? placeholder}
+      onFocus={() => {
         focused.current = true;
-        e.target.select();
+        // The first digit replaces the number at once: selecting it is unreliable on phones (iOS often leaves the
+        // cursor after it, the old number had to be erased first) and brings up the copy/paste bar.
+        if (textValue !== '') {
+          setGhost(textValue);
+          setText('');
+        }
       }}
       onBlur={() => {
         focused.current = false;
+        setGhost(null);
         setText(show(sent.current !== undefined ? sent.current : value));
       }}
       onChange={(e) => {
@@ -2340,6 +2556,8 @@ function NumberInput({
         if (!(decimal ? /^\d{0,4}(\.\d{0,2})?$/ : /^\d{0,4}$/).test(raw)) return;
         const filled = !!fillAt && raw.length >= fillAt && textValue.length < fillAt;
         setText(e.target.value);
+        // Typed over: erased now, the field shows its usual hint (no old number to come back).
+        if (ghost !== null) setGhost(null);
         // The digit shows at once; the rest of the journal follows without holding up the next key.
         const n = raw === '' ? null : Number(raw);
         sent.current = n;

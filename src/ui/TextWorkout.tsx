@@ -38,11 +38,12 @@ const dayText = (date: string) => {
   const [y, m, d] = date.split('-').map(Number);
   return `${d} ${MONTHS[m - 1]}${y !== new Date().getFullYear() ? ' ' + y : ''}`;
 };
-/** Midday of the date (now, when it is today): the history shows the day. */
+/** Midday of the date (now, when it is today — it is the last workout of the day then): the history shows the day. */
 const atDate = (date: string) => {
   const [y, m, d] = date.split('-').map(Number);
-  const t = new Date(y, m - 1, d, 12).getTime();
-  return new Date(Math.min(t, Date.now() - 1000)).toISOString();
+  const now = new Date();
+  if (y === now.getFullYear() && m === now.getMonth() + 1 && d === now.getDate()) return new Date(now.getTime() - 1000).toISOString();
+  return new Date(Math.min(new Date(y, m - 1, d, 12).getTime(), now.getTime() - 1000)).toISOString();
 };
 const setsText = (sets: ParsedSet[]) => {
   if (!sets.length) return 'без подходов';

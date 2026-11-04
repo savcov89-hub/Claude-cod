@@ -20,6 +20,7 @@ import { AddExercise } from './Library';
 import { MuscleChips, PlanVolume } from './Volume';
 import { adaptExercises, restrictionsOf, unsuitable, type Swap } from '../restrictions';
 import { PlanByVolume } from './PlanByVolume';
+import { similarExercises, type SimilarCandidate } from '../similar';
 
 export interface BuilderOptions {
   clientId?: string;
@@ -577,6 +578,15 @@ export function ProgramBuilder({
           swaps={swaps}
           exclude={day.exercises.filter((_, i) => i !== picker.replace).map((e) => e.exerciseId)}
           title={picker.replace === null ? 'Добавить упражнение' : 'Заменить упражнение'}
+          similarTo={
+            picker.replace !== null && day.exercises[picker.replace]
+              ? {
+                  id: day.exercises[picker.replace].exerciseId,
+                  muscles: day.exercises[picker.replace].muscles,
+                  muscleGroup: exercises.find((x) => x.id === day.exercises[picker.replace!].exerciseId)?.muscleGroup,
+                }
+              : undefined
+          }
           allowCreate
           onCreated={onExerciseCreated}
           onPick={pick}
@@ -637,12 +647,18 @@ export function ExercisePicker({
   restrictions = [],
   swaps = [],
   top,
+  similarTo,
+  recent = [],
   onCreated,
   onPick,
   onClose,
 }: {
   /** Shown above the search, e.g. a way back to the planned exercise. */
   top?: ReactNode;
+  /** The exercise being replaced: its closest replacements come first, under «Похожие». */
+  similarTo?: SimilarCandidate;
+  /** Picked to replace it before (on this phone), newest first: on top of «Похожие». */
+  recent?: string[];
   exercises: Exercise[];
   exclude: string[];
   title: string;
@@ -672,6 +688,13 @@ export function ExercisePicker({
     (e) => !exclude.includes(e.id) && searchKey(e.name + ' ' + e.muscleGroup + ' ' + e.equipment).includes(searchKey(q.trim())),
   );
   const inGroup = found.filter((e) => !group || e.muscleGroup.startsWith(group));
+  // Two taps to a replacement: the closest ones on top while nothing is searched for (or another group chosen).
+  const similar = useMemo(
+    () => (similarTo ? similarExercises(similarTo, exercises.filter((e) => !exclude.includes(e.id)), { restrictions, recent }) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [exercises, similarTo?.id, exclude.join(), restrictions.join(), recent.join()],
+  );
+  const showSimilar = similar.length > 0 && !q.trim() && (!group || group === initialGroup);
   // A name typed while a muscle group is chosen is also looked for in the other groups.
   const elsewhere = q.trim() && group ? found.filter((e) => !e.muscleGroup.startsWith(group)) : [];
   // What does not suit the client's restrictions comes after everything else.
@@ -679,6 +702,24 @@ export function ExercisePicker({
   const list = [...inGroup.filter(fits), ...elsewhere.filter(fits), ...inGroup, ...elsewhere].filter((e, i, all) => all.indexOf(e) === i);
   const firstElsewhere = list.findIndex((e) => elsewhere.includes(e) && fits(e));
   const firstUnfit = list.findIndex((e) => !fits(e));
+  const row = (e: Exercise, key?: string, before = false) => (
+    <button key={key} className="pick" onClick={() => onPick(e)}>
+      <ExerciseThumb exercise={e} size={40} />
+      <span className="grow">
+        <strong>{e.name}</strong>
+        <span className="muted small">
+          {before ? 'выбирали раньше · ' : ''}
+          {e.muscleGroup} · {e.equipment}
+          {exerciseRules[e.id] ? ' · ' + exerciseRules[e.id].position : ''}
+        </span>
+        {!fits(e) && <span className="small tone-warn">{unsuitable(e.id, restrictions)!.label}</span>}
+        {swaps.some((x) => x.from === e.id) && (
+          <span className="small tone-warn">Заменено в зале на «{swaps.find((x) => x.from === e.id)!.toName}»</span>
+        )}
+      </span>
+      <Plus size={18} />
+    </button>
+  );
   if (creating)
     return (
       <AddExercise
@@ -692,7 +733,7 @@ export function ExercisePicker({
       />
     );
   return (
-    <Sheet title={title} onClose={onClose}>
+    <Sheet title={title} onClose={onClose} tall>
       {top}
       <label className="search">
         <Search size={16} />
@@ -709,25 +750,18 @@ export function ExercisePicker({
         ))}
       </div>
       <div className="pick-list">
+        {showSimilar && (
+          <>
+            <p className="muted small pick-other pick-similar">Похожие</p>
+            {similar.map((e) => row(e, 'similar:' + e.id, recent.includes(e.id)))}
+            <p className="muted small pick-other">{group ? group + ' — все' : 'Все упражнения'}</p>
+          </>
+        )}
         {list.map((e, i) => (
           <Fragment key={e.id}>
-          {i === firstElsewhere && <p className="muted small pick-other">В других группах</p>}
-          {i === firstUnfit && <p className="muted small pick-other">Не подходят по ограничениям клиента</p>}
-          <button className="pick" onClick={() => onPick(e)}>
-            <ExerciseThumb exercise={e} size={40} />
-            <span className="grow">
-              <strong>{e.name}</strong>
-              <span className="muted small">
-                {e.muscleGroup} · {e.equipment}
-                {exerciseRules[e.id] ? ' · ' + exerciseRules[e.id].position : ''}
-              </span>
-              {!fits(e) && <span className="small tone-warn">{unsuitable(e.id, restrictions)!.label}</span>}
-              {swaps.some((x) => x.from === e.id) && (
-                <span className="small tone-warn">Заменено в зале на «{swaps.find((x) => x.from === e.id)!.toName}»</span>
-              )}
-            </span>
-            <Plus size={18} />
-          </button>
+            {i === firstElsewhere && <p className="muted small pick-other">В других группах</p>}
+            {i === firstUnfit && <p className="muted small pick-other">Не подходят по ограничениям клиента</p>}
+            {row(e)}
           </Fragment>
         ))}
         {!list.length && <p className="muted small center-text">Ничего не найдено.</p>}

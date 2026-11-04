@@ -467,7 +467,7 @@ export function Gym({
 
   return (
     <div className="gym">
-      <div className="gym-tabs" role="tablist" aria-label="Клиенты в зале">
+      <div className="gym-tabs" role="tablist" aria-label="Клиенты в зале" data-sticky-top>
         {shown.map((c) => (
           <GymTab
             key={c.clientId}

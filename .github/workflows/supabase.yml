@@ -4,12 +4,21 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    # Everything the function is built from (esbuild bundles these from backend/server.ts).
     paths:
       - backend/**
-      - src/catalog.ts
-      - src/trainingRules.ts
       - src/analytics.ts
+      - src/catalog.ts
       - src/clock.ts
+      - src/draftMerge.ts
+      - src/phases.ts
+      - src/programMerge.ts
+      - src/restrictions.ts
+      - src/templates.ts
+      - src/trainingRules.ts
+      - src/types.ts
+      - src/volume.ts
+      - src/volumePlanner.ts
       - supabase/functions/**
       - package-lock.json
       - .github/workflows/supabase.yml

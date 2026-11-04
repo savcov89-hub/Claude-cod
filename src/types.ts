@@ -122,8 +122,12 @@ export interface SessionExercise {
   replaces?: string;
   /** Left out of this workout only; done sets still count. */
   skipped?: boolean;
-  /** Added in the gym for this workout only, with its own targets (sets = sets.length). */
-  extra?: { repMin: number; repMax: number; targetRir: number; once?: boolean };
+  /**
+   * Added in the gym for this workout only, with its own targets (sets = sets.length). `once`: never joins the
+   * program. `instead`: the planned exercise whose remaining sets it took over — swapped mid-exercise, the sets
+   * done stay with that one.
+   */
+  extra?: { repMin: number; repMax: number; targetRir: number; once?: boolean; instead?: string };
   /** Short comment on this exercise in this workout. */
   note?: string;
   /** Own exercise: its muscles at the time (built-in ones are known by id). */
@@ -166,6 +170,8 @@ export interface WorkoutPayload {
     updatedAt: string;
     feedback?: string;
     updatedByRole?: Role;
+    /** The program's version the server rewrote it for (a change from the journal): no fitting to the program again. */
+    programAt?: string;
   } | null;
   programId: string;
   programName: string;

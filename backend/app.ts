@@ -201,6 +201,8 @@ interface ExtraPlan {
   targetRir: number;
   /** Came over from another workout opened by mistake: for this workout only, never joins the program. */
   once?: boolean;
+  /** Took over the remaining sets of this planned exercise of the day (swapped mid-exercise; done sets stay there). */
+  instead?: string;
 }
 interface SessionRecord {
   recordedByRole?: Role;
@@ -230,6 +232,11 @@ interface DraftRecord {
   localDate?: string;
   /** Finished by the server after a long pause (see finishStale). */
   autoClosed?: boolean;
+  /**
+   * The program's version (its updatedAt) this draft was rewritten for, after a change from the journal: the journal
+   * does not fit it to the program again (a swap mid-exercise keeps its set counts).
+   */
+  programAt?: string;
 }
 
 const tableKey = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -467,6 +474,9 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const extra = cleanExtra(e.extra);
         const known = await findKnown(id);
         if (!extra || !known || day.exercises.some((p) => p.exerciseId === id)) return null;
+        // The rest of a planned exercise's sets after a swap mid-exercise: kept only while that one is planned.
+        const instead = String(e.extra.instead || '');
+        if (instead && day.exercises.some((p) => p.exerciseId === instead)) extra.instead = instead;
         out.push({ exerciseId: id, exerciseName: known.name, extra, ...note, sets: e.sets });
         continue;
       }
@@ -532,13 +542,21 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
   const writeDraft = (table: string, current: (DraftRecord & { id: string }) | undefined, record: DraftRecord) =>
     db.swap(table, current?.id ?? null, record, current ? current.revision ?? null : null);
 
-  /** Changes an open draft's entries after a program change; done again on top of a save that came in meanwhile. */
-  async function rewriteDraft(table: string, draft: (DraftRecord & { id: string }) | undefined, change: (list: SessionExercise[]) => SessionExercise[]) {
+  /**
+   * Changes an open draft's entries after a program change (`programAt`: the program's new version); done again on
+   * top of a save that came in meanwhile.
+   */
+  async function rewriteDraft(
+    table: string,
+    draft: (DraftRecord & { id: string }) | undefined,
+    change: (list: SessionExercise[]) => SessionExercise[],
+    programAt: string,
+  ) {
     let d = draft;
     for (let attempt = 0; d && !d.closed && attempt < 5; attempt++) {
       const revision = randomId();
       const { id: _id, ...record } = d;
-      if (await writeDraft(table, d, { ...record, exercises: change(d.exercises), revision })) return revision;
+      if (await writeDraft(table, d, { ...record, exercises: change(d.exercises), revision, programAt })) return revision;
       d = await first<DraftRecord & { id: string }>(table);
     }
     return d?.revision || null;
@@ -550,14 +568,30 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
    * exercise's). Done sets of the old one (the other phone ticked them a moment ago, a workout open on another day)
    * stay as they were done: as today's swap in the new exercise's slot; so does a swap today to something else.
    */
-  const takeSwap = (list: SessionExercise[], from: string, next: ProgramExercise) =>
-    list.map((e): SessionExercise => {
+  const takeSwap = (list: SessionExercise[], from: string, next: ProgramExercise): SessionExercise[] => {
+    // Swapped mid-exercise today, the new one doing the remaining sets as an added exercise: that one becomes the
+    // planned exercise as it is, the old one keeps only its done sets, for today.
+    const rest = list.find((e) => e.extra && e.exerciseId === next.exerciseId);
+    if (rest)
+      return list.flatMap((e): SessionExercise[] => {
+        if (e === rest) {
+          const { extra: _x, ...plain } = e;
+          return [plain];
+        }
+        if (e.extra || (e.replaces || e.exerciseId) !== from) return [e];
+        const done = e.sets.filter((x) => x.reps > 0);
+        if (!done.length) return [];
+        const { replaces: _r, skipped: _s, ...plain } = e;
+        return [{ ...plain, extra: { repMin: next.repMin, repMax: next.repMax, targetRir: next.targetRir, once: true }, sets: done }];
+      });
+    return list.map((e): SessionExercise => {
       if (e.extra || (e.replaces || e.exerciseId) !== from) return e;
       const { replaces: _r, ...plain } = e;
       if (e.exerciseId === next.exerciseId) return plain;
       if (e.exerciseId !== from || e.sets.some((x) => x.reps > 0)) return { ...plain, replaces: next.exerciseId };
       return { ...plain, exerciseId: next.exerciseId, exerciseName: next.exerciseName, sets: e.sets.map(() => ({ weight: 0, reps: 0, rir: null })) };
     });
+  };
 
   /**
    * A client whose set is recorded without «Я в зале» / «Пришёл» (by herself, or by the trainer who opened her from the
@@ -1950,7 +1984,8 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const exercises = ids.map((id) => day.exercises.find((e) => e.exerciseId === id) || added.get(id)!);
         const days = program.days.map((d) => (d.id === dayId ? { ...d, exercises } : d));
         const { id: _drop, ...rest } = program as ProgramRecord & { id?: string };
-        const [ok] = await db.update(programsTable(trainerId), [{ id: programId, record: { ...rest, days, updatedAt: nowIso() } }]);
+        const at = nowIso();
+        const [ok] = await db.update(programsTable(trainerId), [{ id: programId, record: { ...rest, days, updatedAt: at } }]);
         if (!ok) return error('Не удалось сохранить программу.', 500);
         const slot = (e: SessionExercise) => e.replaces || e.exerciseId;
         const order: string[] = Array.isArray(ctx.body?.order) ? ctx.body.order.map(String) : [];
@@ -1975,6 +2010,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
             })
             .map(({ extra, ...e }) => (extra && !added.has(e.exerciseId) ? { ...e, extra } : e))
             .sort((a, b) => rank(a) - rank(b)),
+          at,
         );
         return json({ saved: true, revision });
       },
@@ -2049,10 +2085,10 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
           { id: programId, record: { ...rest, days, updatedAt: at, ...(swapLog ? { swapLog } : {}) } },
         ]);
         if (!ok) return error('Не удалось сохранить программу.', 500);
-        const revision = swapped ? await rewriteDraft(draftT, draft, (list) => takeSwap(list, from, next)) : draft?.revision || null;
+        const revision = swapped ? await rewriteDraft(draftT, draft, (list) => takeSwap(list, from, next), at) : draft?.revision || null;
         for (const [i, d] of others.entries())
           if (also.includes(d) && isOpen(otherDrafts[i]))
-            await rewriteDraft(draftTable(program.clientId, programId, d.id), otherDrafts[i], (list) => takeSwap(list, from, next));
+            await rewriteDraft(draftTable(program.clientId, programId, d.id), otherDrafts[i], (list) => takeSwap(list, from, next), at);
         if (swapped && b.everywhere) {
           const client = await findClient(trainerId, program.clientId);
           if (client)

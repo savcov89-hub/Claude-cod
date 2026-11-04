@@ -4,6 +4,7 @@ import App from "./App";
 import "./index.css";
 import { applyTheme } from "./theme";
 import { CrashScreen } from "./ui/Crash";
+import { keepInView, scrollBoxOf } from "./ui/keepInView";
 
 applyTheme();
 
@@ -12,6 +13,7 @@ applyTheme();
 const vv = window.visualViewport;
 if (vv) {
   let frame = 0;
+  let pinned = 0;
   const sync = () => {
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(() => {
@@ -21,9 +23,21 @@ if (vv) {
       // Only a field being typed in brings the keyboard. iOS can report a short viewport without one
       // (after locking the screen or coming back to the app); the layout must not stay squeezed then.
       const kb = !zoomed && typing() && vv.height < html.clientHeight - 120;
-      html.style.setProperty("--vv-top", (kb ? vv.offsetTop : 0) + "px");
+      const top = kb ? vv.offsetTop : 0;
+      // iOS has just moved the page up to show the field above the keyboard. Pinning the layout to the visible
+      // area would move the field back under the keyboard, so its own list scrolls by as much: the field stays
+      // where it is on screen instead of jumping down and up again.
+      const field = kb && top !== pinned ? (document.activeElement as HTMLElement | null) : null;
+      const box = field ? scrollBoxOf(field) : null;
+      const before = box ? field!.getBoundingClientRect().top : 0;
+      html.style.setProperty("--vv-top", top + "px");
       html.style.setProperty("--vv-height", (kb ? vv.height : html.clientHeight) + "px");
       html.classList.toggle("kb-open", kb);
+      pinned = top;
+      if (box) {
+        const dy = field!.getBoundingClientRect().top - before;
+        if (Math.abs(dy) > 1) box.scrollTop += dy;
+      }
     });
   };
   const typing = () => {
@@ -45,21 +59,12 @@ if (vv) {
   });
   sync();
 
-  // iOS scrolls the page for the keyboard, but the fixed layout shrinks instead, so the field being typed in
-  // can end up under the keyboard. Scroll its own list so the field stays in the visible part.
+  // Once the keyboard has settled, the field being typed in (with the rest of its row and the next one) is brought
+  // into the part above the keyboard and under the client tabs — with as small a smooth scroll as it takes.
   let settle = 0;
   const keepFocusVisible = () => {
     const el = document.activeElement;
-    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) || Math.abs(vv.scale - 1) > 0.01) return;
-    let box = el.parentElement;
-    while (box && !(/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight)) box = box.parentElement;
-    if (!box) return;
-    const r = el.getBoundingClientRect();
-    const b = box.getBoundingClientRect();
-    const top = Math.max(b.top, vv.offsetTop);
-    const bottom = Math.min(b.bottom, vv.offsetTop + vv.height);
-    if (r.top >= top + 8 && r.bottom <= bottom - 8) return;
-    box.scrollTop += r.top + r.height / 2 - (top + bottom) / 2;
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) keepInView(el);
   };
   const later = () => {
     clearTimeout(settle);

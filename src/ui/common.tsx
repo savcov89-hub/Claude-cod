@@ -83,11 +83,14 @@ export function Sheet({
   onClose,
   children,
   wide = false,
+  tall = false,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  /** Full height from the start: a list filtered by typing must not pull the search field down as it gets shorter. */
+  tall?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -97,7 +100,7 @@ export function Sheet({
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div
-        className={'sheet' + (wide ? ' sheet-wide' : '')}
+        className={'sheet' + (wide ? ' sheet-wide' : '') + (tall ? ' sheet-tall' : '')}
         role="dialog"
         aria-modal="true"
         aria-label={title}
