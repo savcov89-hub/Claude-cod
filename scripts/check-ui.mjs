@@ -1730,6 +1730,74 @@ await scenario('41. Тренировка из текста: «Жим ногам�
   await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click().catch(() => {});
 });
 
+await scenario('43. Нейросеть: свободный рассказ «три дня…» → программа из трёх тренировок; без ключа — понятное сообщение', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  await p.reload();
+  await p.waitForSelector('.nav', { timeout: 30000 });
+  await p.waitForTimeout(1500);
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: 'Павел' }).first().locator('.client-open').click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('tab', { name: 'Программы' }).click();
+  await p.waitForTimeout(500);
+  await p.getByRole('button', { name: 'Текстом или голосом' }).click();
+  const told = 'Значит смотри три дня у нас будет. Первый день грудь спина: жим штанги лёжа, вертикальная тяга. Второй день ноги: маятниковый присед. Третий день плечи руки: разведение на заднюю дельту. В конце пресс в каждой тренировке';
+  await p.locator('#text-workout-input').fill(told);
+  await p.waitForTimeout(300);
+  // Test mode has no model: it says so.
+  await p.locator('#text-workout-ai').click();
+  await p.waitForTimeout(800);
+  const noKey = (await p.locator('.text-workout .alert').first().innerText().catch(() => '')).replace(/\s+/g, ' ');
+  expect(/Нейросеть не подключена/.test(noKey), 'without a key: «Нейросеть не подключена»', noKey);
+  // A stand-in for the model: it gets the base and the text, answers by the schema.
+  await p.evaluate(() => {
+    window.__tlAiSeen = null;
+    window.__tlFakeAi = (req) => {
+      window.__tlAiSeen = { system: req.system.slice(0, 20000), text: req.content[0].text };
+      const ex = (written, exerciseId, sets, repMin, repMax) => ({ written, exerciseId, done: [], plan: { sets, repMin, repMax }, note: '' });
+      const abs = ex('Пресс', 'crunch', 3, 15, 20);
+      return JSON.stringify({
+        title: '',
+        days: [
+          { name: 'Грудь и спина', date: '', bodyWeight: 0, exercises: [ex('Жим штанги лёжа', 'bench-press', 3, 8, 10), ex('Вертикальная тяга', 'lat-pulldown', 3, 10, 12), abs] },
+          { name: 'Ноги', date: '', bodyWeight: 0, exercises: [ex('Маятниковый присед', 'pendulum-squat', 4, 10, 12), abs] },
+          { name: 'Плечи и руки', date: '', bodyWeight: 0, exercises: [ex('Разведение на заднюю дельту', 'rear-delt-fly', 3, 12, 15), ex('Жираф', '', 0, 0, 0), abs] },
+        ],
+      });
+    };
+  });
+  await p.locator('#text-workout-ai').click();
+  await p.waitForTimeout(1200);
+  const seen = await p.evaluate(() => window.__tlAiSeen);
+  expect(seen && /bench-press \| Жим штанги лёжа/.test(seen.system) && seen.text.includes('три дня'), 'the model gets the base and the text', seen && seen.text);
+  const pv = (await p.locator('.tw-preview').innerText()).replace(/\s+/g, ' ');
+  expect(/Грудь и спина/.test(pv) && /Ноги/.test(pv) && /Плечи и руки/.test(pv) && /план 3×8–10/.test(pv) && /Жираф новое/.test(pv), 'three days with plans; an unknown name is new', pv.slice(0, 400));
+  expect(/Разобрано нейросетью/.test(await p.locator('.tw-ai').innerText()), 'says it was read by the model');
+  const summary = (await p.locator('.text-workout').innerText()).replace(/\s+/g, ' ');
+  expect(/3 тренировки в программе: «Грудь и спина», «Ноги», «Плечи и руки»/.test(summary), 'three workouts of the program by their names', summary.slice(-500));
+  await p.locator('#text-workout-program-name').fill('Сплит на три дня');
+  await p.locator('#text-workout-save').click();
+  await p.waitForTimeout(2500);
+  const done = (await p.locator('.review-bar[role="status"]').first().innerText()).replace(/\s+/g, ' ');
+  expect(/Собрано: 3 тренировки .* в программе «Сплит на три дня»/.test(done), 'says what was made', done);
+  const prog = (await call('get', '/api/programs')).programs.find((x) => x.clientId === idOf('Павел') && x.name === 'Сплит на три дня');
+  const plan = prog?.days.map((d) => d.name + ': ' + d.exercises.map((e) => `${e.exerciseName} ${e.sets}×${e.repMin}–${e.repMax}`).join(', ')).join(' | ');
+  expect(
+    plan === 'Грудь и спина: Жим штанги лёжа 3×8–10, Вертикальная тяга 3×10–12, Скручивание 3×15–20 | Ноги: Маятниковый присед 4×10–12, Скручивание 3×15–20 | Плечи и руки: Разведение на заднюю дельту 3×12–15, Жираф 3×8–12, Скручивание 3×15–20',
+    'the program: three days, the told sets and reps, abs in each',
+    plan,
+  );
+  const hist = (await call('get', '/api/client/' + idOf('Павел') + '/history')).sessions.filter((x) => x.programId === prog?.id);
+  expect(prog && hist.length === 0, 'nothing done — nothing written to history', hist.length);
+  await p.evaluate(() => {
+    delete window.__tlFakeAi;
+  });
+  if (prog) await call('post', '/api/programs/' + prog.id + '/archive', { archived: true });
+  await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click().catch(() => {});
+});
+
 await scenario('42. Замена посреди упражнения: отмеченные подходы остаются; «вернуть», «насовсем», «Это был…», недавние сверху', async () => {
   const { client: c } = await call('post', '/api/clients', { clientName: 'Глеб' });
   const ex = (id) => ({ exerciseId: id, sets: 3, repMin: 8, repMax: 12, targetRir: 2 });

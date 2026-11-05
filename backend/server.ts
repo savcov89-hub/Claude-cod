@@ -1,6 +1,7 @@
 // HTTP entry for backend/app.ts on Supabase: web-standard Request/Response, rows kept in one Postgres table.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createHandler, type Accounts, type Ctx, type Db, type Sdk } from './app';
+import { openRouter, type AiCall } from './aiWorkout';
 import { error, json, requireAuth, router, type Handler } from './router';
 
 const ROWS = 'kv_rows';
@@ -89,8 +90,8 @@ export function routePath(pathname: string) {
   return p === '/api/api' || p.startsWith('/api/api/') ? p.slice(4) : p;
 }
 
-export function createServer(deps: { db: Db; getUser: (token: string) => Promise<Ctx['user']>; accounts?: Accounts }) {
-  const handle = createHandler({ db: deps.db, accounts: deps.accounts, error, json, requireAuth, router } as unknown as Sdk) as Handler;
+export function createServer(deps: { db: Db; getUser: (token: string) => Promise<Ctx['user']>; accounts?: Accounts; ai?: AiCall }) {
+  const handle = createHandler({ db: deps.db, accounts: deps.accounts, ai: deps.ai, error, json, requireAuth, router } as unknown as Sdk) as Handler;
   return async (req: Request): Promise<Response> => {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     try {
@@ -114,11 +115,19 @@ export function createServer(deps: { db: Db; getUser: (token: string) => Promise
   };
 }
 
-/** Production wiring: service-role client for rows and for checking the caller's token. */
-export function createSupabaseServer(supabaseUrl: string, serviceRoleKey: string) {
+/**
+ * Production wiring: service-role client for rows and for checking the caller's token. The model's key is read on each
+ * request, so a secret added later works without a new deploy.
+ */
+export function createSupabaseServer(supabaseUrl: string, serviceRoleKey: string, aiKey: () => string | undefined = () => undefined) {
   const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
   return createServer({
     db: supabaseDb(admin),
+    ai: (req) => {
+      const key = aiKey();
+      if (!key) return Promise.reject(Object.assign(new Error('no OPENROUTER_API_KEY'), { why: 'nokey' }));
+      return openRouter(key)(req);
+    },
     accounts: {
       async createUser(email, password) {
         const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true });

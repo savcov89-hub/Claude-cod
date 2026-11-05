@@ -4,6 +4,7 @@ import { parseWorkoutText, planOf } from '../src/workoutText';
 import { matchExercise } from '../src/exerciseMatch';
 import { catalog } from '../src/catalog';
 import type { Exercise } from '../src/types';
+import { AI_MODEL, AI_SCHEMA, aiSystem, cleanAiWorkout, openRouter } from '../backend/aiWorkout';
 
 let failures = 0;
 let checks = 0;
@@ -114,6 +115,44 @@ const plan = (t: string) => {
   return `${p.sets}×${p.repMin}–${p.repMax}`;
 };
 expect(plan('Жим ногами 45 3х15') === '3×12–15' && plan('Тяга 20 3х12,10,8') === '3×8–12' && plan('Жим 50х10') === '1×8–10', '«3х15» → 3×12–15, «12,10,8» → 3×8–12');
+
+console.log('6. Нейросеть: запрос к OpenRouter и проверка ответа');
+const known = new Set(base.map((e) => e.id));
+const answer = JSON.stringify({
+  title: null,
+  days: [
+    { name: 'Грудь и спина', date: null, bodyWeight: null, exercises: [
+      { written: 'Жим штанги лёжа', exerciseId: 'bench-press', done: [], plan: { sets: 3, repMin: 12, repMax: 8 }, note: null },
+      { written: 'Жираф', exerciseId: 'made-up-id', done: [{ weight: '5', reps: 15 }, { weight: 2000, reps: 3 }], plan: null, note: '' },
+    ] },
+    { name: '', date: '2026-08-24', bodyWeight: 44.6, exercises: [{ written: 'Пресс', exerciseId: 'crunch', done: [], plan: null, note: null }] },
+    { name: 'Пустой', date: null, bodyWeight: null, exercises: [] },
+  ],
+});
+const clean = cleanAiWorkout('```json\n' + answer + '\n```', known);
+expect(clean?.days.length === 2, 'пустой день убран, ответ в ```json``` читается', clean?.days.map((d) => d.name));
+const d0 = clean?.days[0].exercises;
+expect(d0?.[0].exerciseId === 'bench-press' && d0?.[0].plan?.repMin === 8 && d0?.[0].plan?.repMax === 12, 'id из базы остаётся, диапазон повторов упорядочен', d0?.[0]);
+expect(d0?.[1].exerciseId === null && d0?.[1].done.length === 1 && d0?.[1].done[0].weight === 5, 'выдуманный id — null, вес вне 0–1500 отброшен', d0?.[1]);
+expect(clean?.days[1].name === 'День 2' && clean?.days[1].bodyWeight === 44.6, 'день без названия — «День 2»; вес тела при дате', clean?.days[1]);
+expect(cleanAiWorkout('не JSON', known) === null && cleanAiWorkout('{"days":[]}', known) === null, 'не JSON или без упражнений — нет ответа');
+const sys = aiSystem(base, '2026-11-05');
+expect(sys.includes('bench-press | Жим штанги лёжа | Грудь') && sys.includes('2026-11-05'), 'нейросети даны упражнения базы и сегодняшняя дата');
+let sent: any = null;
+const call = openRouter('sk-test', (async (url: string, init: any) => {
+  sent = { url, headers: init.headers, body: JSON.parse(init.body) };
+  return new Response(JSON.stringify({ choices: [{ message: { content: answer } }] }), { status: 200 });
+}) as unknown as typeof fetch);
+const got2 = await call({ system: 'x', content: [{ type: 'text', text: 'y' }], schema: AI_SCHEMA as any });
+expect(
+  sent.url === 'https://openrouter.ai/api/v1/chat/completions' && sent.headers.Authorization === 'Bearer sk-test' && sent.body.model === AI_MODEL &&
+    sent.body.response_format.type === 'json_schema' && got2 === answer,
+  'запрос: ключ в заголовке, модель, ответ по схеме',
+  sent?.body?.model,
+);
+const fail = openRouter('bad', (async () => new Response('{}', { status: 402 })) as unknown as typeof fetch);
+const why = await fail({ system: '', content: [], schema: {} }).catch((e) => e.why);
+expect(why === 'money', 'закончились деньги — понятная причина', why);
 
 console.log(`\n${checks} проверок, ошибок: ${failures}`);
 process.exit(failures ? 1 : 0);

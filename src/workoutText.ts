@@ -22,8 +22,14 @@ export interface ParsedExercise {
   ambiguous?: { a: number; reps: number };
   /** The line it came from. */
   line: string;
+  /** Chosen by the model («Разобрать нейросетью»): the exercise of the base. */
+  exerciseId?: string;
+  /** Told for the program («3 по 10–12»), by the model. */
+  plan?: { sets: number; repMin: number; repMax: number };
 }
 export interface ParsedWorkout {
+  /** The day's name in a program told by the model: «Грудь и спина». */
+  name?: string;
   /** yyyy-mm-dd when the text has a date line. */
   date?: string;
   bodyWeight?: number;

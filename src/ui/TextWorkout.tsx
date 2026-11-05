@@ -2,12 +2,12 @@
 // (with what was done recorded), or notes from the phone (dates, «вес×повторы; …») → the client's history.
 // The text is read on the phone (src/workoutText.ts), names are matched to the base (src/exerciseMatch.ts).
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Mic, Search, Square } from 'lucide-react';
+import { Camera, ChevronDown, Mic, Search, Sparkles, Square } from 'lucide-react';
 import { api, readError } from '../transport';
 import { localDate } from '../clock';
 import { fmtKg } from '../analytics';
 import type { Exercise } from '../types';
-import { parseWorkoutText, planOf, type ParsedExercise, type ParsedSet } from '../workoutText';
+import { parseWorkoutText, planOf, type ParsedExercise, type ParsedSet, type ParsedText } from '../workoutText';
 import { guessEquipment, guessGroup, matchExercise, normName, rankExercises, SURE } from '../exerciseMatch';
 import { Sheet, nextDayName, plural, searchKey } from './common';
 import { programsOf, type TrainerData } from './data';
@@ -54,6 +54,55 @@ const setsText = (sets: ParsedSet[]) => {
   if (sameW) return `${kg(sets[0].weight)} · ${sets.map((s) => s.reps || '?').join(', ')}`;
   return sets.map((s) => (s.weight ? fmtKg(s.weight) + '×' : '') + (s.reps || '?')).join('; ');
 };
+
+/** The model's answer (backend/aiWorkout.ts) in the shape the preview shows. */
+interface AiAnswer {
+  title: string | null;
+  days: Array<{
+    name: string;
+    date: string | null;
+    bodyWeight: number | null;
+    exercises: Array<{ written: string; exerciseId: string | null; done: ParsedSet[]; plan: ParsedExercise['plan'] | null; note: string | null }>;
+  }>;
+}
+const fromAi = (a: AiAnswer): ParsedText => ({
+  ...(a.title ? { title: a.title } : {}),
+  notes: false,
+  workouts: a.days.map((d, di) => ({
+    name: d.name,
+    ...(d.date ? { date: d.date } : {}),
+    ...(d.bodyWeight ? { bodyWeight: d.bodyWeight } : {}),
+    exercises: d.exercises.map((e, ei) => ({
+      name: e.written,
+      sets: e.done,
+      line: `ai:${di}:${ei}:${e.written}`,
+      ...(e.exerciseId ? { exerciseId: e.exerciseId } : {}),
+      ...(e.plan ? { plan: e.plan } : {}),
+      ...(e.note ? { note: e.note } : {}),
+    })),
+  })),
+});
+
+/** A photo made smaller for sending (the long side up to 1600 px, JPEG). */
+async function shrinkPhoto(file: File): Promise<string> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((ok, fail) => {
+      const i = new Image();
+      i.onload = () => ok(i);
+      i.onerror = () => fail(new Error('Не удалось открыть фото.'));
+      i.src = url;
+    });
+    const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * k);
+    c.height = Math.round(img.naturalHeight * k);
+    c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.85);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 type SpeechRec = {
   lang: string;
@@ -127,7 +176,14 @@ export function TextWorkout({
   onDone: (message: string) => void;
 }) {
   const [textValue, setText] = useState('');
-  const parsed = useMemo(() => parseWorkoutText(textValue), [textValue]);
+  const local = useMemo(() => parseWorkoutText(textValue), [textValue]);
+  // «Разобрать нейросетью»: its answer is shown instead of the rules' until «Без нейросети».
+  const [ai, setAi] = useState<{ parsed: ParsedText; text: string; photo: boolean } | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiErr, setAiErr] = useState('');
+  const [photo, setPhoto] = useState<{ data: string; name: string } | null>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+  const parsed = ai?.parsed || local;
   const dictation = useDictation((line) => setText((t) => (t.trim() ? t.replace(/\s*$/, '') + '\n' : '') + line));
   const [aliases, setAliases] = useState(readAliases);
   // Names chosen by hand here: normalised name → exercise id or «new».
@@ -157,6 +213,8 @@ export function TextWorkout({
     if (p === 'new') return { kind: 'new' };
     const byHand = p && data.exercises.find((x) => x.id === p);
     if (byHand) return { kind: 'base', exercise: byHand, sure: true };
+    const byModel = e.exerciseId && data.exercises.find((x) => x.id === e.exerciseId);
+    if (byModel) return { kind: 'base', exercise: byModel, sure: true };
     const m = matchExercise(e.name, data.exercises, e.group, aliases);
     return m.exercise ? { kind: 'base', exercise: m.exercise, sure: m.score >= SURE } : { kind: 'new' };
   };
@@ -172,6 +230,39 @@ export function TextWorkout({
   const doneSets = all.reduce((n, e) => n + setsOf(e).filter((s) => s.reps > 0).length, 0);
   const weights = parsed.workouts.filter((w) => w.date && w.bodyWeight);
   const defaultDayName = nextDayName((targetProgram?.days || []).map((d) => d.name));
+  const days = parsed.workouts.filter((w) => w.exercises.length);
+  // A program told as several workouts: each becomes a day, by its name.
+  const dayNames = (() => {
+    const taken = (targetProgram?.days || []).map((d) => d.name);
+    return days.map((w) => {
+      const n = days.length === 1 ? dayName.trim() || w.name || defaultDayName : w.name || nextDayName(taken);
+      taken.push(n);
+      return n;
+    });
+  })();
+
+  const askAi = async () => {
+    setAiBusy(true);
+    setAiErr('');
+    try {
+      const r = await api.post('/api/ai/workout', { text: textValue, today: localDate(), ...(photo ? { image: photo.data } : {}) });
+      setAi({ parsed: fromAi(r.data.workout), text: textValue, photo: !!photo });
+      setPicked({});
+    } catch (e) {
+      setAiErr(readError(e));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+  const pickPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    setAiErr('');
+    try {
+      setPhoto({ data: await shrinkPhoto(file), name: file.name });
+    } catch (e) {
+      setAiErr(readError(e));
+    }
+  };
 
   /** Own exercises for the new names, made once; → name → id. */
   const makeNew = async () => {
@@ -211,11 +302,22 @@ export function TextWorkout({
       if (same) {
         same.sets = [...same.sets, ...sets].slice(0, 10);
         if (e.note) same.note = [same.note, e.note].filter(Boolean).join('; ');
-      } else out.push({ exerciseId: id, exerciseName: e.name, sets, ...(e.note ? { note: e.note } : {}), plan: planOf([]), repMin: 0, repMax: 0, targetRir: 2 });
+      } else
+        out.push({
+          exerciseId: id,
+          exerciseName: e.name,
+          sets,
+          ...(e.note ? { note: e.note } : {}),
+          plan: e.plan ? { ...e.plan, targetRir: 2 } : planOf([]),
+          repMin: 0,
+          repMax: 0,
+          targetRir: 2,
+        });
     }
-    // The plan of the program and the targets of a free workout — from all the sets.
+    // The plan of the program and the targets of a free workout — told, or from all the sets.
     for (const x of out) {
-      x.plan = planOf(x.sets);
+      const told = list.find((e) => e.plan && idOf(e, made) === x.exerciseId);
+      x.plan = told?.plan ? { ...told.plan, targetRir: 2 } : planOf(x.sets);
       x.repMin = x.plan.repMin;
       x.repMax = x.plan.repMax;
       x.targetRir = x.plan.targetRir;
@@ -229,25 +331,33 @@ export function TextWorkout({
     try {
       const made = await makeNew();
       if (mode === 'program') {
-        const exercises = entries(all, made);
-        const name = dayName.trim() || defaultDayName;
-        const r = await api.post('/api/free/' + encodeURIComponent(clientId) + '/save', {
-          programId: target || null,
-          programName: programName.trim() || 'Программа',
-          dayName: name,
-          exercises: exercises.map((x) => ({ exerciseId: x.exerciseId, ...x.plan })),
-        });
-        let recorded = '';
-        if (record && doneSets) {
-          await api.post('/api/client/' + encodeURIComponent(clientId) + '/import', {
-            programId: r.data.programId,
-            dayId: r.data.dayId,
-            workouts: [{ completedAt: atDate(date), exercises: exercises.map(({ plan: _plan, ...x }) => x) }],
+        let programId: string | null = target || null;
+        let programTitle = '';
+        let recordedDays = 0;
+        for (const [i, w] of days.entries()) {
+          const exercises = entries(w.exercises, made);
+          const r = await api.post('/api/free/' + encodeURIComponent(clientId) + '/save', {
+            programId,
+            programName: programName.trim() || parsed.title || 'Программа',
+            dayName: dayNames[i],
+            exercises: exercises.map((x) => ({ exerciseId: x.exerciseId, ...x.plan })),
           });
-          recorded = `, сделанное записано за ${dayText(date)}`;
+          programId = r.data.programId;
+          programTitle = r.data.programName;
+          if (record && exercises.some((x) => x.sets.some((s) => s.reps > 0))) {
+            await api.post('/api/client/' + encodeURIComponent(clientId) + '/import', {
+              programId: r.data.programId,
+              dayId: r.data.dayId,
+              workouts: [{ completedAt: atDate(w.date || date), exercises: exercises.map(({ plan: _plan, ...x }) => x) }],
+            });
+            recordedDays++;
+          }
         }
         await data.reload();
-        onDone(`Собрано: «${name}» в программе «${r.data.programName}», ${exercises.length} упр.${recorded}.`);
+        const count = all.length;
+        const what = days.length === 1 ? `«${dayNames[0]}»` : `${days.length} ${plural(days.length, 'тренировка', 'тренировки', 'тренировок')} (${dayNames.map((n) => '«' + n + '»').join(', ')})`;
+        const recorded = recordedDays ? `, сделанное записано за ${dayText(date)}` : '';
+        onDone(`Собрано: ${what} в программе «${programTitle}», ${count} упр.${recorded}.`);
       } else {
         const workouts = parsed.workouts
           .filter((w) => w.exercises.length)
@@ -278,13 +388,14 @@ export function TextWorkout({
     }
   };
 
-  const canSave = all.length > 0 && (mode === 'program' ? all.length <= 30 : doneSets > 0);
+  const tooLong = days.some((w) => w.exercises.length > 30);
+  const canSave = all.length > 0 && (mode === 'program' ? !tooLong && (target ? targetProgram!.days.length : 0) + days.length <= 14 : doneSets > 0);
 
   return (
     <Sheet title="Тренировка из текста" onClose={onClose} wide>
       <div className="text-workout">
         <label className="field">
-          <span>Одно упражнение — одна строка: название, вес, подходы×повторы</span>
+          <span>По строке на упражнение («Жим ногами 45 3х15») или своими словами — тогда «Разобрать нейросетью»</span>
           <textarea
             id="text-workout-input"
             rows={6}
@@ -305,12 +416,53 @@ export function TextWorkout({
           ) : (
             <span className="muted small">Голосом — кнопка микрофона на клавиатуре телефона.</span>
           )}
-          {textValue && (
-            <button type="button" className="btn btn-quiet" onClick={() => setText('')}>
+          <button type="button" className="btn" onClick={() => photoInput.current?.click()}>
+            <Camera size={16} /> {photo ? 'Другое фото' : 'Фото заметки'}
+          </button>
+          <input ref={photoInput} type="file" accept="image/*" hidden onChange={(e) => void pickPhoto(e.target.files?.[0])} />
+          {(textValue || photo) && (
+            <button
+              type="button"
+              className="btn btn-quiet"
+              onClick={() => {
+                setText('');
+                setPhoto(null);
+                setAi(null);
+              }}
+            >
               Очистить
             </button>
           )}
         </div>
+        {photo && (
+          <div className="tw-photo">
+            <img src={photo.data} alt="Фото заметки" />
+            <span className="muted small">Фото прочитает нейросеть. Можно дописать текстом, что на нём важно.</span>
+            <button type="button" className="btn btn-quiet btn-sm" onClick={() => setPhoto(null)}>
+              Убрать
+            </button>
+          </div>
+        )}
+        {(textValue.trim() || photo) && (
+          <div className="tw-ai">
+            <button id="text-workout-ai" type="button" className="btn btn-primary" disabled={aiBusy} onClick={() => void askAi()}>
+              <Sparkles size={16} /> {aiBusy ? 'Нейросеть разбирает…' : ai ? 'Разобрать нейросетью заново' : 'Разобрать нейросетью'}
+            </button>
+            {ai && (
+              <button type="button" className="btn btn-quiet btn-sm" onClick={() => setAi(null)}>
+                Без нейросети
+              </button>
+            )}
+            <span className="muted small">
+              {ai
+                ? ai.text !== textValue || ai.photo !== !!photo
+                  ? 'Текст изменился — разберите заново.'
+                  : 'Разобрано нейросетью. Проверьте ниже.'
+                : 'Для свободного рассказа («три дня: первый — грудь и спина…») и фото заметок.'}
+            </span>
+          </div>
+        )}
+        {aiErr && <div className="alert">{aiErr}</div>}
         {dictation.listening && (
           <p className="muted small">
             Слушаю… Говорите по упражнению с паузой: «жим ногами сорок пять, три по пятнадцать». {dictation.heard && <i>«{dictation.heard}»</i>}
@@ -323,6 +475,11 @@ export function TextWorkout({
             {parsed.title && <p className="muted small">{parsed.title}</p>}
             {parsed.workouts.map((w, wi) => (
               <div key={wi} className="tw-workout">
+                {w.name && parsed.workouts.length > 1 && !w.date && (
+                  <div className="tw-date">
+                    <strong>{w.name}</strong>
+                  </div>
+                )}
                 {w.date && (
                   <div className="tw-date">
                     <strong>{dayText(w.date)}</strong>
@@ -345,7 +502,7 @@ export function TextWorkout({
                         )}
                       </button>
                       <span className="tw-sets small">
-                        {setsText(sets)}
+                        {e.plan && !sets.length ? `план ${e.plan.sets}×${e.plan.repMin === e.plan.repMax ? e.plan.repMin : e.plan.repMin + '–' + e.plan.repMax}` : setsText(sets)}
                         {e.ambiguous && (
                           <button type="button" className="btn btn-quiet btn-sm" onClick={() => setFlipped((f) => ({ ...f, [e.line]: !f[e.line] }))}>
                             {flipped[e.line] ? `${e.ambiguous.a} — это подходы` : `${e.ambiguous.a} — это вес`}
@@ -395,10 +552,16 @@ export function TextWorkout({
                     <input id="text-workout-program-name" value={programName} onChange={(e) => setProgramName(e.target.value)} />
                   </label>
                 )}
-                <label className="field">
-                  <span>Название тренировки</span>
-                  <input id="text-workout-day" value={dayName} placeholder={defaultDayName} onChange={(e) => setDayName(e.target.value)} />
-                </label>
+                {days.length === 1 ? (
+                  <label className="field">
+                    <span>Название тренировки</span>
+                    <input id="text-workout-day" value={dayName} placeholder={days[0].name || defaultDayName} onChange={(e) => setDayName(e.target.value)} />
+                  </label>
+                ) : (
+                  <p className="small">
+                    {days.length} {plural(days.length, 'тренировка', 'тренировки', 'тренировок')} в программе: {dayNames.map((n) => '«' + n + '»').join(', ')}
+                  </p>
+                )}
                 {doneSets > 0 && (
                   <label className="toggle">
                     <input id="text-workout-record" type="checkbox" checked={record} onChange={(e) => setRecord(e.target.checked)} />
@@ -431,7 +594,7 @@ export function TextWorkout({
                 <input id="text-workout-date" type="date" value={date} max={localDate()} onChange={(e) => setDate(e.target.value || localDate())} />
               </label>
             )}
-            {mode === 'program' && all.length > 30 && <div className="alert">В одной тренировке — до 30 упражнений.</div>}
+            {mode === 'program' && tooLong && <div className="alert">В одной тренировке — до 30 упражнений.</div>}
             {mode === 'history' && !doneSets && <div className="alert">Нет подходов с повторами — записывать в историю нечего.</div>}
             {err && <div className="alert">{err}</div>}
             <button id="text-workout-save" className="btn btn-primary btn-block" disabled={busy || !canSave} onClick={() => void save()}>

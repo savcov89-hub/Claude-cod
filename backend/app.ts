@@ -1,3 +1,4 @@
+import { AI_DAILY_LIMIT, AI_SCHEMA, aiSystem, cleanAiWorkout, type AiCall, type AiContent } from './aiWorkout';
 import { catalog } from '../src/catalog';
 import { groupMuscles, exerciseRules, programIssue } from '../src/trainingRules';
 import { cleanFocus, cleanMuscles, cleanTargets, type Focus } from '../src/volume';
@@ -59,6 +60,8 @@ export interface Sdk {
   json: (data: unknown, status?: number) => any;
   requireAuth: () => any;
   router: (routes: Record<string, any[]>) => any;
+  /** The language model for «Разобрать нейросетью» (backend/aiWorkout.ts); absent — not connected (no key, the demo). */
+  ai?: AiCall;
 }
 
 type Role = 'trainer' | 'client';
@@ -338,7 +341,7 @@ const randomId = () =>
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2) + Date.now().toString(36);
 
-export function createHandler({ db, accounts, error, json, requireAuth, router }: Sdk) {
+export function createHandler({ db, accounts, error, json, requireAuth, router, ai }: Sdk) {
   async function listAll<T>(table: string, max = 1000) {
     const items: Array<T & { id: string }> = [];
     let nextToken: string | undefined;
@@ -2112,6 +2115,56 @@ export function createHandler({ db, accounts, error, json, requireAuth, router }
         const free = await freeProgramOf(trainerId, profile.name, client);
         if (!free) return error('Не удалось начать тренировку.', 500);
         return json({ trainerId, programId: free.id, dayId: 'free' }, free.created ? 201 : 200);
+      },
+    ],
+
+    /**
+     * A workout told in free words or a photo of notes → days of exercises (backend/aiWorkout.ts). The key of the
+     * model is the server's; a trainer has AI_DAILY_LIMIT requests a day.
+     */
+    'POST /api/ai/workout': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        if (!(await trainerOnly(ctx))) return error('Доступ только для тренера.', 403);
+        if (!ai) return error('Нейросеть не подключена: нужен ключ OPENROUTER_API_KEY в секретах Supabase.', 503);
+        const trainerId = ctx.user!.userId;
+        const b = ctx.body || {};
+        const said = text(b.text, 8000);
+        const image = typeof b.image === 'string' && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(b.image) && b.image.length < 6_000_000 ? b.image : '';
+        if (!said && !image) return error('Напишите, надиктуйте или приложите фото.', 400);
+        const today = DATE_RE.test(String(b.today || '')) ? String(b.today) : nowIso().slice(0, 10);
+        const usageT = 'ai-usage:' + trainerId;
+        const usage = await first<{ date: string; count: number }>(usageT);
+        const count = usage?.date === today ? usage.count : 0;
+        if (count >= AI_DAILY_LIMIT) return error(`На сегодня запросов к нейросети больше нет (${AI_DAILY_LIMIT} в день).`, 429);
+        await upsertSingle(usageT, { date: today, count: count + 1 });
+        const base = [...catalog, ...(await customExercises(trainerId))];
+        const content: AiContent = [
+          { type: 'text', text: said ? 'Текст тренера:\n' + said : 'Тренировка на фото — прочитай её.' },
+          ...(image ? [{ type: 'image_url' as const, image_url: { url: image } }] : []),
+        ];
+        let raw: string;
+        try {
+          raw = await ai({ system: aiSystem(base, today), content, schema: AI_SCHEMA as unknown as Record<string, unknown> });
+        } catch (e) {
+          const why = (e as { why?: string }).why;
+          console.error('ai', e);
+          return error(
+            why === 'nokey'
+              ? 'Нейросеть не подключена: нужен ключ OPENROUTER_API_KEY в секретах Supabase.'
+              : why === 'key'
+              ? 'Ключ OpenRouter не подошёл — проверьте секрет OPENROUTER_API_KEY.'
+              : why === 'money'
+                ? 'На счёте OpenRouter закончились деньги или лимит ключа.'
+                : why === 'busy'
+                  ? 'Нейросеть сейчас занята — повторите через минуту.'
+                  : 'Нейросеть не ответила. Повторите или разберите без неё.',
+            502,
+          );
+        }
+        const workout = cleanAiWorkout(raw, new Set(base.map((e) => e.id)));
+        if (!workout) return error('Нейросеть не нашла упражнений. Попробуйте сказать иначе.', 422);
+        return json({ workout, left: AI_DAILY_LIMIT - count - 1 });
       },
     ],
 

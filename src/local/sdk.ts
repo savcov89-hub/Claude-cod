@@ -98,5 +98,11 @@ const accounts = {
   },
   async setPassword() {},
 };
-export const sdk = { db, accounts, error, json, requireAuth, router } as unknown as Sdk;
+// No model in the test mode: «Разобрать нейросетью» says it is not connected; check-ui puts a stand-in
+// (`window.__tlFakeAi`, given the request, returns the model's JSON).
+const ai = (req: unknown) => {
+  const fake = (globalThis as { __tlFakeAi?: (r: unknown) => string }).__tlFakeAi;
+  return fake ? Promise.resolve(fake(req)) : Promise.reject(Object.assign(new Error('test mode'), { why: 'nokey' }));
+};
+export const sdk = { db, accounts, error, json, requireAuth, router, ai } as unknown as Sdk;
 export type LocalHandler = Handler;
