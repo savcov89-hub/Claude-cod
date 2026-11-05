@@ -1,4 +1,16 @@
-import { AI_DAILY_LIMIT, AI_SCHEMA, aiSystem, cleanAiWorkout, type AiCall, type AiContent } from './aiWorkout';
+import {
+  AI_DAILY_LIMIT,
+  AI_EDIT_SCHEMA,
+  AI_SCHEMA,
+  aiEditSystem,
+  aiSelfCheck,
+  aiSystem,
+  cleanAiEdit,
+  cleanAiWorkout,
+  type AiBase,
+  type AiCall,
+  type AiContent,
+} from './aiWorkout';
 import { catalog } from '../src/catalog';
 import { groupMuscles, exerciseRules, programIssue } from '../src/trainingRules';
 import { cleanFocus, cleanMuscles, cleanTargets, type Focus } from '../src/volume';
@@ -416,6 +428,49 @@ export function createHandler({ db, accounts, error, json, requireAuth, router, 
     if (!permitted || (!(program.free && profile.role === 'trainer') && !(await hasAssignment(program.clientId, trainerId, programId)))) return null;
     return { program, ownerId: program.clientId, role: profile.role, name: profile.name };
   }
+  const AI_NOT_CONNECTED = 'Нейросеть не подключена: нужен ключ OPENROUTER_API_KEY в секретах Supabase.';
+  /** One request to the model counted; a string when the day's limit is spent. */
+  async function aiTurn(trainerId: string, today: string): Promise<string | { left: number }> {
+    const usageT = 'ai-usage:' + trainerId;
+    const usage = await first<{ date: string; count: number }>(usageT);
+    const count = usage?.date === today ? usage.count : 0;
+    if (count >= AI_DAILY_LIMIT) return `На сегодня запросов к нейросети больше нет (${AI_DAILY_LIMIT} в день).`;
+    await upsertSingle(usageT, { date: today, count: count + 1 });
+    return { left: AI_DAILY_LIMIT - count - 1 };
+  }
+  /** The exercises the model picks from: the client's programs first, then the trainer's own, then the base. */
+  async function aiBaseOf(trainerId: string, clientId?: string): Promise<AiBase> {
+    const own = await customExercises(trainerId);
+    const all: Exercise[] = [...catalog, ...own];
+    const inPrograms = clientId
+      ? (await listAll<ProgramRecord>(programsTable(trainerId))).filter((p) => p.clientId === clientId && !p.archived)
+      : [];
+    const ids = Array.from(new Set(inPrograms.flatMap((p) => p.days.flatMap((d) => d.exercises.map((e) => e.exerciseId)))));
+    const pick = (e: Exercise) => ({ id: e.id, name: e.name, muscleGroup: e.muscleGroup });
+    return {
+      client: ids.map((id) => all.find((e) => e.id === id)).filter((e): e is Exercise => !!e).map(pick),
+      own: own.map(pick),
+      common: catalog.map(pick),
+    };
+  }
+  const aiKnown = (b: AiBase) => new Set([...b.client, ...b.own, ...b.common].map((e) => e.id));
+  function aiFailed(e: unknown) {
+    const why = (e as { why?: string }).why;
+    console.error('ai', e);
+    return error(
+      why === 'nokey'
+        ? AI_NOT_CONNECTED
+        : why === 'key'
+          ? 'Ключ OpenRouter не подошёл — проверьте секрет OPENROUTER_API_KEY.'
+          : why === 'money'
+            ? 'На счёте OpenRouter закончились деньги или лимит ключа.'
+            : why === 'busy'
+              ? 'Нейросеть сейчас занята — повторите через минуту.'
+              : 'Нейросеть не ответила. Повторите или сделайте без неё.',
+      502,
+    );
+  }
+
   /** The client's hidden program of free workouts (and of workouts brought from notes); created on first use. */
   async function freeProgramOf(trainerId: string, trainerName: string, client: ClientRecord) {
     const existing = (await listAll<ProgramRecord>(programsTable(trainerId))).find((p) => p.free && p.clientId === client.clientId);
@@ -2125,9 +2180,10 @@ export function createHandler({ db, accounts, error, json, requireAuth, router, 
     'GET /api/ai/status': [
       async () => {
         const statusT = 'ai-status';
-        const system = aiSystem(catalog.filter((e) => ['leg-press', 'rdl'].includes(e.id)), nowIso().slice(0, 10));
+        const today = nowIso().slice(0, 10);
         // A new prompt (a deploy that changed it) is checked at once.
-        const sig = String([...system].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0));
+        const prompt = aiSystem(catalog, today) + aiEditSystem({ client: [], own: [], common: [] }, []);
+        const sig = String([...prompt].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0));
         const last = await first<{ at: string; sig?: string; result: Record<string, unknown> }>(statusT);
         if (last && last.sig === sig && Date.now() - Date.parse(last.at) < 10 * 60000)
           return json({ ...last.result, checkedAt: last.at, cached: true });
@@ -2135,17 +2191,11 @@ export function createHandler({ db, accounts, error, json, requireAuth, router, 
         if (!ai) result = { connected: false };
         else
           try {
-            const raw = await ai({
-              system,
-              content: [{ type: 'text', text: 'Текст тренера:\nЖим ногами 45 3х15' }],
-              schema: AI_SCHEMA as unknown as Record<string, unknown>,
-            });
-            const w = cleanAiWorkout(raw, new Set(['leg-press', 'rdl']));
-            const e = w?.days[0]?.exercises[0];
-            result = { connected: true, ok: !!e, understood: e ? `${e.exerciseId || e.written}: ${e.done.map((x) => x.weight + 'x' + x.reps).join(' ')}${e.plan ? ` plan ${e.plan.sets}x${e.plan.repMin}-${e.plan.repMax}` : ''}` : raw.slice(0, 200) };
+            const cases = await aiSelfCheck(ai, catalog, today);
+            const key = cases.find((c) => c.name === 'ошибка' && /no OPENROUTER_API_KEY/.test(c.got));
+            result = key ? { connected: false } : { connected: true, ok: cases.every((c) => c.ok), cases };
           } catch (e) {
-            const why = (e as { why?: string }).why || 'failed';
-            result = why === 'nokey' ? { connected: false } : { connected: true, ok: false, why, error: String((e as Error).message).slice(0, 200) };
+            result = { connected: true, ok: false, error: String((e as Error).message).slice(0, 200) };
           }
         const at = nowIso();
         await upsertSingle(statusT, { at, sig, result });
@@ -2161,19 +2211,17 @@ export function createHandler({ db, accounts, error, json, requireAuth, router, 
       requireAuth(),
       async (ctx: Ctx) => {
         if (!(await trainerOnly(ctx))) return error('Доступ только для тренера.', 403);
-        if (!ai) return error('Нейросеть не подключена: нужен ключ OPENROUTER_API_KEY в секретах Supabase.', 503);
+        if (!ai) return error(AI_NOT_CONNECTED, 503);
         const trainerId = ctx.user!.userId;
         const b = ctx.body || {};
         const said = text(b.text, 8000);
         const image = typeof b.image === 'string' && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(b.image) && b.image.length < 6_000_000 ? b.image : '';
         if (!said && !image) return error('Напишите, надиктуйте или приложите фото.', 400);
         const today = DATE_RE.test(String(b.today || '')) ? String(b.today) : nowIso().slice(0, 10);
-        const usageT = 'ai-usage:' + trainerId;
-        const usage = await first<{ date: string; count: number }>(usageT);
-        const count = usage?.date === today ? usage.count : 0;
-        if (count >= AI_DAILY_LIMIT) return error(`На сегодня запросов к нейросети больше нет (${AI_DAILY_LIMIT} в день).`, 429);
-        await upsertSingle(usageT, { date: today, count: count + 1 });
-        const base = [...catalog, ...(await customExercises(trainerId))];
+        const turn = await aiTurn(trainerId, today);
+        if (typeof turn === 'string') return error(turn, 429);
+        const client = b.clientId ? await findClient(trainerId, String(b.clientId)) : undefined;
+        const base = await aiBaseOf(trainerId, client?.clientId);
         const content: AiContent = [
           { type: 'text', text: said ? 'Текст тренера:\n' + said : 'Тренировка на фото — прочитай её.' },
           ...(image ? [{ type: 'image_url' as const, image_url: { url: image } }] : []),
@@ -2182,24 +2230,64 @@ export function createHandler({ db, accounts, error, json, requireAuth, router, 
         try {
           raw = await ai({ system: aiSystem(base, today), content, schema: AI_SCHEMA as unknown as Record<string, unknown> });
         } catch (e) {
-          const why = (e as { why?: string }).why;
-          console.error('ai', e);
-          return error(
-            why === 'nokey'
-              ? 'Нейросеть не подключена: нужен ключ OPENROUTER_API_KEY в секретах Supabase.'
-              : why === 'key'
-              ? 'Ключ OpenRouter не подошёл — проверьте секрет OPENROUTER_API_KEY.'
-              : why === 'money'
-                ? 'На счёте OpenRouter закончились деньги или лимит ключа.'
-                : why === 'busy'
-                  ? 'Нейросеть сейчас занята — повторите через минуту.'
-                  : 'Нейросеть не ответила. Повторите или разберите без неё.',
-            502,
-          );
+          return aiFailed(e);
         }
-        const workout = cleanAiWorkout(raw, new Set(base.map((e) => e.id)));
+        const workout = cleanAiWorkout(raw, aiKnown(base));
         if (!workout) return error('Нейросеть не нашла упражнений. Попробуйте сказать иначе.', 422);
-        return json({ workout, left: AI_DAILY_LIMIT - count - 1 });
+        return json({ workout, left: turn.left });
+      },
+    ],
+
+    /**
+     * A program changed by words («первые 4 упражнения по 3 подхода, остальные по 1»): the model returns the whole
+     * program changed; nothing is saved here — the trainer sees the changes and saves them (POST /api/programs/:id).
+     * `days` — the version on screen (a change after a change), else the program as saved.
+     */
+    'POST /api/ai/program': [
+      requireAuth(),
+      async (ctx: Ctx) => {
+        if (!(await trainerOnly(ctx))) return error('Доступ только для тренера.', 403);
+        if (!ai) return error(AI_NOT_CONNECTED, 503);
+        const trainerId = ctx.user!.userId;
+        const b = ctx.body || {};
+        const [program] = await db.get<ProgramRecord>(programsTable(trainerId), [String(b.programId || '')]);
+        if (!program || program.trainerId !== trainerId || program.free) return error('Программа не найдена.', 404);
+        const said = text(b.text, 4000);
+        if (!said) return error('Скажите или напишите, что изменить.', 400);
+        const today = DATE_RE.test(String(b.today || '')) ? String(b.today) : nowIso().slice(0, 10);
+        const turn = await aiTurn(trainerId, today);
+        if (typeof turn === 'string') return error(turn, 429);
+        const base = await aiBaseOf(trainerId, program.clientId);
+        const known = aiKnown(base);
+        const shown = Array.isArray(b.days) ? (b.days as ProgramDay[]).slice(0, 14) : program.days;
+        const days = shown
+          .filter((d) => d && typeof d.id === 'string' && Array.isArray(d.exercises))
+          .map((d) => ({
+            id: d.id,
+            name: text(d.name, 80),
+            exercises: d.exercises.slice(0, 30).map((e) => ({
+              exerciseId: String(e.exerciseId),
+              exerciseName: text(e.exerciseName, 100),
+              sets: Number(e.sets) || 3,
+              repMin: Number(e.repMin) || 8,
+              repMax: Number(e.repMax) || 12,
+              targetRir: Number.isFinite(Number(e.targetRir)) ? Number(e.targetRir) : 2,
+            })),
+          }));
+        if (!days.length) return error('В программе нет тренировок.', 400);
+        let raw: string;
+        try {
+          raw = await ai({
+            system: aiEditSystem(base, days, program.perWeek),
+            content: [{ type: 'text', text: 'Что изменить:\n' + said }],
+            schema: AI_EDIT_SCHEMA as unknown as Record<string, unknown>,
+          });
+        } catch (e) {
+          return aiFailed(e);
+        }
+        const edit = cleanAiEdit(raw, known, days);
+        if (!edit) return error('Нейросеть не поняла правку. Попробуйте сказать иначе.', 422);
+        return json({ edit, left: turn.left });
       },
     ],
 
@@ -2347,12 +2435,15 @@ export function createHandler({ db, accounts, error, json, requireAuth, router, 
           return ok ? json({ programId: b.programId, dayId: day.id, programName: program.name }) : error('Не удалось сохранить.', 500);
         }
         const name = text(b.programName, 100) || 'Программа';
+        // «Одна тренировка три раза в неделю» (told to the model): the plan of the weekly volume.
+        const perWeek = perWeekOf(b.perWeek, 1);
         const record: ProgramRecord = {
           trainerId,
           trainerName: profile.name,
           clientId: client.clientId,
           clientName: client.clientName,
           name,
+          ...(perWeek ? { perWeek } : {}),
           days: [{ id: 'day-1', name: dayName, exercises }],
           createdAt: at,
           updatedAt: at,

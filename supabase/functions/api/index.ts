@@ -2,5 +2,11 @@
 import { createSupabaseServer } from './server.js';
 
 Deno.serve(
-  createSupabaseServer(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, () => Deno.env.get('OPENROUTER_API_KEY')),
+  createSupabaseServer(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    () => Deno.env.get('OPENROUTER_API_KEY'),
+    // Another model without a deploy: any OpenRouter id, e.g. google/gemini-2.5-flash.
+    () => Deno.env.get('OPENROUTER_MODEL'),
+  ),
 );

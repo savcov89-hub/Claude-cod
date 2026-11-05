@@ -119,14 +119,19 @@ export function createServer(deps: { db: Db; getUser: (token: string) => Promise
  * Production wiring: service-role client for rows and for checking the caller's token. The model's key is read on each
  * request, so a secret added later works without a new deploy.
  */
-export function createSupabaseServer(supabaseUrl: string, serviceRoleKey: string, aiKey: () => string | undefined = () => undefined) {
+export function createSupabaseServer(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  aiKey: () => string | undefined = () => undefined,
+  aiModel: () => string | undefined = () => undefined,
+) {
   const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
   return createServer({
     db: supabaseDb(admin),
     ai: (req) => {
       const key = aiKey();
       if (!key) return Promise.reject(Object.assign(new Error('no OPENROUTER_API_KEY'), { why: 'nokey' }));
-      return openRouter(key)(req);
+      return openRouter(key, fetch, aiModel() || undefined)(req);
     },
     accounts: {
       async createUser(email, password) {

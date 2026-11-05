@@ -58,6 +58,7 @@ const setsText = (sets: ParsedSet[]) => {
 /** The model's answer (backend/aiWorkout.ts) in the shape the preview shows. */
 interface AiAnswer {
   title: string | null;
+  perWeek: number | null;
   days: Array<{
     name: string;
     date: string | null;
@@ -120,7 +121,7 @@ const SpeechCtor = (): (new () => SpeechRec) | undefined => {
 };
 
 /** Dictation into the text: each pause is a new line (one exercise). */
-function useDictation(onLine: (line: string) => void) {
+export function useDictation(onLine: (line: string) => void) {
   const rec = useRef<SpeechRec | null>(null);
   const [listening, setListening] = useState(false);
   const [heard, setHeard] = useState('');
@@ -178,7 +179,7 @@ export function TextWorkout({
   const [textValue, setText] = useState('');
   const local = useMemo(() => parseWorkoutText(textValue), [textValue]);
   // «Разобрать нейросетью»: its answer is shown instead of the rules' until «Без нейросети».
-  const [ai, setAi] = useState<{ parsed: ParsedText; text: string; photo: boolean } | null>(null);
+  const [ai, setAi] = useState<{ parsed: ParsedText; text: string; photo: boolean; perWeek: number | null } | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiErr, setAiErr] = useState('');
   const [photo, setPhoto] = useState<{ data: string; name: string } | null>(null);
@@ -245,8 +246,8 @@ export function TextWorkout({
     setAiBusy(true);
     setAiErr('');
     try {
-      const r = await api.post('/api/ai/workout', { text: textValue, today: localDate(), ...(photo ? { image: photo.data } : {}) });
-      setAi({ parsed: fromAi(r.data.workout), text: textValue, photo: !!photo });
+      const r = await api.post('/api/ai/workout', { text: textValue, today: localDate(), clientId, ...(photo ? { image: photo.data } : {}) });
+      setAi({ parsed: fromAi(r.data.workout), text: textValue, photo: !!photo, perWeek: r.data.workout.perWeek ?? null });
       setPicked({});
     } catch (e) {
       setAiErr(readError(e));
@@ -316,8 +317,12 @@ export function TextWorkout({
     }
     // The plan of the program and the targets of a free workout — told, or from all the sets.
     for (const x of out) {
-      const told = list.find((e) => e.plan && idOf(e, made) === x.exerciseId);
-      x.plan = told?.plan ? { ...told.plan, targetRir: 2 } : planOf(x.sets);
+      const told = list.find((e) => e.plan && idOf(e, made) === x.exerciseId)?.plan;
+      const fromSets = planOf(x.sets);
+      // Sets told without reps («по одному подходу»): the reps from what was done, or 8–12.
+      x.plan = told
+        ? { sets: told.sets, repMin: told.repMin || fromSets.repMin, repMax: told.repMax || fromSets.repMax, targetRir: 2 }
+        : fromSets;
       x.repMin = x.plan.repMin;
       x.repMax = x.plan.repMax;
       x.targetRir = x.plan.targetRir;
@@ -340,6 +345,8 @@ export function TextWorkout({
             programId,
             programName: programName.trim() || parsed.title || 'Программа',
             dayName: dayNames[i],
+            // One workout done several times a week («три раза в неделю»): the plan of the weekly volume.
+            ...(days.length === 1 && ai?.perWeek ? { perWeek: ai.perWeek } : {}),
             exercises: exercises.map((x) => ({ exerciseId: x.exerciseId, ...x.plan })),
           });
           programId = r.data.programId;
@@ -473,6 +480,11 @@ export function TextWorkout({
         {all.length > 0 && (
           <div className="tw-preview" aria-label="Что получилось">
             {parsed.title && <p className="muted small">{parsed.title}</p>}
+            {ai?.perWeek && days.length === 1 ? (
+              <p className="muted small">
+                Одна тренировка {ai.perWeek} {plural(ai.perWeek, 'раз', 'раза', 'раз')} в неделю
+              </p>
+            ) : null}
             {parsed.workouts.map((w, wi) => (
               <div key={wi} className="tw-workout">
                 {w.name && parsed.workouts.length > 1 && !w.date && (
@@ -502,7 +514,17 @@ export function TextWorkout({
                         )}
                       </button>
                       <span className="tw-sets small">
-                        {e.plan && !sets.length ? `план ${e.plan.sets}×${e.plan.repMin === e.plan.repMax ? e.plan.repMin : e.plan.repMin + '–' + e.plan.repMax}` : setsText(sets)}
+                        {[
+                          sets.length ? setsText(sets) : '',
+                          e.plan
+                            ? 'план ' +
+                              (e.plan.repMin
+                                ? `${e.plan.sets}×${e.plan.repMin === e.plan.repMax ? e.plan.repMin : e.plan.repMin + '–' + e.plan.repMax}`
+                                : `${e.plan.sets} ${plural(e.plan.sets, 'подход', 'подхода', 'подходов')}`)
+                            : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ') || 'без подходов'}
                         {e.ambiguous && (
                           <button type="button" className="btn btn-quiet btn-sm" onClick={() => setFlipped((f) => ({ ...f, [e.line]: !f[e.line] }))}>
                             {flipped[e.line] ? `${e.ambiguous.a} — это подходы` : `${e.ambiguous.a} — это вес`}

@@ -1798,6 +1798,60 @@ await scenario('43. Нейросеть: свободный рассказ «тр
   await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click().catch(() => {});
 });
 
+await scenario('44. «Правка голосом»: «первые 4 по 3 подхода, остальные по 1» → видно, что поменялось → сохранить', async () => {
+  await p.locator('.testbar').getByRole('button', { name: 'Тренер' }).click();
+  await p.waitForTimeout(800);
+  const ex = (id) => ({ exerciseId: id, sets: 2, repMin: 10, repMax: 12, targetRir: 2 });
+  const { program } = await call('post', '/api/programs', {
+    clientId: idOf('Павел'),
+    name: 'Всё тело 3 раза',
+    days: [{ id: 'full', name: 'Всё тело', exercises: ['leg-press', 'rdl', 'bench-press', 'lat-pulldown', 'lateral-raise', 'dumbbell-curl'].map(ex) }],
+  });
+  await p.reload();
+  await p.waitForSelector('.nav', { timeout: 30000 });
+  await p.waitForTimeout(1500);
+  await p.locator('.nav').getByRole('button', { name: 'Клиенты' }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-row', { hasText: 'Павел' }).first().locator('.client-open').click();
+  await p.waitForTimeout(1000);
+  await p.getByRole('tab', { name: 'Программы' }).click();
+  await p.waitForTimeout(500);
+  await p.evaluate(() => {
+    window.__tlAiSeen = null;
+    window.__tlFakeAi = (req) => {
+      window.__tlAiSeen = { system: req.system, text: req.content[0].text };
+      const ids = ['leg-press', 'deadlift', 'bench-press', 'lat-pulldown', 'lateral-raise', 'dumbbell-curl'];
+      return JSON.stringify({
+        summary: 'Первые четыре — по 3 подхода, остальные — по 1; румынская тяга заменена на становую.',
+        perWeek: 3,
+        days: [{ id: 'full', name: 'Всё тело', exercises: ids.map((id, i) => ({ exerciseId: id, exerciseName: id === 'deadlift' ? 'Становая тяга' : '', sets: i < 4 ? 3 : 1, repMin: 10, repMax: 12, targetRir: 2 })) }],
+      });
+    };
+  });
+  const card = p.locator('.program-card, article', { hasText: 'Всё тело 3 раза' }).first();
+  await card.getByRole('button', { name: 'Правка голосом' }).click();
+  await p.locator('#program-voice-input').fill('Первые четыре упражнения по три подхода, остальные по одному. Румынскую тягу замени на становую. Три раза в неделю');
+  await p.locator('#program-voice-apply').click();
+  await p.waitForTimeout(1200);
+  const seen = await p.evaluate(() => window.__tlAiSeen);
+  expect(seen && /id=full «Всё тело»/.test(seen.system) && /1\. leg-press \| Жим ногами \| 2 подх\. × 10–12/.test(seen.system), 'the model gets the program with numbered exercises', seen && seen.system.slice(0, 300));
+  const pv = (await p.locator('.tw-preview').innerText()).replace(/\s+/g, ' ');
+  expect(/Жим ногами изменено 2×10–12 → 3×10–12/.test(pv) && /Сгибание рук с гантелями изменено 2×10–12 → 1×10–12/.test(pv), 'changed sets are shown old → new', pv.slice(0, 400));
+  expect(/Становая тяга добавлено/.test(pv) && /Убрано: Румынская тяга/.test(pv), 'the replacement: added and removed', pv);
+  expect(/3 раза в неделю/.test(await p.locator('.text-workout').innerText()), 'says «3 раза в неделю»');
+  await p.locator('#program-voice-save').click();
+  await p.waitForTimeout(1500);
+  const after = (await call('get', '/api/programs')).programs.find((x) => x.id === program.id);
+  const got = after?.days[0].exercises.map((e) => e.exerciseId + ':' + e.sets).join(',');
+  expect(got === 'leg-press:3,deadlift:3,bench-press:3,lat-pulldown:3,lateral-raise:1,dumbbell-curl:1' && after.perWeek === 3, 'saved: sets, the replacement, 3 a week', [got, after?.perWeek]);
+  expect(/Программа «Всё тело 3 раза» изменена/.test(await card.innerText()), 'says it was changed');
+  await p.evaluate(() => {
+    delete window.__tlFakeAi;
+  });
+  await call('post', '/api/programs/' + program.id + '/archive', { archived: true });
+  await p.locator('.main').getByRole('button', { name: 'Назад', exact: true }).first().click().catch(() => {});
+});
+
 await scenario('42. Замена посреди упражнения: отмеченные подходы остаются; «вернуть», «насовсем», «Это был…», недавние сверху', async () => {
   const { client: c } = await call('post', '/api/clients', { clientName: 'Глеб' });
   const ex = (id) => ({ exerciseId: id, sets: 3, repMin: 8, repMax: 12, targetRir: 2 });

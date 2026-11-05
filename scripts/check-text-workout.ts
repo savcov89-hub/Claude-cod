@@ -4,7 +4,7 @@ import { parseWorkoutText, planOf } from '../src/workoutText';
 import { matchExercise } from '../src/exerciseMatch';
 import { catalog } from '../src/catalog';
 import type { Exercise } from '../src/types';
-import { AI_MODEL, AI_SCHEMA, aiSystem, cleanAiWorkout, openRouter } from '../backend/aiWorkout';
+import { AI_MODEL, AI_SCHEMA, aiEditSystem, aiSelfCheck, aiSystem, cleanAiEdit, cleanAiWorkout, openRouter } from '../backend/aiWorkout';
 
 let failures = 0;
 let checks = 0;
@@ -153,6 +153,58 @@ expect(
 const fail = openRouter('bad', (async () => new Response('{}', { status: 402 })) as unknown as typeof fetch);
 const why = await fail({ system: '', content: [], schema: {} }).catch((e) => e.why);
 expect(why === 'money', 'закончились деньги — понятная причина', why);
+
+console.log('7. Одна тренировка несколько раз, подходы словами, упражнения клиента первыми');
+const once = cleanAiWorkout(
+  JSON.stringify({ title: '', perWeek: 3, days: [{ name: 'Всё тело', date: '', bodyWeight: 0, exercises: [{ written: 'Жим ногами', exerciseId: 'leg-press', done: [], plan: { sets: 1, repMin: 0, repMax: 0 }, note: '' }] }] }),
+  known,
+);
+expect(once?.perWeek === 3 && once.days[0].exercises[0].plan?.sets === 1 && once.days[0].exercises[0].plan?.repMin === 0, '«по одному подходу» без повторов — 1 подход, повторы подставит приложение', once);
+const sys2 = aiSystem({ client: [{ id: 'custom:red', name: 'Жим в тренажёре красный', muscleGroup: 'Грудь' }], own: [], common: base }, '2026-11-05');
+expect(sys2.indexOf('custom:red') < sys2.indexOf('bench-press') && /в первую очередь/.test(sys2) && /ОДНА тренировка/.test(sys2), 'упражнения программ клиента — первыми; «три раза в неделю» — одна тренировка');
+
+console.log('8. Правка программы словами');
+const prog = [{ id: 'day-1', name: 'Всё тело', exercises: ['leg-press', 'rdl', 'bench-press'].map((id) => ({ exerciseId: id, exerciseName: id, sets: 2, repMin: 10, repMax: 12, targetRir: 2 })) }];
+const editSys = aiEditSystem({ client: [], own: [], common: base }, prog, 3);
+expect(/id=day-1 «Всё тело»/.test(editSys) && /1\. leg-press \| leg-press \| 2 подх\. × 10–12, RIR 2/.test(editSys) && /3 раз в неделю/.test(editSys), 'нейросеть видит программу с номерами упражнений');
+const edited = cleanAiEdit(
+  JSON.stringify({
+    summary: 'Первые два по 3 подхода, третье — 1.',
+    perWeek: 0,
+    days: [
+      { id: 'day-1', name: 'Всё тело', exercises: [
+        { exerciseId: 'leg-press', exerciseName: 'Жим ногами', sets: 3, repMin: 10, repMax: 12, targetRir: 2 },
+        { exerciseId: 'deadlift', exerciseName: 'Становая тяга', sets: 3, repMin: 0, repMax: 0, targetRir: 9 },
+        { exerciseId: 'bench-press', exerciseName: '', sets: 1, repMin: 10, repMax: 12, targetRir: 2 },
+        { exerciseId: '', exerciseName: 'Жираф', sets: 0, repMin: 0, repMax: 0, targetRir: 2 },
+      ] },
+      { id: 'day-1', name: 'Копия', exercises: [{ exerciseId: 'made-up', exerciseName: '', sets: 1, repMin: 1, repMax: 1, targetRir: 1 }] },
+      { id: 'zzz', name: 'Новая', exercises: [{ exerciseId: 'crunch', exerciseName: 'Скручивание', sets: 2, repMin: 15, repMax: 20, targetRir: 1 }] },
+    ],
+  }),
+  known,
+  prog,
+);
+const e0 = edited?.days[0].exercises;
+expect(e0?.map((x) => x.sets).join(',') === '3,3,1,3', 'подходы по словам; неверное число — как было или 3', e0);
+expect(e0?.[1].repMin === 8 && e0?.[1].targetRir === 2 && e0?.[2].exerciseName === 'bench-press', 'неверные повторы и RIR — по умолчанию; пустое название — прежнее', e0);
+expect(e0?.[3].exerciseId === '' && e0?.[3].exerciseName === 'Жираф', 'нет в базе — новое упражнение по названию', e0?.[3]);
+expect(edited?.days.length === 2 && edited.days[1].id === '' && edited.perWeek === null, 'тренировка без упражнений убрана, новая — без id, perWeek 0 — как было', edited?.days.map((d) => d.id));
+
+console.log('9. Проверка нейросети после публикации (на образцовых ответах)');
+const ideal = async ({ system, content }: { system: string; content: any[] }) => {
+  const t = content[0].text as string;
+  if (system.startsWith('Ты помощник фитнес-тренера. Ниже программа'))
+    return JSON.stringify({ summary: 'ok', perWeek: 0, days: [{ id: 'day-1', name: 'Всё тело', exercises: ['leg-press', 'deadlift', 'bench-press', 'lat-pulldown', 'lateral-raise', 'dumbbell-curl'].map((id, i) => ({ exerciseId: id, exerciseName: id, sets: i < 4 ? 3 : 1, repMin: 10, repMax: 12, targetRir: 2 })) }] });
+  if (/Жим ногами 45/.test(t)) return JSON.stringify({ title: '', perWeek: 0, days: [{ name: 'A', date: '', bodyWeight: 0, exercises: [{ written: 'Жим ногами', exerciseId: 'leg-press', done: [1, 2, 3].map(() => ({ weight: 45, reps: 15 })), plan: { sets: 0, repMin: 0, repMax: 0 }, note: '' }] }] });
+  if (/три раза в неделю/.test(t))
+    return JSON.stringify({ title: '', perWeek: 3, days: [{ name: 'Всё тело', date: '', bodyWeight: 0, exercises: ['leg-press', 'rdl', 'bench-press', 'lat-pulldown', 'lateral-raise', 'dumbbell-curl'].map((id, i) => ({ written: id, exerciseId: id, done: [], plan: { sets: i < 4 ? 3 : 1, repMin: 0, repMax: 0 }, note: '' })) }] });
+  return JSON.stringify({ title: '', perWeek: 0, days: ['bench-press', 'leg-press', 'dumbbell-curl'].map((id, i) => ({ name: 'Д' + i, date: '', bodyWeight: 0, exercises: [{ written: id, exerciseId: id, done: [], plan: { sets: 0, repMin: 0, repMax: 0 }, note: '' }] })) });
+};
+const cases = await aiSelfCheck(ideal as any, base, '2026-11-05');
+expect(cases.length === 4 && cases.every((c) => c.ok), 'все 4 образца проходят', cases);
+const bad = await aiSelfCheck((async () => '{"days":[]}') as any, base, '2026-11-05');
+expect(bad.every((c) => !c.ok), 'плохие ответы не проходят', bad.map((c) => c.got));
 
 console.log(`\n${checks} проверок, ошибок: ${failures}`);
 process.exit(failures ? 1 : 0);

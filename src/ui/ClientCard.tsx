@@ -15,6 +15,7 @@ import { AUTO_FINISH_IDLE_MS, Journal } from './Journal';
 import { RecordsSheet } from './Records';
 import { copyLater, programText } from './programText';
 import { TextWorkout } from './TextWorkout';
+import { ProgramVoice } from './ProgramVoice';
 import type { PersonalRecord } from '../analytics';
 
 type Tab = 'overview' | 'progress' | 'history' | 'body' | 'ration' | 'programs';
@@ -700,6 +701,7 @@ export function ProgramCard({
   const [err, setErr] = useState('');
   const [copying, setCopying] = useState<string | null>(null);
   const [copied, setCopied] = useState('');
+  const [voice, setVoice] = useState(false);
   // Plain text for a messenger: copied at once; shown to copy by hand when the browser does not allow it.
   const [asText, setAsText] = useState<string | null>(null);
   const [textBusy, setTextBusy] = useState(false);
@@ -781,6 +783,11 @@ export function ProgramCard({
             <Pencil size={15} /> Изменить
           </button>
         )}
+        {!p.archived && (
+          <button className="btn btn-sm" onClick={() => setVoice(true)}>
+            <Mic size={15} /> Правка голосом
+          </button>
+        )}
         <button className="btn btn-sm" onClick={() => openBuilder({ clientId: p.clientId, program: p, copy: true })}>
           <Copy size={15} /> Копировать программу
         </button>
@@ -792,6 +799,17 @@ export function ProgramCard({
         </button>
       </footer>
       {copied && <p className="tone-good small">{copied}</p>}
+      {voice && (
+        <ProgramVoice
+          program={p}
+          data={data}
+          onClose={() => setVoice(false)}
+          onSaved={(message) => {
+            setVoice(false);
+            setCopied(message);
+          }}
+        />
+      )}
       {asText !== null && (
         <Sheet title="Текст программы" onClose={() => setAsText(null)}>
           <textarea className="program-text" readOnly rows={12} value={asText} onFocus={(e) => e.target.select()} />

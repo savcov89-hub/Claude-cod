@@ -29,7 +29,8 @@
 - Картинки упражнений (`src/ui/figure/`): `npx tsx scripts/check-figures.tsx лист.html фото/` — суставы, опора, равновесие,
   и посмотреть лист глазами рядом с фото из `scripts/figure-refs.json`.
 - Тренировка из текста (`src/workoutText.ts`, `src/exerciseMatch.ts`, `src/ui/TextWorkout.tsx`):
-  `npx tsx scripts/check-text-workout.ts` (форматы, голос, заметки, названия) и check-ui сценарий 41.
+  `npx tsx scripts/check-text-workout.ts` (форматы, голос, заметки, названия, ответы нейросети) и check-ui сценарии 41, 43, 44.
+  Настоящую модель проверяет только шаг «Check the model» после публикации (из среды разработки OpenRouter недоступен).
 - Изменения прогрессии или журнала: `npx tsx scripts/simulate-month.ts отчёт.md` — 30 клиентов, месяц Пн/Ср/Пт;
   сравнить «в диапазоне / легко / тяжело» и число колебаний с прошлым прогоном.
   После `npm run build:api` перезапускать контейнер `supabase_edge_runtime_training-log`.
@@ -89,6 +90,11 @@
   «Разобрать нейросетью» / «Фото заметки» — `POST /api/ai/workout` (`backend/aiWorkout.ts`: Gemini 2.5 Flash-Lite через
   OpenRouter, ответ по JSON-схеме без null, проверка `cleanAiWorkout`, 150 в день). Ключ — секрет Supabase
   `OPENROUTER_API_KEY`, читается на каждый запрос (`supabase/functions/api/index.ts`); в демо модели нет,
-  check-ui подставляет `window.__tlFakeAi` (сценарий 43). Несколько дней ответа — несколько дней программы.
+  check-ui подставляет `window.__tlFakeAi` (сценарии 43, 44). Несколько дней ответа — несколько дней программы;
+  одна тренировка «3 раза в неделю» — один день и `perWeek`. Модель — секрет `OPENROUTER_MODEL` или `AI_MODEL`.
+  Список упражнений для модели (`aiBaseOf`): сначала из программ клиента, потом свои тренера, потом база.
+  «Правка голосом» (`src/ui/ProgramVoice.tsx`) — `POST /api/ai/program` (`aiEditSystem`, `cleanAiEdit`): вся программа
+  с правкой, ничего не сохраняет; сохранение — `POST /api/programs/:id` с `base`. `GET /api/ai/status` (без входа,
+  раз в 10 минут, шаг «Check the model» в Deploy Supabase) — `aiSelfCheck` на четырёх фиксированных образцах.
 - Брошенная тренировка (есть подходы, 3 ч без сохранений) записывается сервером сама датой последнего сохранения,
   когда её черновик читают по пути: приложение клиента, карточка, «Зал», открытие тренировки (`finishStale`).
