@@ -2125,26 +2125,30 @@ export function createHandler({ db, accounts, error, json, requireAuth, router, 
     'GET /api/ai/status': [
       async () => {
         const statusT = 'ai-status';
-        const last = await first<{ at: string; result: Record<string, unknown> }>(statusT);
-        if (last && Date.now() - Date.parse(last.at) < 10 * 60000) return json({ ...last.result, checkedAt: last.at, cached: true });
+        const system = aiSystem(catalog.filter((e) => ['leg-press', 'rdl'].includes(e.id)), nowIso().slice(0, 10));
+        // A new prompt (a deploy that changed it) is checked at once.
+        const sig = String([...system].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0));
+        const last = await first<{ at: string; sig?: string; result: Record<string, unknown> }>(statusT);
+        if (last && last.sig === sig && Date.now() - Date.parse(last.at) < 10 * 60000)
+          return json({ ...last.result, checkedAt: last.at, cached: true });
         let result: Record<string, unknown>;
         if (!ai) result = { connected: false };
         else
           try {
             const raw = await ai({
-              system: aiSystem(catalog.filter((e) => ['leg-press', 'rdl'].includes(e.id)), nowIso().slice(0, 10)),
+              system,
               content: [{ type: 'text', text: 'Текст тренера:\nЖим ногами 45 3х15' }],
               schema: AI_SCHEMA as unknown as Record<string, unknown>,
             });
             const w = cleanAiWorkout(raw, new Set(['leg-press', 'rdl']));
             const e = w?.days[0]?.exercises[0];
-            result = { connected: true, ok: !!e, understood: e ? `${e.exerciseId || e.written}: ${e.done.map((x) => x.weight + 'x' + x.reps).join(' ')}` : raw.slice(0, 200) };
+            result = { connected: true, ok: !!e, understood: e ? `${e.exerciseId || e.written}: ${e.done.map((x) => x.weight + 'x' + x.reps).join(' ')}${e.plan ? ` plan ${e.plan.sets}x${e.plan.repMin}-${e.plan.repMax}` : ''}` : raw.slice(0, 200) };
           } catch (e) {
             const why = (e as { why?: string }).why || 'failed';
             result = why === 'nokey' ? { connected: false } : { connected: true, ok: false, why, error: String((e as Error).message).slice(0, 200) };
           }
         const at = nowIso();
-        await upsertSingle(statusT, { at, result });
+        await upsertSingle(statusT, { at, sig, result });
         return json({ ...result, checkedAt: at });
       },
     ],
