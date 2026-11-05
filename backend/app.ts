@@ -2119,6 +2119,37 @@ export function createHandler({ db, accounts, error, json, requireAuth, router, 
     ],
 
     /**
+     * Is the model connected: one short real request (the whole way — key, model, schema), at most once in 10 minutes
+     * for everyone; between them the last answer. No sign-in: it says only whether it works (checked after a deploy).
+     */
+    'GET /api/ai/status': [
+      async () => {
+        const statusT = 'ai-status';
+        const last = await first<{ at: string; result: Record<string, unknown> }>(statusT);
+        if (last && Date.now() - Date.parse(last.at) < 10 * 60000) return json({ ...last.result, checkedAt: last.at, cached: true });
+        let result: Record<string, unknown>;
+        if (!ai) result = { connected: false };
+        else
+          try {
+            const raw = await ai({
+              system: aiSystem(catalog.filter((e) => ['leg-press', 'rdl'].includes(e.id)), nowIso().slice(0, 10)),
+              content: [{ type: 'text', text: 'Текст тренера:\nЖим ногами 45 3х15' }],
+              schema: AI_SCHEMA as unknown as Record<string, unknown>,
+            });
+            const w = cleanAiWorkout(raw, new Set(['leg-press', 'rdl']));
+            const e = w?.days[0]?.exercises[0];
+            result = { connected: true, ok: !!e, understood: e ? `${e.exerciseId || e.written}: ${e.done.map((x) => x.weight + 'x' + x.reps).join(' ')}` : raw.slice(0, 200) };
+          } catch (e) {
+            const why = (e as { why?: string }).why || 'failed';
+            result = why === 'nokey' ? { connected: false } : { connected: true, ok: false, why, error: String((e as Error).message).slice(0, 200) };
+          }
+        const at = nowIso();
+        await upsertSingle(statusT, { at, result });
+        return json({ ...result, checkedAt: at });
+      },
+    ],
+
+    /**
      * A workout told in free words or a photo of notes → days of exercises (backend/aiWorkout.ts). The key of the
      * model is the server's; a trainer has AI_DAILY_LIMIT requests a day.
      */

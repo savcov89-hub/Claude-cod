@@ -43,6 +43,12 @@ jobs:
       - name: Deploy function
         if: env.SUPABASE_ACCESS_TOKEN != ''
         run: npx supabase functions deploy api --project-ref "$PROJECT_ID" --no-verify-jwt --use-api
+      - name: Check the model (OPENROUTER_API_KEY)
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+        continue-on-error: true
+        run: |
+          sleep 20
+          curl -s -m 120 "https://$PROJECT_ID.supabase.co/functions/v1/api/api/ai/status"; echo
       - name: No token
         if: env.SUPABASE_ACCESS_TOKEN == ''
         run: echo "::warning::SUPABASE_ACCESS_TOKEN secret is not set, so the function was built but not deployed."
