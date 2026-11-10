@@ -693,6 +693,38 @@ async function main() {
     expect(ids(after) === 'machine-chest-press:3,lat-pulldown:3', 'the bench done today does not come back into the program', ids(after));
   }
 
+  console.log('24. Комментарии: к упражнению без подходов не пропадает, «в прошлый раз» — у следующей; поздний — с другого телефона');
+  {
+    const s = await setup('notes', ['leg-press', 'lat-pulldown', 'seated-leg-curl'], ['bench-press']);
+    await s.T.open();
+    await s.C.open();
+    s.T.set('leg-press', 0, { weight: 100, reps: 12 });
+    s.T.entries.find((e) => e.exerciseId === 'leg-press')!.note = 'сиденье на 4';
+    s.T.entries.find((e) => e.exerciseId === 'lat-pulldown')!.note = 'плечо болит, не делал';
+    s.T.fb = 'Тяжело сегодня';
+    s.T.pending = true;
+    await s.T.save();
+    const fin = await s.T.finish();
+    expect(!!fin.sessionId, 'finished', fin);
+    const rec = (await history(s)).sessions[0];
+    expect(rec.feedback === 'Тяжело сегодня', 'the workout comment is recorded', rec.feedback);
+    expect(rec.exercises.map((e: any) => e.exerciseId + ':' + (e.note || '')).join(',') === 'leg-press:сиденье на 4', 'done exercises keep their comment', rec.exercises);
+    expect(JSON.stringify(rec.skippedNotes) === JSON.stringify([{ exerciseId: 'lat-pulldown', exerciseName: rec.skippedNotes?.[0]?.exerciseName, note: 'плечо болит, не делал' }]), 'the comment on the exercise not done is kept with the workout', rec.skippedNotes);
+    // The client's phone, behind: a comment on the curl after the trainer finished — joins the record.
+    s.C.entries.find((e) => e.exerciseId === 'seated-leg-curl')!.note = 'колено';
+    s.C.set('seated-leg-curl', 0, { weight: 30, reps: 12 });
+    const late = await s.C.save();
+    expect(late.closed === true && late.amended === true, 'the late entry joins the finished workout', late);
+    const rec2 = (await history(s)).sessions[0];
+    expect(rec2.exercises.find((e: any) => e.exerciseId === 'seated-leg-curl')?.note === 'колено', 'its comment too', rec2.exercises);
+    expect(rec2.skippedNotes?.[0]?.note === 'плечо болит, не делал', 'the comment on the skipped one stays', rec2.skippedNotes);
+    expect(rec2.feedback === 'Тяжело сегодня' && rec2.exercises.find((e: any) => e.exerciseId === 'leg-press')?.note === 'сиденье на 4', "the other phone's empty comments wipe nothing", [rec2.feedback, rec2.exercises]);
+    const next = await s.T.open();
+    const prev = Object.fromEntries(next.day.exercises.map((e: any) => [e.exerciseId, [e.previousNote || '', e.previousSets.length]]));
+    expect(prev['leg-press'][0] === 'сиденье на 4' && prev['lat-pulldown'][0] === 'плечо болит, не делал' && prev['seated-leg-curl'][0] === 'колено', '«в прошлый раз» shows each comment next time', prev);
+    expect(prev['lat-pulldown'][1] === 0 && prev['leg-press'][1] === 1, 'a skipped exercise brings no sets of its own', prev);
+  }
+
   console.log(`\n${checks} проверок, ошибок: ${failures}`);
   process.exit(failures ? 1 : 0);
 }

@@ -18,6 +18,11 @@ function pick<T>(hasBase: boolean, base: T, local: T, remote: T, key: (v: T) => 
   if (hasBase && same(key(local), key(base))) return remote;
   return local;
 }
+/** A comment: without a base (both phones opened the workout before anything was saved) an empty side never wipes the other's. */
+function pickText(hasBase: boolean, base: string, local: string, remote: string) {
+  if (!hasBase && (!local || !remote)) return local || remote;
+  return pick(hasBase, base, local, remote);
+}
 const extraKey = (x?: SessionExercise['extra']) => (x ? [x.repMin, x.repMax, x.targetRir, !!x.once, x.instead || ''] : null);
 
 function sameEntry(a: SessionExercise, b: SessionExercise) {
@@ -64,7 +69,7 @@ function mergeEntry(b: SessionExercise | undefined, l: SessionExercise | undefin
     const id = pick<ReturnType<typeof identity> | undefined>(has, b && identity(b), identity(l), identity(r)) || identity(l);
     const skipped = pick(has, !!b?.skipped, !!l.skipped, !!r.skipped);
     const extra = pick(has, b?.extra, l.extra, r.extra, extraKey);
-    const note = pick(has, b?.note || '', l.note || '', r.note || '');
+    const note = pickText(has, b?.note || '', l.note || '', r.note || '');
     const muscles = l.muscles || r.muscles;
     const entry: SessionExercise = {
       exerciseId: id.exerciseId,
@@ -143,7 +148,7 @@ export function mergeEntries(base: SessionExercise[] | null | undefined, local: 
 
 /** The workout's comment: changed on one side wins, on both — this phone's. */
 export const mergeText = (base: string | null | undefined, local: string, remote: string) =>
-  pick(base !== null && base !== undefined, base || '', local, remote);
+  pickText(base !== null && base !== undefined, base || '', local, remote);
 
 /** True when the done sets differ (what a workout record keeps). */
 export function doneDiffers(a: SessionExercise[], b: SessionExercise[]) {

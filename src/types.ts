@@ -145,6 +145,8 @@ export interface Session {
   dayName: string;
   completedAt: string;
   exercises: SessionExercise[];
+  /** Comments on exercises left without a done set. */
+  skippedNotes?: Array<{ exerciseId: string; exerciseName: string; note: string }>;
 }
 export interface WorkoutExercise extends ProgramExercise {
   /** Decides plates or kilograms; sent by the server for catalog and own exercises. */

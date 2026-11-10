@@ -232,6 +232,13 @@ interface SessionRecord {
   dayName: string;
   completedAt: string;
   exercises: SessionExercise[];
+  /** Comments on exercises left without a done set («плечо болит, не делал»): kept with the workout. */
+  skippedNotes?: SkippedNote[];
+}
+interface SkippedNote {
+  exerciseId: string;
+  exerciseName: string;
+  note: string;
 }
 interface DraftRecord {
   revision?: string;
@@ -672,6 +679,28 @@ export function createHandler({ db, accounts, error, json, requireAuth, router, 
   const doneCount = (list: SessionExercise[] | undefined) => (list || []).reduce((n, e) => n + e.sets.filter((x) => x.reps > 0).length, 0);
 
   /** Done sets of a workout as its record keeps them, with the muscles of own exercises. */
+  /** Comments on exercises with no done set: not lost with the exercise, kept with the workout. */
+  function skippedNotesOf(entries: SessionExercise[], performed: SessionExercise[]): SkippedNote[] {
+    return entries
+      .filter((e) => text(e.note, 200) && !performed.some((p) => p.exerciseId === e.exerciseId))
+      .map((e) => ({ exerciseId: e.exerciseId, exerciseName: e.exerciseName, note: text(e.note, 200) }));
+  }
+
+  /** «В прошлый раз» shows a comment left on an exercise not done; its last sets stay the weight hints. */
+  async function noteOnLast(ownerId: string, notes: SkippedNote[], completedAt: string) {
+    for (const n of notes) {
+      const lastT = lastResultTable(ownerId, n.exerciseId);
+      const last = await first<{ sets?: SetEntry[]; completedAt?: string; noteAt?: string }>(lastT);
+      if ((last?.completedAt && last.completedAt > completedAt) || (last?.noteAt && last.noteAt > completedAt)) continue;
+      await upsertSingle(lastT, {
+        sets: last?.sets || [],
+        ...(last?.completedAt ? { completedAt: last.completedAt } : {}),
+        note: n.note,
+        noteAt: completedAt,
+      });
+    }
+  }
+
   async function performedOf(trainerId: string, day: ProgramDay | undefined, entries: SessionExercise[]) {
     const performed = entries
       .map(({ skipped: _skipped, extra: _extra, ...e }) => ({ ...e, sets: e.sets.filter((s) => s.reps > 0).map(cleanSet) }))
@@ -725,6 +754,8 @@ export function createHandler({ db, accounts, error, json, requireAuth, router, 
       completedAt,
       exercises: performed,
     };
+    const skipped = skippedNotesOf(matched, performed);
+    if (skipped.length) session.skippedNotes = skipped;
     // Personal records: against every earlier workout of this client (all trainers).
     const earlier = (await listAll<SessionRecord>(sessionsTable(ownerId), 400)).filter((s) => s.completedAt < completedAt);
     const equipmentOf = equipmentLookup(trainerId);
@@ -747,6 +778,7 @@ export function createHandler({ db, accounts, error, json, requireAuth, router, 
       if (last?.completedAt && last.completedAt > completedAt) continue;
       await upsertSingle(lastT, { sets: e.sets, completedAt, ...(e.note ? { note: e.note } : {}) });
     }
+    await noteOnLast(ownerId, skipped, completedAt);
     const client = await findClient(trainerId, ownerId);
     const date = DATE_RE.test(String(o.localDate || '')) ? String(o.localDate) : completedAt.slice(0, 10);
     const latest = !client?.latestCompletedAt || client.latestCompletedAt <= completedAt;
@@ -952,14 +984,18 @@ export function createHandler({ db, accounts, error, json, requireAuth, router, 
       const revision = randomId();
       const { id: _draftId, ...draftRest } = current;
       if (!(await writeDraft(table, current, { ...draftRest, exercises: merged, feedback, revision }))) continue;
-      const { id: _sid, ...sessionRest } = session as SessionRecord & { id?: string };
-      await db.update(sessionsT, [{ id: current.sessionId, record: { ...sessionRest, exercises: performed, feedback } }]);
+      const { id: _sid, skippedNotes: _was, ...sessionRest } = session as SessionRecord & { id?: string };
+      const skipped = skippedNotesOf(merged, performed);
+      await db.update(sessionsT, [
+        { id: current.sessionId, record: { ...sessionRest, exercises: performed, feedback, ...(skipped.length ? { skippedNotes: skipped } : {}) } },
+      ]);
       for (const e of performed) {
         const lastT = lastResultTable(access.ownerId, e.exerciseId);
         const last = await first<{ completedAt: string }>(lastT);
         if (!last || last.completedAt <= session.completedAt)
           await upsertSingle(lastT, { sets: e.sets, completedAt: session.completedAt, ...(e.note ? { note: e.note } : {}) });
       }
+      await noteOnLast(access.ownerId, skipped, session.completedAt);
       await refreshInsights(session.trainerId, access.ownerId, access.role === 'client' ? { needsReview: true } : {});
       return { revision, merged, amended: true };
     }

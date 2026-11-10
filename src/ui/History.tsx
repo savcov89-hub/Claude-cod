@@ -145,6 +145,15 @@ function SessionList({ sessions, onDelete }: { sessions: Session[]; onDelete?: (
                   <td className="num">{fmtSets(e.sets)}</td>
                 </tr>
               ))}
+              {(s.skippedNotes || []).map((e) => (
+                <tr key={'skipped-' + e.exerciseId} className="ex-note-only">
+                  <td>
+                    {e.exerciseName}
+                    <span className="ex-note-line">«{e.note}»</span>
+                  </td>
+                  <td className="num muted">не делали</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </article>
